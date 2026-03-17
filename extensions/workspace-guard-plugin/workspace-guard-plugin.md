@@ -1,25 +1,6 @@
-**只读保护路径**
-skills/...
-.agents/skills/...
-.openclaw/extensions/...
-/workspace/skills/...
-/workspace/.agents/skills/...
-/workspace/.openclaw/extensions/...
+两层防护体系
 
-**其他拦截规则**
-rm -rf /workspace
-
-**openclaw.json增加配置**
-
-_启用插件_
-"plugins": {
-"allow": ["workspace-guard-plugin"],
-"entries": {
-"workspace-guard-plugin": { "enabled": true }
-}
-}
-
-_指定工具操作目录_
+**软防护：让工具操作限定在工作目录**
 "tools": {
 "fs": {
 "workspaceOnly": true
@@ -27,13 +8,20 @@ _指定工具操作目录_
 "elevated": {
 "enabled": false
 }
+}
 
-_启动沙箱模式_
-"agents": {
-"defaults": {
-//打开沙箱
-"sandbox": {
-"mode": "all",
-"workspaceAccess": "rw"
+**硬防护：启用拦截插件**
+_启用插件_
+"plugins": {
+"allow": ["workspace-guard-plugin"],
+"entries": {
+"workspace-guard-plugin": { "enabled": true }
 }
 }
+_所有写操作和删除操作只允许落在当前 workspace 内_
+_workspace 外的所有文件和目录一律视为只读，写/删都会被拦_
+_获取当前工作目录ctx.workspaceDir，workspace 内这些目录保持只读_
+skills/...
+extensions/...
+.agents/skills/...
+.openclaw/extensions/...
