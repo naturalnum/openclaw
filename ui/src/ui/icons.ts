@@ -130,6 +130,12 @@ export const icons = {
       <path d="m19 12-7 7-7-7" />
     </svg>
   `,
+  arrowUp: html`
+    <svg viewBox="0 0 24 24">
+      <path d="M12 19V5" />
+      <path d="m5 12 7-7 7 7" />
+    </svg>
+  `,
   copy: html`
     <svg viewBox="0 0 24 24">
       <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
