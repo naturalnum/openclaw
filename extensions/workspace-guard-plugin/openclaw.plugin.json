@@ -1,0 +1,10 @@
+{
+  "id": "workspace-guard-plugin",
+  "name": "Workspace Guard Plugin",
+  "description": "Blocks exec/bash tool calls that attempt to run dangerous commands.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
