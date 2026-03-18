@@ -1,17 +1,13 @@
 import { html, nothing } from "lit";
 import { repeat } from "lit/directives/repeat.js";
 import { parseAgentSessionKey } from "../../../src/routing/session-key.ts";
-import { extractText } from "../../../ui/src/ui/chat/message-extract.ts";
 import { icons } from "../../../ui/src/ui/icons.ts";
 import type {
   AgentIdentityResult,
   AgentsFilesListResult,
   AgentsListResult,
-  CronJob,
   ModelCatalogEntry,
   SessionsListResult,
-  SkillStatusEntry,
-  SkillStatusReport,
   ToolsCatalogResult,
 } from "../../../ui/src/ui/types.ts";
 import {
@@ -20,10 +16,21 @@ import {
   resolveToolSections,
   type AgentToolEntry,
 } from "../../../ui/src/ui/views/agents-utils.ts";
+import { renderCron, type CronProps } from "../../../ui/src/ui/views/cron.ts";
+import { renderSkills, type SkillsProps } from "../../../ui/src/ui/views/skills.ts";
+import { renderPowerChatThread } from "../integrations/openclaw/chat/thread.ts";
 
 export type WorkbenchSection = "newTask" | "automations" | "skills";
 export type WorkbenchToolsCategory = "builtIn" | "mcp" | "connectors";
-export type WorkbenchSettingsTab = "settings" | "models";
+export type WorkbenchSettingsTab = "general" | "models";
+
+export type WorkbenchModelConfig = {
+  id: string;
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+};
 
 type WorkbenchSession = {
   key: string;
@@ -44,6 +51,7 @@ type WorkbenchProject = {
 };
 
 export type WorkbenchProps = {
+  basePath: string;
   assistantName: string;
   currentProjectId: string | null;
   currentSessionKey: string;
@@ -65,20 +73,15 @@ export type WorkbenchProps = {
   chatSending: boolean;
   chatRunId: string | null;
   chatStream: string | null;
+  chatStreamStartedAt: number | null;
+  chatToolMessages: unknown[];
+  chatStreamSegments: Array<{ text: string; ts: number }>;
   lastError: string | null;
   toolsCatalogResult: ToolsCatalogResult | null;
   toolsCatalogLoading: boolean;
   toolsCatalogError: string | null;
-  skillsReport: SkillStatusReport | null;
-  skillsLoading: boolean;
-  skillsError: string | null;
-  skillsFilter: string;
-  skillsBusyKey: string | null;
-  skillMessages: Record<string, { kind: "success" | "error"; message: string }>;
-  skillEdits: Record<string, string>;
-  cronJobs: CronJob[];
-  cronLoading: boolean;
-  cronError: string | null;
+  skillsPage: SkillsProps;
+  automationsPage: CronProps;
   modelCatalog: ModelCatalogEntry[];
   modelsLoading: boolean;
   themeResolved: string;
@@ -87,6 +90,20 @@ export type WorkbenchProps = {
     theme: string;
     themeMode: string;
     locale?: string;
+  };
+  settingsView: {
+    localeOptions: Array<{ value: string; label: string }>;
+    modelConfigs: WorkbenchModelConfig[];
+    onLocaleChange: (value: string) => void;
+    onThemeChange: (value: string) => void;
+    onThemeModeChange: (value: string) => void;
+    onModelConfigChange: (
+      id: string,
+      field: "name" | "baseUrl" | "apiKey" | "model",
+      value: string,
+    ) => void;
+    onAddModelConfig: () => void;
+    onRemoveModelConfig: (id: string) => void;
   };
   section: WorkbenchSection;
   toolsOpen: boolean;
@@ -103,6 +120,8 @@ export type WorkbenchProps = {
   onStartTask: (projectId: string) => void;
   onOpenAttachment: () => void;
   onComposerChange: (value: string) => void;
+  onComposerKeyDown: (event: KeyboardEvent) => void;
+  onChatScroll: (event: Event) => void;
   onSend: () => void;
   onAbort: () => void;
   onOpenTools: () => void;
@@ -119,12 +138,6 @@ export type WorkbenchProps = {
   onToggleRightRail: () => void;
   onToggleProject: (projectId: string) => void;
   onRefreshContext: () => void;
-  onRefreshSkills: () => void;
-  onSkillsFilterChange: (value: string) => void;
-  onToggleSkill: (skillKey: string, enabled: boolean) => void;
-  onEditSkillKey: (skillKey: string, value: string) => void;
-  onSaveSkillKey: (skillKey: string) => void;
-  onInstallSkill: (skillKey: string, name: string, installId: string) => void;
 };
 
 export function renderWorkbench(props: WorkbenchProps) {
@@ -570,42 +583,40 @@ function renderSessionView(
   _project: WorkbenchProject | null,
   _session: WorkbenchSession,
 ) {
-  const stream = props.chatStream?.trim();
+  const assistantAvatar = resolveAgentAvatarUrl({
+    identity: {
+      avatar: null,
+      avatarUrl: null,
+    },
+  });
+  const hasLiveMessages =
+    props.chatMessages.length > 0 ||
+    props.chatToolMessages.length > 0 ||
+    props.chatStreamSegments.length > 0 ||
+    Boolean(props.chatStream?.trim());
   return html`
     <section class="workbench-session-shell ${props.rightRailCollapsed ? "workbench-session-shell--centered" : ""}">
       <section class="workbench-chat-surface">
-        <div class="workbench-chat-scroll">
-          ${
-            props.chatMessages.length === 0 && !stream
-              ? html`
-                  <div class="workbench-empty workbench-empty--chat">
-                    <h4>No conversation yet</h4>
-                    <p>Use the composer below to send the first message into this session.</p>
-                  </div>
-                `
-              : nothing
-          }
-
-          ${repeat(
-            props.chatMessages,
-            (_message, index) => `${props.currentSessionKey}:${index}`,
-            (message) => renderChatMessage(message),
-          )}
-
-          ${
-            stream
-              ? html`
-                <article class="workbench-message workbench-message--assistant">
-                  <div class="workbench-message__role">assistant</div>
-                  <div class="workbench-message__bubble">
-                    <div class="workbench-streaming-dot"></div>
-                    <p>${stream}</p>
-                  </div>
-                </article>
-              `
-              : nothing
-          }
-        </div>
+        ${renderPowerChatThread({
+          messages: props.chatMessages,
+          toolMessages: props.chatToolMessages,
+          streamSegments: props.chatStreamSegments,
+          stream: props.chatStream,
+          streamStartedAt: props.chatStreamStartedAt,
+          sessionKey: props.currentSessionKey,
+          assistantName: props.assistantName,
+          assistantAvatar,
+          basePath: props.basePath,
+          onScroll: props.onChatScroll,
+          emptyState: hasLiveMessages
+            ? nothing
+            : html`
+                <div class="workbench-empty workbench-empty--chat">
+                  <h4>No conversation yet</h4>
+                  <p>Use the composer below to send the first message into this session.</p>
+                </div>
+              `,
+        })}
 
         <div class="workbench-chat-composer workbench-chat-composer--floating">
           <textarea
@@ -614,6 +625,7 @@ function renderSessionView(
             placeholder="Reply in this session..."
             @input=${(event: Event) =>
               props.onComposerChange((event.target as HTMLTextAreaElement).value)}
+            @keydown=${props.onComposerKeyDown}
           ></textarea>
           <div class="workbench-chat-composer__footer">
             <div class="workbench-chat-composer__controls">
@@ -683,279 +695,19 @@ function renderSessionView(
   `;
 }
 
-function renderChatMessage(message: unknown) {
-  const text = extractText(message)?.trim();
-  if (!text) {
-    return nothing;
-  }
-  const entry = message as Record<string, unknown>;
-  const role = typeof entry.role === "string" ? entry.role.toLowerCase() : "assistant";
-  const timestamp = typeof entry.timestamp === "number" ? entry.timestamp : null;
-  const bubbleRole =
-    role === "assistant" || role === "system" || role === "tool" ? "assistant" : "user";
+function renderAutomationsPage(props: WorkbenchProps, _currentProject: WorkbenchProject | null) {
   return html`
-    <article class="workbench-message workbench-message--${bubbleRole}">
-      <div class="workbench-message__role">${role}</div>
-      <div class="workbench-message__bubble">
-        <p>${text}</p>
-        ${timestamp ? html`<time>${formatTime(timestamp)}</time>` : nothing}
-      </div>
-    </article>
-  `;
-}
-
-function renderAutomationsPage(props: WorkbenchProps, currentProject: WorkbenchProject | null) {
-  const relevantJobs = props.cronJobs.filter((job) => {
-    if (!currentProject) {
-      return true;
-    }
-    const agentId = typeof job.agentId === "string" ? job.agentId.trim() : "";
-    return !agentId || agentId === currentProject.id;
-  });
-  return html`
-    <section class="workbench-grid workbench-grid--overview">
-      <article class="workbench-card workbench-card--metric">
-        <div class="workbench-card__topline">
-          <span class="workbench-card__eyebrow">Automation center</span>
-          <span>${currentProject?.label ?? "All projects"}</span>
-        </div>
-        <h4>${relevantJobs.length} scheduled entries</h4>
-        <p>Automations stay visible here before the dedicated recurring-task creation flow is wired.</p>
-        <div class="workbench-stats-grid">
-          ${renderStatTile("Enabled", String(relevantJobs.filter((job) => job.enabled).length))}
-          ${renderStatTile("Paused", String(relevantJobs.filter((job) => !job.enabled).length))}
-          ${renderStatTile("Errors", String(relevantJobs.filter((job) => job.state?.lastStatus === "error").length))}
-          ${renderStatTile("Scope", currentProject ? "Project" : "Global")}
-        </div>
-      </article>
-
-      <article class="workbench-card">
-        <div class="workbench-card__topline">
-          <span class="workbench-card__eyebrow">Planned flow</span>
-          <span>Prototype</span>
-        </div>
-        <h4>What this page will become</h4>
-        <p>
-          It will evolve into the project-scoped recurring task center, backed by existing cron APIs
-          and later surfaced with create, edit, run, and history actions.
-        </p>
-      </article>
-    </section>
-
-    <section class="workbench-panel">
-      <div class="workbench-panel__header">
-        <div>
-          <h3>Automation runs</h3>
-          <p>Project-scoped cron jobs and recurring task entry points.</p>
-        </div>
-        <div class="workbench-status-cluster">
-          ${
-            props.cronLoading
-              ? html`
-                  <span class="workbench-status-pill is-live">Refreshing</span>
-                `
-              : nothing
-          }
-          ${props.cronError ? html`<span class="workbench-status-pill is-danger">${props.cronError}</span>` : nothing}
-        </div>
-      </div>
-
-      <div class="workbench-grid workbench-grid--cards">
-        ${
-          relevantJobs.length === 0
-            ? html`
-                <div class="workbench-empty workbench-empty--small">
-                  No automations found for the current project yet.
-                </div>
-              `
-            : repeat(
-                relevantJobs.slice(0, 8),
-                (job) => job.id,
-                (job) => html`
-                <article class="workbench-card">
-                  <div class="workbench-card__topline">
-                    <span class="workbench-card__eyebrow">${job.enabled ? "Enabled" : "Paused"}</span>
-                    <span>${formatRelativeTime(job.updatedAtMs ?? null)}</span>
-                  </div>
-                  <h4>${job.name || job.id}</h4>
-                  <p>${job.description || "Recurring task entry point"}</p>
-                  <div class="workbench-card__footer">
-                    <span>${describeCronJob(job)}</span>
-                    <span>${job.state?.lastStatus ?? "idle"}</span>
-                  </div>
-                </article>
-              `,
-              )
-        }
-      </div>
+    <section class="workbench-page-shell workbench-page-shell--scroll">
+      <div class="workbench-page-shell__body">${renderCron(props.automationsPage)}</div>
     </section>
   `;
 }
 
 function renderSkillsPage(props: WorkbenchProps) {
-  const skills = props.skillsReport?.skills ?? [];
-  const filter = props.skillsFilter.trim().toLowerCase();
-  const installed = skills.filter(
-    (skill) => skill.install.length === 0 || skill.missing.bins.length === 0,
-  ).length;
-  const enabled = skills.filter((skill) => !skill.disabled).length;
-  const filtered = filter
-    ? skills.filter((skill) =>
-        [skill.name, skill.description, skill.source].join(" ").toLowerCase().includes(filter),
-      )
-    : skills;
-
   return html`
-    <section class="workbench-panel">
-      <div class="workbench-panel__header">
-        <div>
-          <h3>Skills</h3>
-          <p>Prepackaged and repeatable capabilities, now surfaced as a dedicated page.</p>
-        </div>
-        <button type="button" class="workbench-primary-button" @click=${props.onRefreshSkills}>
-          ${props.skillsLoading ? "Refreshing..." : "Refresh"}
-        </button>
-      </div>
-
-      <div class="workbench-toolbar">
-        <label class="workbench-search-field">
-          ${icons.search}
-          <input
-            .value=${props.skillsFilter}
-            placeholder="Search skills"
-            @input=${(event: Event) =>
-              props.onSkillsFilterChange((event.target as HTMLInputElement).value)}
-          />
-        </label>
-        <div class="workbench-toolbar__meta">
-          <span class="workbench-inline-badge">Official</span>
-          <span class="workbench-inline-badge">${enabled} enabled</span>
-          <span class="workbench-inline-badge">${installed} installed</span>
-          <span class="workbench-inline-badge">${filtered.length} shown</span>
-        </div>
-      </div>
-
-      ${
-        props.skillsError
-          ? html`<div class="workbench-callout workbench-callout--danger">${props.skillsError}</div>`
-          : nothing
-      }
-
-      <div class="workbench-grid workbench-grid--skills">
-        <article class="workbench-skill-hero">
-          <div class="workbench-skill-hero__icon">${icons.puzzle}</div>
-          <div>
-            <h4>Add custom skills</h4>
-            <p>Add a skill to unlock new capabilities for yourself or your team.</p>
-            <div class="workbench-badge-row">
-              <span class="workbench-inline-badge">Workspace skill packs</span>
-              <span class="workbench-inline-badge">Official catalog</span>
-            </div>
-          </div>
-          <button type="button" class="workbench-primary-button" @click=${props.onOpenTools}>
-            Add
-          </button>
-        </article>
-
-        ${
-          filtered.length === 0
-            ? html`
-                <div class="workbench-empty workbench-empty--small">No skills match this filter.</div>
-              `
-            : repeat(
-                filtered,
-                (skill) => skill.skillKey,
-                (skill) => renderSkillCard(skill, props),
-              )
-        }
-      </div>
+    <section class="workbench-page-shell workbench-page-shell--scroll">
+      <div class="workbench-page-shell__body">${renderSkills(props.skillsPage)}</div>
     </section>
-  `;
-}
-
-function renderSkillCard(skill: SkillStatusEntry, props: WorkbenchProps) {
-  const busy = props.skillsBusyKey === skill.skillKey;
-  const message = props.skillMessages[skill.skillKey] ?? null;
-  const hasInstall = skill.install.length > 0 && skill.missing.bins.length > 0;
-  const envValue = props.skillEdits[skill.skillKey] ?? "";
-  return html`
-    <article class="workbench-skill-card">
-      <div class="workbench-skill-card__header">
-        <div>
-          <h4>${skill.name}</h4>
-          <p>${clampText(skill.description, 120)}</p>
-        </div>
-        <label class="workbench-switch">
-          <input
-            type="checkbox"
-            .checked=${!skill.disabled}
-            ?disabled=${busy}
-            @change=${() => props.onToggleSkill(skill.skillKey, skill.disabled)}
-          />
-          <span></span>
-        </label>
-      </div>
-      <div class="workbench-skill-card__meta">
-        <span>${skill.source}</span>
-        <span>${skill.disabled ? "Disabled" : "Enabled"}</span>
-      </div>
-      ${
-        message
-          ? html`
-            <div class="workbench-callout ${message.kind === "error" ? "workbench-callout--danger" : ""}">
-              ${message.message}
-            </div>
-          `
-          : nothing
-      }
-      ${
-        skill.primaryEnv
-          ? html`
-            <label class="workbench-inline-field">
-              <span>API key</span>
-              <input
-                type="password"
-                .value=${envValue}
-                placeholder="Paste key"
-                @input=${(event: Event) =>
-                  props.onEditSkillKey(skill.skillKey, (event.target as HTMLInputElement).value)}
-              />
-            </label>
-          `
-          : nothing
-      }
-      <div class="workbench-skill-card__actions">
-        ${
-          skill.primaryEnv
-            ? html`
-              <button
-                type="button"
-                class="workbench-secondary-button"
-                ?disabled=${busy}
-                @click=${() => props.onSaveSkillKey(skill.skillKey)}
-              >
-                Save key
-              </button>
-            `
-            : nothing
-        }
-        ${
-          hasInstall
-            ? html`
-              <button
-                type="button"
-                class="workbench-primary-button"
-                ?disabled=${busy}
-                @click=${() =>
-                  props.onInstallSkill(skill.skillKey, skill.name, skill.install[0].id)}
-              >
-                ${busy ? "Installing..." : skill.install[0].label}
-              </button>
-            `
-            : nothing
-        }
-      </div>
-    </article>
   `;
 }
 
@@ -1190,7 +942,7 @@ function renderSettingsDialog(props: WorkbenchProps) {
         <div class="workbench-dialog__topbar">
           <div>
             <h3>Settings</h3>
-            <p>Prototype settings shell for later config and model wiring.</p>
+            <p>Manage language, appearance, and model presets.</p>
           </div>
           <button type="button" class="workbench-icon-button" @click=${props.onCloseSettings}>
             ${icons.x}
@@ -1201,10 +953,10 @@ function renderSettingsDialog(props: WorkbenchProps) {
           <aside class="workbench-settings-nav">
             <button
               type="button"
-              class="${props.settingsTab === "settings" ? "is-active" : ""}"
-              @click=${() => props.onSettingsTabChange("settings")}
+              class="${props.settingsTab === "general" ? "is-active" : ""}"
+              @click=${() => props.onSettingsTabChange("general")}
             >
-              Settings
+              General
             </button>
             <button
               type="button"
@@ -1217,69 +969,180 @@ function renderSettingsDialog(props: WorkbenchProps) {
 
           <section class="workbench-settings-panel">
             ${
-              props.settingsTab === "settings"
+              props.settingsTab === "general"
                 ? html`
                   <article class="workbench-setting-card">
-                    <h4>Gateway</h4>
-                    <div class="workbench-kv-grid">
-                      <div><span>Gateway URL</span><strong>${props.settings.gatewayUrl || "Inherited"}</strong></div>
-                      <div><span>Theme</span><strong>${props.settings.theme}</strong></div>
-                      <div><span>Theme mode</span><strong>${props.settings.themeMode}</strong></div>
-                      <div><span>Locale</span><strong>${props.settings.locale ?? "default"}</strong></div>
+                    <div class="workbench-settings-section">
+                      <div class="workbench-settings-section__header">
+                        <span>General</span>
+                      </div>
+                      <label class="workbench-settings-field">
+                        <span>Language</span>
+                        <div class="workbench-settings-select">
+                          <select
+                            .value=${props.settings.locale ?? ""}
+                            @change=${(event: Event) =>
+                              props.settingsView.onLocaleChange(
+                                (event.target as HTMLSelectElement).value,
+                              )}
+                          >
+                            ${props.settingsView.localeOptions.map(
+                              (option) =>
+                                html`<option value=${option.value}>${option.label}</option>`,
+                            )}
+                          </select>
+                          <span class="workbench-settings-select__chevron">
+                            ${icons.chevronDown}
+                          </span>
+                        </div>
+                      </label>
                     </div>
-                  </article>
-                  <article class="workbench-setting-card">
-                    <h4>Planned integrations</h4>
-                    <p>Next steps for backend wiring in this branch:</p>
-                    <ul class="workbench-inline-list">
-                      <li>project file upload/list APIs</li>
-                      <li>session transcript search plugin</li>
-                      <li>project metadata persistence</li>
-                    </ul>
-                  </article>
-                  <article class="workbench-setting-card">
-                    <h4>Environment notes</h4>
-                    <p>
-                      This prototype intentionally lives in a parallel <code>power-ui/</code> package
-                      so upstream <code>ui/</code> can keep syncing with minimal merge pressure.
-                    </p>
+
+                    <div class="workbench-settings-section">
+                      <div class="workbench-settings-section__header">
+                        <span>Theme</span>
+                      </div>
+                      <div class="workbench-settings-cards">
+                        ${renderThemeCard(
+                          "claw",
+                          "Claw",
+                          "OpenClaw default palette",
+                          props.settings.theme === "claw",
+                          () => props.settingsView.onThemeChange("claw"),
+                        )}
+                        ${renderThemeCard(
+                          "knot",
+                          "Knot",
+                          "Teal editorial palette",
+                          props.settings.theme === "knot",
+                          () => props.settingsView.onThemeChange("knot"),
+                        )}
+                        ${renderThemeCard(
+                          "dash",
+                          "Dash",
+                          "Blue product palette",
+                          props.settings.theme === "dash",
+                          () => props.settingsView.onThemeChange("dash"),
+                        )}
+                      </div>
+                    </div>
+
+                    <div class="workbench-settings-section">
+                      <div class="workbench-settings-section__header">
+                        <span>Appearance</span>
+                      </div>
+                      <div class="workbench-settings-cards">
+                        ${renderAppearanceCard(
+                          "light",
+                          "Light",
+                          props.settings.themeMode === "light",
+                          () => props.settingsView.onThemeModeChange("light"),
+                        )}
+                        ${renderAppearanceCard(
+                          "dark",
+                          "Dark",
+                          props.settings.themeMode === "dark",
+                          () => props.settingsView.onThemeModeChange("dark"),
+                        )}
+                        ${renderAppearanceCard(
+                          "system",
+                          "Follow System",
+                          props.settings.themeMode === "system",
+                          () => props.settingsView.onThemeModeChange("system"),
+                        )}
+                      </div>
+                    </div>
                   </article>
                 `
                 : html`
                   <article class="workbench-setting-card">
-                    <h4>Available models</h4>
-                    ${
-                      props.modelsLoading
-                        ? html`
-                            <div class="workbench-skeleton">Loading model catalog…</div>
-                          `
-                        : props.modelCatalog.length === 0
+                    <div class="workbench-settings-section__header">
+                      <span>Model presets</span>
+                      <button
+                        type="button"
+                        class="workbench-secondary-button"
+                        @click=${props.settingsView.onAddModelConfig}
+                      >
+                        Add model
+                      </button>
+                    </div>
+                    <div class="workbench-settings-models">
+                      ${
+                        props.settingsView.modelConfigs.length === 0
                           ? html`
-                              <div class="workbench-empty workbench-empty--tiny">No models loaded.</div>
+                              <div class="workbench-empty workbench-empty--tiny">No model presets yet.</div>
                             `
                           : repeat(
-                              props.modelCatalog,
-                              (model) => model.id,
-                              (model) => html`
-                              <div class="workbench-model-row">
-                                <div>
-                                  <div class="workbench-model-row__title">${model.name || model.id}</div>
-                                  <div class="workbench-model-row__sub">${model.provider}</div>
-                                </div>
-                                <div class="workbench-model-row__meta">
-                                  ${model.contextWindow ? `${Math.round(model.contextWindow / 1000)}k ctx` : "catalog"}
-                                </div>
-                              </div>
-                            `,
+                              props.settingsView.modelConfigs,
+                              (config) => config.id,
+                              (config, index) => html`
+                                <section class="workbench-model-config">
+                                  <div class="workbench-model-config__header">
+                                    <div>
+                                      <h4>Model ${index + 1}</h4>
+                                      <p>Only the required fields are kept here.</p>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      class="workbench-link-button workbench-link-button--danger"
+                                      @click=${() =>
+                                        props.settingsView.onRemoveModelConfig(config.id)}
+                                    >
+                                      Remove
+                                    </button>
+                                  </div>
+                                  <div class="workbench-model-config__grid">
+                                    ${renderSettingsInput(
+                                      "Name",
+                                      config.name,
+                                      "e.g. OpenAI Prod",
+                                      (value) =>
+                                        props.settingsView.onModelConfigChange(
+                                          config.id,
+                                          "name",
+                                          value,
+                                        ),
+                                    )}
+                                    ${renderSettingsInput(
+                                      "URL",
+                                      config.baseUrl,
+                                      "https://api.example.com/v1",
+                                      (value) =>
+                                        props.settingsView.onModelConfigChange(
+                                          config.id,
+                                          "baseUrl",
+                                          value,
+                                        ),
+                                    )}
+                                    ${renderSettingsInput(
+                                      "API Key",
+                                      config.apiKey,
+                                      "sk-...",
+                                      (value) =>
+                                        props.settingsView.onModelConfigChange(
+                                          config.id,
+                                          "apiKey",
+                                          value,
+                                        ),
+                                      "password",
+                                    )}
+                                    ${renderSettingsInput(
+                                      "Model",
+                                      config.model,
+                                      "gpt-5.4",
+                                      (value) =>
+                                        props.settingsView.onModelConfigChange(
+                                          config.id,
+                                          "model",
+                                          value,
+                                        ),
+                                    )}
+                                  </div>
+                                </section>
+                              `,
                             )
-                    }
-                  </article>
-                  <article class="workbench-setting-card">
-                    <h4>Model strategy</h4>
-                    <p>
-                      Default model selection will stay in settings, while project- and
-                      session-specific overrides will be layered on top through the workbench shell.
-                    </p>
+                      }
+                    </div>
                   </article>
                 `
             }
@@ -1287,6 +1150,70 @@ function renderSettingsDialog(props: WorkbenchProps) {
         </div>
       </div>
     </div>
+  `;
+}
+
+function renderThemeCard(
+  theme: "claw" | "knot" | "dash",
+  label: string,
+  sublabel: string,
+  active: boolean,
+  onClick: () => void,
+) {
+  return html`
+    <button
+      type="button"
+      class="workbench-theme-card ${active ? "is-active" : ""}"
+      data-theme=${theme}
+      @click=${onClick}
+    >
+      <span class="workbench-theme-card__preview"></span>
+      <span class="workbench-theme-card__label">${label}</span>
+      <span class="workbench-theme-card__sub">${sublabel}</span>
+    </button>
+  `;
+}
+
+function renderAppearanceCard(
+  mode: "light" | "dark" | "system",
+  label: string,
+  active: boolean,
+  onClick: () => void,
+) {
+  return html`
+    <button
+      type="button"
+      class="workbench-appearance-card ${active ? "is-active" : ""}"
+      data-mode=${mode}
+      @click=${onClick}
+    >
+      <span class="workbench-appearance-card__preview">
+        <span></span>
+        <span></span>
+        <span></span>
+      </span>
+      <span class="workbench-appearance-card__label">${label}</span>
+    </button>
+  `;
+}
+
+function renderSettingsInput(
+  label: string,
+  value: string,
+  placeholder: string,
+  onInput: (value: string) => void,
+  type = "text",
+) {
+  return html`
+    <label class="workbench-settings-field">
+      <span>${label}</span>
+      <input
+        type=${type}
+        .value=${value}
+        placeholder=${placeholder}
+        @input=${(event: Event) => onInput((event.target as HTMLInputElement).value)}
+      />
+    </label>
   `;
 }
 
@@ -1425,31 +1352,6 @@ function shortSessionLabel(sessionKey: string) {
   return last || sessionKey;
 }
 
-function formatRelativeTime(value: number | null) {
-  if (!value) {
-    return "just now";
-  }
-  const diffMs = value - Date.now();
-  const diffMinutes = Math.round(diffMs / 60000);
-  const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
-  if (Math.abs(diffMinutes) < 60) {
-    return formatter.format(diffMinutes, "minute");
-  }
-  const diffHours = Math.round(diffMinutes / 60);
-  if (Math.abs(diffHours) < 24) {
-    return formatter.format(diffHours, "hour");
-  }
-  const diffDays = Math.round(diffHours / 24);
-  return formatter.format(diffDays, "day");
-}
-
-function formatTime(value: number) {
-  return new Intl.DateTimeFormat(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(value);
-}
-
 function formatBytes(bytes: number) {
   if (bytes <= 0) {
     return "0 B";
@@ -1461,24 +1363,4 @@ function formatBytes(bytes: number) {
     return `${(bytes / 1024).toFixed(1)} KB`;
   }
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function renderStatTile(label: string, value: string) {
-  return html`
-    <div class="workbench-stat-tile">
-      <span>${label}</span>
-      <strong>${value}</strong>
-    </div>
-  `;
-}
-
-function describeCronJob(job: CronJob) {
-  if (job.schedule.kind === "every") {
-    const everyMinutes = Math.max(1, Math.round(job.schedule.everyMs / 60000));
-    return `Every ${everyMinutes} min`;
-  }
-  if (job.schedule.kind === "at") {
-    return job.schedule.at;
-  }
-  return job.schedule.expr;
 }

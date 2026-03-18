@@ -14,7 +14,11 @@ import type {
   SkillStatusReport,
   ToolsCatalogResult,
 } from "../../../ui/src/ui/types.ts";
-import type { WorkbenchAdapter } from "../adapters/workbench-adapter.ts";
+import type {
+  WorkbenchAdapter,
+  WorkbenchAdapterEvent,
+  WorkbenchSendResult,
+} from "../adapters/workbench-adapter.ts";
 
 type MockMessage = {
   role: "user" | "assistant";
@@ -62,12 +66,6 @@ export type MockWorkbenchSnapshot = {
 };
 
 export type WorkbenchSnapshot = MockWorkbenchSnapshot;
-
-type StartTaskResult = {
-  assistantName: string;
-  sessionKey: string;
-  replyText: string;
-};
 
 function nowMinus(minutes: number) {
   return Date.now() - minutes * 60 * 1000;
@@ -117,12 +115,23 @@ function buildReply(projectName: string, text: string, modelId: string) {
 }
 
 export class MockWorkbenchAdapter implements WorkbenchAdapter {
+  readonly kind = "mock" as const;
   private projects: MockProject[];
   private skills: SkillStatusEntry[];
   private cronJobs: CronJob[];
   private models: ModelCatalogEntry[];
   private nextProjectNumber = 4;
   private nextSessionNumber = 12;
+  private listeners = new Set<(event: WorkbenchAdapterEvent) => void>();
+  private pendingRuns = new Map<
+    string,
+    {
+      sessionKey: string;
+      replyText: string;
+      deltaTimer: number | null;
+      finalTimer: number | null;
+    }
+  >();
 
   constructor() {
     this.models = [
@@ -418,6 +427,17 @@ export class MockWorkbenchAdapter implements WorkbenchAdapter {
     return this.models[0]?.id ?? "gpt-5.4";
   }
 
+  subscribe(listener: (event: WorkbenchAdapterEvent) => void) {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  async request<T>(_method: string, _params?: unknown): Promise<T> {
+    throw new Error("Mock adapter does not implement direct gateway RPC requests.");
+  }
+
   getDefaultSelection() {
     const project = this.projects[0] ?? null;
     return {
@@ -548,7 +568,7 @@ export class MockWorkbenchAdapter implements WorkbenchAdapter {
     return id;
   }
 
-  async startTask(projectId: string, text: string, modelId: string): Promise<StartTaskResult> {
+  async startTask(projectId: string, text: string, _modelId: string): Promise<WorkbenchSendResult> {
     const project = this.requireProject(projectId);
     const timestamp = Date.now();
     const sessionKey = `agent:${projectId}:task-${this.nextSessionNumber}`;
@@ -561,12 +581,12 @@ export class MockWorkbenchAdapter implements WorkbenchAdapter {
       projectId,
       updatedAt: timestamp,
       totalTokens: 1200,
-      messages: [sessionMessage("user", subject, timestamp)],
+      messages: [],
     };
     project.sessions.unshift(session);
     return {
       sessionKey,
-      replyText: buildReply(project.name, subject, modelId),
+      runId: null,
     };
   }
 
@@ -574,25 +594,43 @@ export class MockWorkbenchAdapter implements WorkbenchAdapter {
     sessionKey: string,
     text: string,
     modelId: string,
-  ): Promise<StartTaskResult> {
+  ): Promise<WorkbenchSendResult> {
     const session = this.requireSession(sessionKey);
     const project = this.requireProject(session.projectId);
     const timestamp = Date.now();
     session.messages.push(sessionMessage("user", text, timestamp));
     session.updatedAt = timestamp;
     session.totalTokens += 900;
+    const runId = crypto.randomUUID();
+    this.scheduleMockReply(runId, sessionKey, buildReply(project.name, text, modelId));
     return {
       sessionKey,
-      replyText: buildReply(project.name, text, modelId),
+      runId,
     };
   }
 
-  async completeAssistantReply(sessionKey: string, replyText: string) {
-    const session = this.requireSession(sessionKey);
-    const timestamp = Date.now();
-    session.messages.push(sessionMessage("assistant", replyText, timestamp));
-    session.updatedAt = timestamp;
-    session.totalTokens += 1400;
+  async abortRun(_sessionKey: string, runId: string | null) {
+    if (!runId) {
+      return;
+    }
+    const pending = this.pendingRuns.get(runId);
+    if (!pending) {
+      return;
+    }
+    if (pending.deltaTimer !== null) {
+      window.clearTimeout(pending.deltaTimer);
+    }
+    if (pending.finalTimer !== null) {
+      window.clearTimeout(pending.finalTimer);
+    }
+    this.pendingRuns.delete(runId);
+    this.emit({
+      type: "chat",
+      sessionKey: pending.sessionKey,
+      runId,
+      state: "aborted",
+      text: pending.replyText,
+    });
   }
 
   async setSkillEnabled(skillKey: string, enabled: boolean) {
@@ -618,6 +656,51 @@ export class MockWorkbenchAdapter implements WorkbenchAdapter {
     skill.missing = { ...skill.missing, bins: [] };
     skill.source = "Installed";
     return { ok: true, message: `${skill.name} is now installed in the prototype catalog.` };
+  }
+
+  private emit(event: WorkbenchAdapterEvent) {
+    for (const listener of this.listeners) {
+      listener(event);
+    }
+  }
+
+  private scheduleMockReply(runId: string, sessionKey: string, replyText: string) {
+    const entry = {
+      sessionKey,
+      replyText,
+      deltaTimer: null as number | null,
+      finalTimer: null as number | null,
+    };
+    entry.deltaTimer = window.setTimeout(() => {
+      this.emit({
+        type: "chat",
+        sessionKey,
+        runId,
+        state: "delta",
+        text: replyText,
+      });
+    }, 180);
+    entry.finalTimer = window.setTimeout(() => {
+      const session = this.requireSession(sessionKey);
+      const timestamp = Date.now();
+      session.messages.push(sessionMessage("assistant", replyText, timestamp));
+      session.updatedAt = timestamp;
+      session.totalTokens += 1400;
+      this.pendingRuns.delete(runId);
+      this.emit({
+        type: "chat",
+        sessionKey,
+        runId,
+        state: "final",
+        text: replyText,
+        message: {
+          role: "assistant",
+          text: replyText,
+          timestamp,
+        },
+      });
+    }, 720);
+    this.pendingRuns.set(runId, entry);
   }
 
   private requireProject(projectId: string) {
