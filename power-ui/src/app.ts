@@ -27,6 +27,7 @@ import {
   abortChatRun,
   handleChatEvent,
   sendChatMessage,
+  type ChatState,
 } from "../../ui/src/ui/controllers/chat.ts";
 import {
   addCronJob,
@@ -72,7 +73,6 @@ import type {
   SessionsListResult,
   ToolsCatalogResult,
 } from "../../ui/src/ui/types.ts";
-import type { ChatAttachment } from "../../ui/src/ui/ui-types.ts";
 import {
   resolveConfiguredCronModelSuggestions,
   sortLocaleStrings,
@@ -152,9 +152,19 @@ function isHttpUrl(value: string): boolean {
 
 const POWER_MODEL_CONFIGS_KEY = "openclaw.power-ui.models.v1";
 
+function createLocalId() {
+  if (
+    typeof globalThis.crypto !== "undefined" &&
+    typeof globalThis.crypto.randomUUID === "function"
+  ) {
+    return globalThis.crypto.randomUUID();
+  }
+  return `power-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function createEmptyModelConfig(): WorkbenchModelConfig {
   return {
-    id: crypto.randomUUID(),
+    id: createLocalId(),
     name: "",
     baseUrl: "",
     apiKey: "",
@@ -175,7 +185,7 @@ function loadModelConfigs(): WorkbenchModelConfig[] {
     return parsed
       .filter((entry) => entry && typeof entry === "object")
       .map((entry) => ({
-        id: typeof entry.id === "string" && entry.id.trim() ? entry.id : crypto.randomUUID(),
+        id: typeof entry.id === "string" && entry.id.trim() ? entry.id : createLocalId(),
         name: typeof entry.name === "string" ? entry.name : "",
         baseUrl: typeof entry.baseUrl === "string" ? entry.baseUrl : "",
         apiKey: typeof entry.apiKey === "string" ? entry.apiKey : "",
@@ -189,6 +199,22 @@ function loadModelConfigs(): WorkbenchModelConfig[] {
 function persistModelConfigs(configs: WorkbenchModelConfig[]) {
   localStorage.setItem(POWER_MODEL_CONFIGS_KEY, JSON.stringify(configs));
 }
+
+type SessionRuntimeState = ChatState & {
+  toolStreamSyncTimer: number | null;
+  toolStreamById: Map<string, ToolStreamEntry>;
+  toolStreamOrder: string[];
+  chatToolMessages: Record<string, unknown>[];
+  chatStreamSegments: Array<{ text: string; ts: number }>;
+  chatScrollFrame: number | null;
+  chatScrollTimeout: number | null;
+  chatHasAutoScrolled: boolean;
+  chatUserNearBottom: boolean;
+  chatNewMessagesBelow: boolean;
+  logsScrollFrame: number | null;
+  logsAtBottom: boolean;
+  topbarObserver: ResizeObserver | null;
+};
 
 @customElement("openclaw-power-app")
 export class OpenClawPowerApp extends LitElement {
@@ -310,19 +336,10 @@ export class OpenClawPowerApp extends LitElement {
   @state() agentIdentityById: Record<string, AgentIdentityResult> = {};
   @state() agentFilesList: AgentsFilesListResult | null = null;
   @state() sessionsResult: SessionsListResult | null = null;
-  @state() chatLoading = false;
-  @state() chatThinkingLevel: string | null = null;
-  @state() chatMessages: unknown[] = [];
   @state() chatMessage = "";
-  @state() chatAttachments: ChatAttachment[] = [];
-  @state() chatSending = false;
-  @state() chatRunId: string | null = null;
-  @state() chatStream: string | null = null;
-  @state() chatStreamStartedAt: number | null = null;
-  @state() chatToolMessages: unknown[] = [];
-  @state() chatStreamSegments: Array<{ text: string; ts: number }> = [];
   @state() toolsCatalogResult: ToolsCatalogResult | null = null;
   @state() chatModelCatalog: ModelCatalogEntry[] = [];
+  @state() chatRuntimeVersion = 0;
 
   constructor() {
     super();
@@ -330,14 +347,7 @@ export class OpenClawPowerApp extends LitElement {
       void i18n.setLocale(this.settings.locale as Locale);
     }
   }
-  private toolStreamSyncTimer: number | null = null;
-  private toolStreamById = new Map<string, ToolStreamEntry>();
-  private toolStreamOrder: string[] = [];
-  chatScrollFrame: number | null = null;
-  chatScrollTimeout: number | null = null;
-  chatHasAutoScrolled = false;
-  chatUserNearBottom = true;
-  chatNewMessagesBelow = false;
+  private readonly chatRuntimeBySessionKey = new Map<string, SessionRuntimeState>();
 
   connectedCallback() {
     super.connectedCallback();
@@ -360,6 +370,140 @@ export class OpenClawPowerApp extends LitElement {
     return this.workbenchSelectedSessionKey ?? "";
   }
 
+  private createSessionRuntime(sessionKey: string): SessionRuntimeState {
+    return {
+      client: this.controllerClient,
+      connected: this.connected,
+      sessionKey,
+      chatLoading: false,
+      chatMessages: [],
+      chatThinkingLevel: null,
+      chatSending: false,
+      chatMessage: "",
+      chatAttachments: [],
+      chatRunId: null,
+      chatStream: null,
+      chatStreamStartedAt: null,
+      lastError: null,
+      toolStreamSyncTimer: null,
+      toolStreamById: new Map<string, ToolStreamEntry>(),
+      toolStreamOrder: [],
+      chatToolMessages: [],
+      chatStreamSegments: [],
+      chatScrollFrame: null,
+      chatScrollTimeout: null,
+      chatHasAutoScrolled: false,
+      chatUserNearBottom: true,
+      chatNewMessagesBelow: false,
+      logsScrollFrame: null,
+      logsAtBottom: true,
+      topbarObserver: null,
+    };
+  }
+
+  private getOrCreateSessionRuntime(sessionKey: string | null): SessionRuntimeState | null {
+    const key = sessionKey?.trim() ?? "";
+    if (!key) {
+      return null;
+    }
+    let runtime = this.chatRuntimeBySessionKey.get(key);
+    if (!runtime) {
+      runtime = this.createSessionRuntime(key);
+      this.chatRuntimeBySessionKey.set(key, runtime);
+    }
+    runtime.client = this.controllerClient;
+    runtime.connected = this.connected;
+    runtime.sessionKey = key;
+    return runtime;
+  }
+
+  private get activeSessionRuntime() {
+    return this.getOrCreateSessionRuntime(this.workbenchSelectedSessionKey);
+  }
+
+  private bumpChatRuntime() {
+    this.chatRuntimeVersion += 1;
+  }
+
+  private createActiveScrollHost(runtime: SessionRuntimeState) {
+    return {
+      updateComplete: this.updateComplete,
+      querySelector: (selectors: string) => this.querySelector(selectors),
+      style: this.style,
+      get chatScrollFrame() {
+        return runtime.chatScrollFrame;
+      },
+      set chatScrollFrame(value: number | null) {
+        runtime.chatScrollFrame = value;
+      },
+      get chatScrollTimeout() {
+        return runtime.chatScrollTimeout;
+      },
+      set chatScrollTimeout(value: number | null) {
+        runtime.chatScrollTimeout = value;
+      },
+      get chatHasAutoScrolled() {
+        return runtime.chatHasAutoScrolled;
+      },
+      set chatHasAutoScrolled(value: boolean) {
+        runtime.chatHasAutoScrolled = value;
+      },
+      get chatUserNearBottom() {
+        return runtime.chatUserNearBottom;
+      },
+      set chatUserNearBottom(value: boolean) {
+        runtime.chatUserNearBottom = value;
+      },
+      get chatNewMessagesBelow() {
+        return runtime.chatNewMessagesBelow;
+      },
+      set chatNewMessagesBelow(value: boolean) {
+        runtime.chatNewMessagesBelow = value;
+      },
+      get logsScrollFrame() {
+        return runtime.logsScrollFrame;
+      },
+      set logsScrollFrame(value: number | null) {
+        runtime.logsScrollFrame = value;
+      },
+      get logsAtBottom() {
+        return runtime.logsAtBottom;
+      },
+      set logsAtBottom(value: boolean) {
+        runtime.logsAtBottom = value;
+      },
+      get topbarObserver() {
+        return runtime.topbarObserver;
+      },
+      set topbarObserver(value: ResizeObserver | null) {
+        runtime.topbarObserver = value;
+      },
+    };
+  }
+
+  private scheduleActiveChatScroll(force = false, smooth = false) {
+    const runtime = this.activeSessionRuntime;
+    if (!runtime) {
+      return;
+    }
+    scheduleChatScroll(
+      this.createActiveScrollHost(runtime) as unknown as Parameters<typeof scheduleChatScroll>[0],
+      force,
+      smooth,
+    );
+  }
+
+  private resetSessionRuntimeViewState(sessionKey: string | null) {
+    const runtime = this.getOrCreateSessionRuntime(sessionKey);
+    if (!runtime) {
+      return;
+    }
+    resetToolStream(runtime as unknown as Parameters<typeof resetToolStream>[0]);
+    resetChatScroll(
+      this.createActiveScrollHost(runtime) as unknown as Parameters<typeof resetChatScroll>[0],
+    );
+  }
+
   private async bootstrap() {
     try {
       const initialSessionKey =
@@ -372,23 +516,28 @@ export class OpenClawPowerApp extends LitElement {
         : this.adapter.getDefaultSelection();
       this.applySnapshot(await this.adapter.snapshot(selection));
       this.connected = true;
+      for (const runtime of this.chatRuntimeBySessionKey.values()) {
+        runtime.connected = true;
+        runtime.client = this.controllerClient;
+      }
       this.lastError = null;
     } catch (error) {
       this.connected = false;
+      for (const runtime of this.chatRuntimeBySessionKey.values()) {
+        runtime.connected = false;
+      }
       this.lastError = error instanceof Error ? error.message : String(error);
     }
     this.ready = true;
   }
 
   private applySnapshot(snapshot: WorkbenchSnapshot) {
-    resetToolStream(this as unknown as Parameters<typeof resetToolStream>[0]);
     this.assistantName = snapshot.assistantName;
     this.workbenchSelectedProjectId = snapshot.currentProjectId;
     this.agentsList = snapshot.agentsList;
     this.agentIdentityById = snapshot.agentIdentityById;
     this.agentFilesList = snapshot.agentFilesList;
     this.sessionsResult = snapshot.sessionsResult;
-    this.chatMessages = snapshot.chatMessages;
     this.skillsState.skillsReport = snapshot.skillsReport;
     this.cronState.cronJobs = snapshot.cronJobs;
     this.cronState.cronJobsTotal = snapshot.cronJobs.length;
@@ -401,10 +550,24 @@ export class OpenClawPowerApp extends LitElement {
     this.skillsState.connected = true;
     this.channelsState.connected = true;
     this.cronState.connected = true;
+    if (snapshot.currentSessionKey) {
+      const runtime = this.getOrCreateSessionRuntime(snapshot.currentSessionKey);
+      if (runtime) {
+        runtime.chatMessages = snapshot.chatMessages;
+        runtime.chatThinkingLevel = null;
+        runtime.chatStream = null;
+        runtime.chatStreamStartedAt = null;
+        runtime.chatRunId = null;
+        runtime.chatSending = false;
+        runtime.lastError = null;
+        resetToolStream(runtime as unknown as Parameters<typeof resetToolStream>[0]);
+      }
+    }
     if (snapshot.currentProjectId && !this.expandedProjectIds.includes(snapshot.currentProjectId)) {
       this.expandedProjectIds = [...this.expandedProjectIds, snapshot.currentProjectId];
     }
-    scheduleChatScroll(this as unknown as Parameters<typeof scheduleChatScroll>[0], false, false);
+    this.bumpChatRuntime();
+    this.scheduleActiveChatScroll(false, false);
   }
 
   private async refreshSnapshot(
@@ -557,8 +720,6 @@ export class OpenClawPowerApp extends LitElement {
     this.workbenchSection = "newTask";
     this.workbenchSelectedSessionKey = null;
     this.newTaskProjectMenuOpen = false;
-    resetToolStream(this as unknown as Parameters<typeof resetToolStream>[0]);
-    resetChatScroll(this as unknown as Parameters<typeof resetChatScroll>[0]);
     const projectId = this.workbenchSelectedProjectId ?? this.agentsList?.defaultId ?? null;
     this.persistSettings({
       sessionKey: "",
@@ -572,8 +733,6 @@ export class OpenClawPowerApp extends LitElement {
     this.workbenchSelectedProjectId = projectId;
     this.workbenchSelectedSessionKey = null;
     this.newTaskProjectMenuOpen = false;
-    resetToolStream(this as unknown as Parameters<typeof resetToolStream>[0]);
-    resetChatScroll(this as unknown as Parameters<typeof resetChatScroll>[0]);
     if (!this.expandedProjectIds.includes(projectId)) {
       this.expandedProjectIds = [...this.expandedProjectIds, projectId];
     }
@@ -592,8 +751,7 @@ export class OpenClawPowerApp extends LitElement {
     this.workbenchSelectedProjectId = projectId;
     this.rightRailCollapsed = false;
     this.newTaskProjectMenuOpen = false;
-    resetToolStream(this as unknown as Parameters<typeof resetToolStream>[0]);
-    resetChatScroll(this as unknown as Parameters<typeof resetChatScroll>[0]);
+    this.resetSessionRuntimeViewState(sessionKey);
     if (projectId && !this.expandedProjectIds.includes(projectId)) {
       this.expandedProjectIds = [...this.expandedProjectIds, projectId];
     }
@@ -651,19 +809,26 @@ export class OpenClawPowerApp extends LitElement {
   }
 
   private handleChatScrollEvent(event: Event) {
-    handleChatScroll(this as unknown as Parameters<typeof handleChatScroll>[0], event);
-  }
-
-  private async sendViaChatController(projectId: string) {
-    const prompt = this.chatMessage.trim();
-    if (!prompt) {
+    const runtime = this.activeSessionRuntime;
+    if (!runtime) {
       return;
     }
-    const runId = await sendChatMessage(
-      this as unknown as Parameters<typeof sendChatMessage>[0],
-      prompt,
+    handleChatScroll(
+      this.createActiveScrollHost(runtime) as unknown as Parameters<typeof handleChatScroll>[0],
+      event,
     );
+  }
+
+  private async sendViaChatController() {
+    const prompt = this.chatMessage.trim();
+    const runtime = this.activeSessionRuntime;
+    if (!prompt || !runtime) {
+      return;
+    }
+    const runId = await sendChatMessage(runtime, prompt);
     if (!runId) {
+      this.lastError = runtime.lastError;
+      this.bumpChatRuntime();
       return;
     }
     this.chatMessage = "";
@@ -671,8 +836,8 @@ export class OpenClawPowerApp extends LitElement {
       sessionKey: this.workbenchSelectedSessionKey ?? "",
       lastActiveSessionKey: this.workbenchSelectedSessionKey ?? "",
     });
-    scheduleChatScroll(this as unknown as Parameters<typeof scheduleChatScroll>[0], true, false);
-    void this.refreshSnapshot(this.workbenchSelectedSessionKey, projectId);
+    this.bumpChatRuntime();
+    this.scheduleActiveChatScroll(true, false);
   }
 
   private async startTask(projectId: string) {
@@ -686,14 +851,13 @@ export class OpenClawPowerApp extends LitElement {
       this.workbenchSelectedProjectId = projectId;
       this.workbenchSelectedSessionKey = sessionKey;
       this.rightRailCollapsed = false;
-      resetToolStream(this as unknown as Parameters<typeof resetToolStream>[0]);
-      resetChatScroll(this as unknown as Parameters<typeof resetChatScroll>[0]);
+      this.resetSessionRuntimeViewState(sessionKey);
       this.persistSettings({
         sessionKey,
         lastActiveSessionKey: sessionKey,
       });
       await this.refreshSnapshot(sessionKey, projectId);
-      await this.sendViaChatController(projectId);
+      await this.sendViaChatController();
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : String(error);
     }
@@ -722,15 +886,19 @@ export class OpenClawPowerApp extends LitElement {
         key: this.workbenchSelectedSessionKey,
         model: this.currentModelId || null,
       });
-      await this.sendViaChatController(projectId);
+      await this.sendViaChatController();
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : String(error);
     }
   }
 
   private async abortCurrentRun() {
+    const runtime = this.activeSessionRuntime;
+    if (!runtime) {
+      return;
+    }
     try {
-      await abortChatRun(this as unknown as Parameters<typeof abortChatRun>[0]);
+      await abortChatRun(runtime);
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : String(error);
     }
@@ -743,6 +911,10 @@ export class OpenClawPowerApp extends LitElement {
       this.skillsState.connected = event.connected;
       this.channelsState.connected = event.connected;
       this.cronState.connected = event.connected;
+      for (const runtime of this.chatRuntimeBySessionKey.values()) {
+        runtime.connected = event.connected;
+        runtime.client = this.controllerClient;
+      }
       if (!event.connected && event.error) {
         this.lastError = event.error;
       }
@@ -751,7 +923,28 @@ export class OpenClawPowerApp extends LitElement {
     }
 
     if (event.type === "agent") {
-      handleAgentEvent(this as unknown as Parameters<typeof handleAgentEvent>[0], event.payload);
+      const sessionKey =
+        typeof event.payload.sessionKey === "string" ? event.payload.sessionKey.trim() : "";
+      if (sessionKey) {
+        const runtime = this.getOrCreateSessionRuntime(sessionKey);
+        if (runtime) {
+          handleAgentEvent(
+            runtime as unknown as Parameters<typeof handleAgentEvent>[0],
+            event.payload,
+          );
+          if (this.workbenchSelectedSessionKey === sessionKey) {
+            this.bumpChatRuntime();
+          }
+        }
+      } else {
+        for (const runtime of this.chatRuntimeBySessionKey.values()) {
+          handleAgentEvent(
+            runtime as unknown as Parameters<typeof handleAgentEvent>[0],
+            event.payload,
+          );
+        }
+        this.bumpChatRuntime();
+      }
       return;
     }
 
@@ -759,9 +952,13 @@ export class OpenClawPowerApp extends LitElement {
       return;
     }
 
+    const runtime = this.getOrCreateSessionRuntime(event.sessionKey);
+    if (!runtime) {
+      return;
+    }
     const projectId =
       parseAgentSessionKey(event.sessionKey)?.agentId ?? this.workbenchSelectedProjectId ?? null;
-    const nextState = handleChatEvent(this as unknown as Parameters<typeof handleChatEvent>[0], {
+    const nextState = handleChatEvent(runtime, {
       runId: event.runId ?? "",
       sessionKey: event.sessionKey,
       state: event.state,
@@ -770,16 +967,20 @@ export class OpenClawPowerApp extends LitElement {
     });
     if (this.workbenchSelectedSessionKey === event.sessionKey) {
       if (event.state === "final" || event.state === "aborted" || event.state === "error") {
-        flushToolStreamSync(this as unknown as Parameters<typeof flushToolStreamSync>[0]);
+        flushToolStreamSync(runtime as unknown as Parameters<typeof flushToolStreamSync>[0]);
       }
-      scheduleChatScroll(
-        this as unknown as Parameters<typeof scheduleChatScroll>[0],
-        false,
-        event.state === "delta",
-      );
+      this.bumpChatRuntime();
+      this.scheduleActiveChatScroll(false, event.state === "delta");
     }
     if (nextState === "final" || nextState === "aborted" || nextState === "error") {
-      void this.refreshSnapshot(event.sessionKey, projectId);
+      if (this.workbenchSelectedSessionKey === event.sessionKey) {
+        void this.refreshSnapshot(event.sessionKey, projectId);
+      } else {
+        void this.refreshSnapshot(
+          this.workbenchSelectedSessionKey,
+          this.workbenchSelectedProjectId,
+        );
+      }
     }
   }
 
@@ -802,6 +1003,7 @@ export class OpenClawPowerApp extends LitElement {
     }
 
     const visibleCronJobs = getVisibleCronJobs(this.cronState);
+    const activeRuntime = this.activeSessionRuntime;
     const selectedDeliveryChannel =
       this.cronState.cronForm.deliveryChannel && this.cronState.cronForm.deliveryChannel.trim()
         ? this.cronState.cronForm.deliveryChannel.trim()
@@ -827,14 +1029,14 @@ export class OpenClawPowerApp extends LitElement {
       agentFilesLoading: false,
       agentFilesError: null,
       sessionsResult: this.sessionsResult,
-      chatMessages: this.chatMessages,
+      chatMessages: activeRuntime?.chatMessages ?? [],
       chatMessage: this.chatMessage,
-      chatSending: this.chatSending,
-      chatRunId: this.chatRunId,
-      chatStream: this.chatStream,
-      chatStreamStartedAt: this.chatStreamStartedAt,
-      chatToolMessages: this.chatToolMessages,
-      chatStreamSegments: this.chatStreamSegments,
+      chatSending: activeRuntime?.chatSending ?? false,
+      chatRunId: activeRuntime?.chatRunId ?? null,
+      chatStream: activeRuntime?.chatStream ?? null,
+      chatStreamStartedAt: activeRuntime?.chatStreamStartedAt ?? null,
+      chatToolMessages: activeRuntime?.chatToolMessages ?? [],
+      chatStreamSegments: activeRuntime?.chatStreamSegments ?? [],
       lastError: this.lastError,
       toolsCatalogResult: this.toolsCatalogResult,
       toolsCatalogLoading: false,

@@ -114,6 +114,16 @@ function buildReply(projectName: string, text: string, modelId: string) {
   return `已进入 ${projectName} 的原型上下文。接下来我会围绕“${text.trim()}”拆任务、列文件位和工具位，并按 ${modelId} 的展示风格返回工作台结果。`;
 }
 
+function createLocalId() {
+  if (
+    typeof globalThis.crypto !== "undefined" &&
+    typeof globalThis.crypto.randomUUID === "function"
+  ) {
+    return globalThis.crypto.randomUUID();
+  }
+  return `mock-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export class MockWorkbenchAdapter implements WorkbenchAdapter {
   readonly kind = "mock" as const;
   private projects: MockProject[];
@@ -601,7 +611,7 @@ export class MockWorkbenchAdapter implements WorkbenchAdapter {
     session.messages.push(sessionMessage("user", text, timestamp));
     session.updatedAt = timestamp;
     session.totalTokens += 900;
-    const runId = crypto.randomUUID();
+    const runId = createLocalId();
     this.scheduleMockReply(runId, sessionKey, buildReply(project.name, text, modelId));
     return {
       sessionKey,
