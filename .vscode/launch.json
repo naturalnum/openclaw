@@ -1,0 +1,20 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "OpenClaw: Gateway",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "runtimeExecutable": "/Users/vincent.yan/.nvm/versions/node/v22.22.1/bin/node",
+      "runtimeArgs": ["--import", "tsx/esm"],
+      "program": "${workspaceFolder}/src/entry.ts",
+      "args": ["gateway", "--port", "18789", "--verbose", "--allow-unconfigured"],
+      "env": {
+        "TSX_TSCONFIG_PATH": "${workspaceFolder}/tsconfig.json"
+      },
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    }
+  ]
+}

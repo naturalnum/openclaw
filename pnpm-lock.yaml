@@ -605,6 +605,8 @@ importers:
         specifier: workspace:*
         version: link:../..
 
+  power-backend: {}
+
   power-ui:
     dependencies:
       lit:

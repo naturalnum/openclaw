@@ -152,9 +152,35 @@ function isHttpUrl(value: string): boolean {
 
 const POWER_MODEL_CONFIGS_KEY = "openclaw.power-ui.models.v1";
 
+function createWorkbenchId(): string {
+  // Prefer Web Crypto UUID when available; Vite may treat bare `crypto` differently.
+  const c = globalThis.crypto;
+  const randomUUID = (c as unknown as { randomUUID?: () => string }).randomUUID;
+  if (typeof randomUUID === "function") {
+    return randomUUID();
+  }
+
+  const getRandomValues = (c as unknown as { getRandomValues?: (arr: Uint8Array) => void })
+    .getRandomValues;
+  if (typeof getRandomValues === "function") {
+    const bytes = new Uint8Array(16);
+    getRandomValues(bytes);
+    // RFC4122 version 4 UUID
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes)
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
+  // Final fallback when neither randomUUID nor getRandomValues exist.
+  return `id_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
 function createEmptyModelConfig(): WorkbenchModelConfig {
   return {
-    id: crypto.randomUUID(),
+    id: createWorkbenchId(),
     name: "",
     baseUrl: "",
     apiKey: "",
@@ -175,7 +201,7 @@ function loadModelConfigs(): WorkbenchModelConfig[] {
     return parsed
       .filter((entry) => entry && typeof entry === "object")
       .map((entry) => ({
-        id: typeof entry.id === "string" && entry.id.trim() ? entry.id : crypto.randomUUID(),
+        id: typeof entry.id === "string" && entry.id.trim() ? entry.id : createWorkbenchId(),
         name: typeof entry.name === "string" ? entry.name : "",
         baseUrl: typeof entry.baseUrl === "string" ? entry.baseUrl : "",
         apiKey: typeof entry.apiKey === "string" ? entry.apiKey : "",
