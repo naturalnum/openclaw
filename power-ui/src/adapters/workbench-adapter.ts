@@ -13,6 +13,28 @@ export type WorkbenchSendResult = {
   runId: string | null;
 };
 
+export type WorkbenchDirectoryEntry = {
+  name: string;
+  path: string;
+};
+
+export type WorkbenchDirectoryRootsResult = {
+  roots: WorkbenchDirectoryEntry[];
+};
+
+export type WorkbenchDirectoryListResult = {
+  path: string;
+  name: string;
+  parentPath: string | null;
+  entries: WorkbenchDirectoryEntry[];
+};
+
+export type WorkbenchWorkspaceValidationResult = {
+  ok: boolean;
+  path: string;
+  name: string;
+};
+
 export type WorkbenchSkillMessage = {
   ok: boolean;
   message: string;
@@ -45,7 +67,10 @@ export interface WorkbenchAdapter {
   subscribe(listener: (event: WorkbenchAdapterEvent) => void): () => void;
   request<T>(method: string, params?: unknown): Promise<T>;
   snapshot(args: WorkbenchSelection): Promise<WorkbenchSnapshot>;
-  createProjectFromFolder(files: File[]): Promise<string | null>;
+  listProjectRoots(): Promise<WorkbenchDirectoryRootsResult>;
+  listProjectDirectories(path?: string | null): Promise<WorkbenchDirectoryListResult>;
+  validateProjectWorkspace(path: string): Promise<WorkbenchWorkspaceValidationResult>;
+  createProject(name: string, workspace: string): Promise<string | null>;
   startTask(projectId: string, text: string, modelId: string): Promise<WorkbenchSendResult>;
   addUserMessage(sessionKey: string, text: string, modelId: string): Promise<WorkbenchSendResult>;
   abortRun(sessionKey: string, runId: string | null): Promise<void>;

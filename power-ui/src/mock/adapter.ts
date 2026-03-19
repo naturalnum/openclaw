@@ -17,7 +17,10 @@ import type {
 import type {
   WorkbenchAdapter,
   WorkbenchAdapterEvent,
+  WorkbenchDirectoryListResult,
+  WorkbenchDirectoryRootsResult,
   WorkbenchSendResult,
+  WorkbenchWorkspaceValidationResult,
 } from "../adapters/workbench-adapter.ts";
 
 type MockMessage = {
@@ -112,6 +115,16 @@ function sessionMessage(role: MockMessage["role"], text: string, timestamp: numb
 
 function buildReply(projectName: string, text: string, modelId: string) {
   return `已进入 ${projectName} 的原型上下文。接下来我会围绕“${text.trim()}”拆任务、列文件位和工具位，并按 ${modelId} 的展示风格返回工作台结果。`;
+}
+
+function createLocalId() {
+  if (
+    typeof globalThis.crypto !== "undefined" &&
+    typeof globalThis.crypto.randomUUID === "function"
+  ) {
+    return globalThis.crypto.randomUUID();
+  }
+  return `mock-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 export class MockWorkbenchAdapter implements WorkbenchAdapter {
@@ -532,37 +545,72 @@ export class MockWorkbenchAdapter implements WorkbenchAdapter {
     };
   }
 
-  async createProjectFromFolder(files: File[]) {
-    if (files.length === 0) {
+  async listProjectRoots(): Promise<WorkbenchDirectoryRootsResult> {
+    return {
+      roots: [{ name: "workspace", path: "/workspace" }],
+    };
+  }
+
+  async listProjectDirectories(path?: string | null): Promise<WorkbenchDirectoryListResult> {
+    const currentPath = path?.trim() || "/workspace";
+    const uniqueDirectories = new Set<string>();
+    for (const project of this.projects) {
+      const projectPath = project.workspace.trim();
+      if (projectPath === currentPath) {
+        continue;
+      }
+      if (!projectPath.startsWith(`${currentPath}/`)) {
+        continue;
+      }
+      const relative = projectPath.slice(currentPath.length + 1);
+      const nextSegment = relative.split("/")[0]?.trim();
+      if (!nextSegment) {
+        continue;
+      }
+      uniqueDirectories.add(nextSegment);
+    }
+    const entries = Array.from(uniqueDirectories)
+      .toSorted((left, right) => left.localeCompare(right))
+      .map((name) => ({
+        name,
+        path: `${currentPath}/${name}`,
+      }));
+    return {
+      path: currentPath,
+      name: currentPath.split("/").filter(Boolean).pop() ?? currentPath,
+      parentPath:
+        currentPath === "/workspace"
+          ? null
+          : currentPath.split("/").slice(0, -1).join("/") || "/workspace",
+      entries,
+    };
+  }
+
+  async validateProjectWorkspace(path: string): Promise<WorkbenchWorkspaceValidationResult> {
+    const normalizedPath = path.trim();
+    if (!normalizedPath.startsWith("/workspace")) {
+      throw new Error(`Path is outside allowed roots: ${normalizedPath}`);
+    }
+    return {
+      ok: true,
+      path: normalizedPath,
+      name: normalizedPath.split("/").filter(Boolean).pop() ?? normalizedPath,
+    };
+  }
+
+  async createProject(name: string, workspace: string) {
+    const folderName = name.trim();
+    if (!folderName) {
       return null;
     }
-    const firstRelativePath = (
-      (files[0] as File & { webkitRelativePath?: string }).webkitRelativePath ?? ""
-    ).trim();
-    const folderName =
-      firstRelativePath.split("/").filter(Boolean)[0] || `project-${this.nextProjectNumber}`;
     const id = toProjectId(folderName);
-    const name = folderName;
     this.nextProjectNumber += 1;
     this.projects.unshift({
       id,
-      name,
+      name: folderName,
       owner: "Prototype Owner",
-      workspace: `/${folderName}`,
-      files: files.slice(0, 12).map((file) => {
-        const relativePath = (
-          (file as File & { webkitRelativePath?: string }).webkitRelativePath ?? file.name
-        ).trim();
-        const parts = relativePath.split("/").filter(Boolean);
-        const filePath = parts.length > 1 ? parts.slice(1).join("/") : file.name;
-        return {
-          name: file.name,
-          path: filePath || file.name,
-          missing: false,
-          size: file.size,
-          updatedAtMs: Date.now(),
-        } satisfies AgentFileEntry;
-      }),
+      workspace: workspace.trim() || `/${folderName}`,
+      files: [],
       sessions: [],
     });
     return id;
@@ -601,7 +649,7 @@ export class MockWorkbenchAdapter implements WorkbenchAdapter {
     session.messages.push(sessionMessage("user", text, timestamp));
     session.updatedAt = timestamp;
     session.totalTokens += 900;
-    const runId = crypto.randomUUID();
+    const runId = createLocalId();
     this.scheduleMockReply(runId, sessionKey, buildReply(project.name, text, modelId));
     return {
       sessionKey,

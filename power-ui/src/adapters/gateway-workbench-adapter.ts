@@ -17,9 +17,12 @@ import type { WorkbenchSnapshot } from "./mock-workbench-adapter.ts";
 import type {
   WorkbenchAdapter,
   WorkbenchAdapterEvent,
+  WorkbenchDirectoryListResult,
+  WorkbenchDirectoryRootsResult,
   WorkbenchSelection,
   WorkbenchSendResult,
   WorkbenchSkillMessage,
+  WorkbenchWorkspaceValidationResult,
 } from "./workbench-adapter.ts";
 
 type GatewayAdapterOptions = {
@@ -111,31 +114,6 @@ async function requiredRequest<T>(request: Promise<T>, label: string): Promise<T
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`${label} failed: ${message}`, { cause: error });
   }
-}
-
-function resolveFolderSelection(files: File[]) {
-  const first = files[0] as File & { path?: string; webkitRelativePath?: string };
-  const relativePath = (first.webkitRelativePath ?? "").trim();
-  const folderName = relativePath.split("/").filter(Boolean)[0] ?? "";
-  const nativePath = typeof first.path === "string" ? first.path.trim() : "";
-  if (!folderName || !nativePath) {
-    return null;
-  }
-  const suffix = relativePath.replaceAll("/", nativePath.includes("\\") ? "\\" : "/");
-  if (!suffix || !nativePath.endsWith(suffix)) {
-    return null;
-  }
-  const workspace = nativePath.slice(0, nativePath.length - suffix.length).replace(/[\\/]+$/, "");
-  if (!workspace) {
-    return null;
-  }
-  return { folderName, workspace };
-}
-
-function resolveFolderName(files: File[]) {
-  const first = files[0] as File & { webkitRelativePath?: string };
-  const relativePath = (first.webkitRelativePath ?? "").trim();
-  return relativePath.split("/").filter(Boolean)[0] ?? "";
 }
 
 export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
@@ -257,30 +235,40 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
     };
   }
 
-  async createProjectFromFolder(files: File[]) {
-    if (files.length === 0) {
+  async listProjectRoots(): Promise<WorkbenchDirectoryRootsResult> {
+    return await requiredRequest(
+      this.gateway.request<WorkbenchDirectoryRootsResult>("power.fs.roots", {}),
+      "power.fs.roots",
+    );
+  }
+
+  async listProjectDirectories(path?: string | null): Promise<WorkbenchDirectoryListResult> {
+    return await requiredRequest(
+      this.gateway.request<WorkbenchDirectoryListResult>("power.fs.listDirs", {
+        path: path?.trim() || null,
+      }),
+      "power.fs.listDirs",
+    );
+  }
+
+  async validateProjectWorkspace(path: string): Promise<WorkbenchWorkspaceValidationResult> {
+    return await requiredRequest(
+      this.gateway.request<WorkbenchWorkspaceValidationResult>("power.fs.validateWorkspace", {
+        path,
+      }),
+      "power.fs.validateWorkspace",
+    );
+  }
+
+  async createProject(name: string, workspace: string) {
+    const projectName = name.trim();
+    const projectWorkspace = workspace.trim();
+    if (!projectName || !projectWorkspace) {
       return null;
     }
-    let selection = resolveFolderSelection(files);
-    if (!selection) {
-      const folderName = resolveFolderName(files);
-      if (!folderName) {
-        throw new Error("无法识别所选文件夹名称。");
-      }
-      const workspace = window
-        .prompt(
-          `浏览器没有暴露 “${folderName}” 的本地绝对路径。\n请先粘贴这个项目目录的绝对路径，再继续创建项目。`,
-          "",
-        )
-        ?.trim();
-      if (!workspace) {
-        return null;
-      }
-      selection = { folderName, workspace };
-    }
     const created = await this.gateway.request<{ agentId: string }>("agents.create", {
-      name: selection.folderName,
-      workspace: selection.workspace,
+      name: projectName,
+      workspace: projectWorkspace,
     });
     return typeof created.agentId === "string" ? created.agentId : null;
   }

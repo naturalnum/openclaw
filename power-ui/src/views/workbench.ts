@@ -32,6 +32,11 @@ export type WorkbenchModelConfig = {
   model: string;
 };
 
+type WorkbenchDirectoryEntry = {
+  name: string;
+  path: string;
+};
+
 type WorkbenchSession = {
   key: string;
   label: string;
@@ -111,6 +116,14 @@ export type WorkbenchProps = {
   toolsCategory: WorkbenchToolsCategory;
   settingsOpen: boolean;
   settingsTab: WorkbenchSettingsTab;
+  projectDirectoryOpen: boolean;
+  projectDirectoryLoading: boolean;
+  projectDirectoryError: string | null;
+  projectDirectoryRoots: WorkbenchDirectoryEntry[];
+  projectDirectoryCurrentPath: string | null;
+  projectDirectoryCurrentName: string | null;
+  projectDirectoryParentPath: string | null;
+  projectDirectoryEntries: WorkbenchDirectoryEntry[];
   onNavigateLegacy: () => void;
   onSectionChange: (section: WorkbenchSection) => void;
   onSelectProject: (projectId: string) => void;
@@ -133,6 +146,9 @@ export type WorkbenchProps = {
   onSettingsTabChange: (value: WorkbenchSettingsTab) => void;
   onModelChange: (value: string) => void;
   onCreateProject: () => void;
+  onCloseProjectDirectory: () => void;
+  onBrowseProjectDirectory: (path: string | null) => void;
+  onCreateProjectFromDirectory: (path: string | null) => void;
   onToggleSidebar: () => void;
   onToggleProjects: () => void;
   onToggleRightRail: () => void;
@@ -252,7 +268,7 @@ export function renderWorkbench(props: WorkbenchProps) {
                   <button
                     type="button"
                     class="workbench-icon-button"
-                    title="New project"
+                    title="Choose project folder"
                     @click=${props.onCreateProject}
                   >
                     ${icons.plus}
@@ -332,6 +348,7 @@ export function renderWorkbench(props: WorkbenchProps) {
       </div>
       ${props.toolsOpen ? renderToolsDialog(props) : nothing}
       ${props.settingsOpen ? renderSettingsDialog(props) : nothing}
+      ${props.projectDirectoryOpen ? renderProjectDirectoryDialog(props) : nothing}
     </div>
   `;
 }
@@ -486,6 +503,109 @@ function renderNewTaskView(
         </div>
       </section>
     </section>
+  `;
+}
+
+function renderProjectDirectoryDialog(props: WorkbenchProps) {
+  const showingRoots = !props.projectDirectoryCurrentPath;
+  const entries = showingRoots ? props.projectDirectoryRoots : props.projectDirectoryEntries;
+  const selectedPath = props.projectDirectoryCurrentPath;
+  return html`
+    <div class="workbench-overlay">
+      <div class="workbench-overlay__backdrop" @click=${props.onCloseProjectDirectory}></div>
+      <div class="workbench-dialog workbench-dialog--directory">
+        <div class="workbench-dialog__topbar">
+          <div>
+            <h3>Select Project Directory</h3>
+            <p>Choose a server-side directory. The project name will match the selected folder.</p>
+          </div>
+          <button
+            type="button"
+            class="workbench-icon-button"
+            @click=${props.onCloseProjectDirectory}
+          >
+            ${icons.x}
+          </button>
+        </div>
+
+        <div class="workbench-dialog__body">
+          <div class="workbench-directory-toolbar">
+            <button
+              type="button"
+              class="workbench-secondary-button"
+              ?disabled=${props.projectDirectoryLoading}
+              @click=${() =>
+                props.onBrowseProjectDirectory(
+                  showingRoots ? null : (props.projectDirectoryParentPath ?? null),
+                )}
+            >
+              ${showingRoots ? "Roots" : "Up"}
+            </button>
+            <div class="workbench-directory-path">
+              ${showingRoots ? "Allowed roots" : props.projectDirectoryCurrentPath}
+            </div>
+            <button
+              type="button"
+              class="workbench-primary-button"
+              ?disabled=${props.projectDirectoryLoading || !selectedPath}
+              @click=${() => props.onCreateProjectFromDirectory(selectedPath)}
+            >
+              Create Project Here
+            </button>
+          </div>
+
+          ${
+            props.projectDirectoryError
+              ? html`<div class="workbench-callout workbench-callout--danger">${props.projectDirectoryError}</div>`
+              : nothing
+          }
+
+          ${
+            props.projectDirectoryLoading
+              ? html`
+                  <div class="workbench-empty workbench-empty--small">Loading directories…</div>
+                `
+              : entries.length === 0
+                ? html`
+                    <div class="workbench-empty workbench-empty--small">No directories available.</div>
+                  `
+                : html`
+                    <div class="workbench-directory-list">
+                      ${repeat(
+                        entries,
+                        (entry) => entry.path,
+                        (entry) => html`
+                          <button
+                            type="button"
+                            class="workbench-directory-entry"
+                            @click=${() => props.onBrowseProjectDirectory(entry.path)}
+                          >
+                            <span class="workbench-directory-entry__icon">${icons.folder}</span>
+                            <span class="workbench-directory-entry__name">${entry.name}</span>
+                            <span class="workbench-directory-entry__path">${entry.path}</span>
+                          </button>
+                        `,
+                      )}
+                    </div>
+                  `
+          }
+
+          ${
+            selectedPath
+              ? html`
+                  <div class="workbench-directory-selection">
+                    <div class="workbench-directory-selection__label">Selected directory</div>
+                    <div class="workbench-directory-selection__name">
+                      ${props.projectDirectoryCurrentName}
+                    </div>
+                    <div class="workbench-directory-selection__path">${selectedPath}</div>
+                  </div>
+                `
+              : nothing
+          }
+        </div>
+      </div>
+    </div>
   `;
 }
 
@@ -939,23 +1059,17 @@ function renderSettingsDialog(props: WorkbenchProps) {
     <div class="workbench-overlay">
       <div class="workbench-overlay__backdrop" @click=${props.onCloseSettings}></div>
       <div class="workbench-dialog workbench-dialog--settings">
-        <div class="workbench-dialog__topbar">
-          <div>
-            <h3>Settings</h3>
-            <p>Manage language, appearance, and model presets.</p>
-          </div>
-          <button type="button" class="workbench-icon-button" @click=${props.onCloseSettings}>
-            ${icons.x}
-          </button>
-        </div>
-
         <div class="workbench-settings-layout">
           <aside class="workbench-settings-nav">
+            <div class="workbench-settings-nav__header">
+              <h3>Settings</h3>
+            </div>
             <button
               type="button"
               class="${props.settingsTab === "general" ? "is-active" : ""}"
               @click=${() => props.onSettingsTabChange("general")}
             >
+              <span class="workbench-settings-nav__icon">${icons.wrench}</span>
               General
             </button>
             <button
@@ -963,21 +1077,42 @@ function renderSettingsDialog(props: WorkbenchProps) {
               class="${props.settingsTab === "models" ? "is-active" : ""}"
               @click=${() => props.onSettingsTabChange("models")}
             >
+              <span class="workbench-settings-nav__icon">${icons.spark}</span>
               Models
             </button>
           </aside>
 
           <section class="workbench-settings-panel">
+            <div class="workbench-settings-panel__header">
+              <div>
+                <h4>${props.settingsTab === "general" ? "General" : "Model Settings"}</h4>
+                <p>
+                  ${
+                    props.settingsTab === "general"
+                      ? "Control language and interface appearance."
+                      : "Manage provider endpoints and model presets."
+                  }
+                </p>
+              </div>
+              <button
+                type="button"
+                class="workbench-icon-button workbench-settings-close"
+                aria-label="Close settings"
+                @click=${props.onCloseSettings}
+              >
+                ${icons.x}
+              </button>
+            </div>
             ${
               props.settingsTab === "general"
                 ? html`
                   <article class="workbench-setting-card">
                     <div class="workbench-settings-section">
                       <div class="workbench-settings-section__header">
-                        <span>General</span>
+                        <span>Language</span>
                       </div>
                       <label class="workbench-settings-field">
-                        <span>Language</span>
+                        <span>Display language</span>
                         <div class="workbench-settings-select">
                           <select
                             .value=${props.settings.locale ?? ""}
@@ -1029,7 +1164,7 @@ function renderSettingsDialog(props: WorkbenchProps) {
 
                     <div class="workbench-settings-section">
                       <div class="workbench-settings-section__header">
-                        <span>Appearance</span>
+                        <span>Mode</span>
                       </div>
                       <div class="workbench-settings-cards">
                         ${renderAppearanceCard(
@@ -1057,12 +1192,13 @@ function renderSettingsDialog(props: WorkbenchProps) {
                 : html`
                   <article class="workbench-setting-card">
                     <div class="workbench-settings-section__header">
-                      <span>Model presets</span>
+                      <span>Models</span>
                       <button
                         type="button"
-                        class="workbench-secondary-button"
+                        class="workbench-secondary-button workbench-settings-add-button"
                         @click=${props.settingsView.onAddModelConfig}
                       >
+                        <span class="workbench-settings-add-button__icon">${icons.plus}</span>
                         Add model
                       </button>
                     </div>
@@ -1079,23 +1215,39 @@ function renderSettingsDialog(props: WorkbenchProps) {
                                 <section class="workbench-model-config">
                                   <div class="workbench-model-config__header">
                                     <div>
-                                      <h4>Model ${index + 1}</h4>
-                                      <p>Only the required fields are kept here.</p>
+                                      <h4>${config.name.trim() || `Model ${index + 1}`}</h4>
+                                      <p>${config.model.trim() || "Configure provider details below."}</p>
                                     </div>
-                                    <button
-                                      type="button"
-                                      class="workbench-link-button workbench-link-button--danger"
-                                      @click=${() =>
-                                        props.settingsView.onRemoveModelConfig(config.id)}
-                                    >
-                                      Remove
-                                    </button>
+                                    <div class="workbench-model-config__actions">
+                                      <button
+                                        type="button"
+                                        class="workbench-model-config__icon-button"
+                                        aria-label="Focus model fields"
+                                        @click=${(event: Event) => {
+                                          const root = (event.currentTarget as HTMLElement).closest(
+                                            ".workbench-model-config",
+                                          );
+                                          root?.querySelector("input")?.focus();
+                                        }}
+                                      >
+                                        ${icons.edit}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        class="workbench-model-config__icon-button workbench-model-config__icon-button--danger"
+                                        aria-label="Remove model"
+                                        @click=${() =>
+                                          props.settingsView.onRemoveModelConfig(config.id)}
+                                      >
+                                        ${icons.trash}
+                                      </button>
+                                    </div>
                                   </div>
                                   <div class="workbench-model-config__grid">
                                     ${renderSettingsInput(
-                                      "Name",
+                                      "Model name",
                                       config.name,
-                                      "e.g. OpenAI Prod",
+                                      "GPT-4",
                                       (value) =>
                                         props.settingsView.onModelConfigChange(
                                           config.id,
@@ -1104,9 +1256,9 @@ function renderSettingsDialog(props: WorkbenchProps) {
                                         ),
                                     )}
                                     ${renderSettingsInput(
-                                      "URL",
+                                      "API URL",
                                       config.baseUrl,
-                                      "https://api.example.com/v1",
+                                      "https://api.openai.com/v1",
                                       (value) =>
                                         props.settingsView.onModelConfigChange(
                                           config.id,
@@ -1127,9 +1279,9 @@ function renderSettingsDialog(props: WorkbenchProps) {
                                       "password",
                                     )}
                                     ${renderSettingsInput(
-                                      "Model",
+                                      "Model ID",
                                       config.model,
-                                      "gpt-5.4",
+                                      "gpt-4",
                                       (value) =>
                                         props.settingsView.onModelConfigChange(
                                           config.id,
