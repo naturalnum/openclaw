@@ -404,6 +404,7 @@ export class OpenClawPowerApp extends LitElement {
   @state() rightRailCollapsed = false;
   @state() newTaskProjectMenuOpen = false;
   @state() expandedProjectIds: string[] = [];
+  @state() priorityProjectIds: string[] = [];
   @state() workbenchSelectedProjectId: string | null = null;
   @state() workbenchSelectedSessionKey: string | null = null;
   @state() workbenchToolsOpen = false;
@@ -656,6 +657,9 @@ export class OpenClawPowerApp extends LitElement {
     if (snapshot.currentProjectId && !this.expandedProjectIds.includes(snapshot.currentProjectId)) {
       this.expandedProjectIds = [...this.expandedProjectIds, snapshot.currentProjectId];
     }
+    this.priorityProjectIds = this.priorityProjectIds.filter((projectId) =>
+      (snapshot.agentsList?.agents ?? []).some((agent) => agent.id === projectId),
+    );
     this.bumpChatRuntime();
     this.scheduleActiveChatScroll(false, false);
   }
@@ -939,6 +943,10 @@ export class OpenClawPowerApp extends LitElement {
       if (!projectId) {
         throw new Error("Failed to create project from selected directory.");
       }
+      this.priorityProjectIds = [
+        projectId,
+        ...this.priorityProjectIds.filter((id) => id !== projectId),
+      ];
       this.closeProjectDirectoryDialog();
       await this.selectProject(projectId);
     } catch (error) {
@@ -1185,6 +1193,7 @@ export class OpenClawPowerApp extends LitElement {
       projectsCollapsed: this.projectsCollapsed,
       rightRailCollapsed: this.rightRailCollapsed,
       expandedProjectIds: this.expandedProjectIds,
+      priorityProjectIds: this.priorityProjectIds,
       agentsList: this.agentsList,
       agentIdentityById: this.agentIdentityById,
       agentFilesList: this.agentFilesList,

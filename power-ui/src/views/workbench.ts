@@ -67,6 +67,7 @@ export type WorkbenchProps = {
   projectsCollapsed: boolean;
   rightRailCollapsed: boolean;
   expandedProjectIds: string[];
+  priorityProjectIds: string[];
   agentsList: AgentsListResult | null;
   agentIdentityById: Record<string, AgentIdentityResult>;
   agentFilesList: AgentsFilesListResult | null;
@@ -1437,6 +1438,10 @@ function resolveProjects(props: WorkbenchProps): WorkbenchProject[] {
     sessionsByAgent.set(parsed.agentId, list);
   }
 
+  const priorityOrder = new Map(
+    props.priorityProjectIds.map((projectId, index) => [projectId, index] as const),
+  );
+
   return agents
     .map((agent) => {
       const identity = props.agentIdentityById[agent.id];
@@ -1456,7 +1461,20 @@ function resolveProjects(props: WorkbenchProps): WorkbenchProject[] {
         sessions,
       };
     })
-    .toSorted((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
+    .toSorted((left, right) => {
+      const leftPriority = priorityOrder.get(left.id);
+      const rightPriority = priorityOrder.get(right.id);
+      if (leftPriority != null || rightPriority != null) {
+        if (leftPriority == null) {
+          return 1;
+        }
+        if (rightPriority == null) {
+          return -1;
+        }
+        return leftPriority - rightPriority;
+      }
+      return (right.updatedAt ?? 0) - (left.updatedAt ?? 0);
+    });
 }
 
 function filterToolEntries(
