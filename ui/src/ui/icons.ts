@@ -441,9 +441,15 @@ export const icons = {
       <path d="M7 4v16" />
     </svg>
   `,
+  layoutGrid: html`
+    <svg viewBox="0 0 24 24">
+      <rect width="7" height="7" x="3" y="3" rx="1" />
+      <rect width="7" height="7" x="14" y="3" rx="1" />
+      <rect width="7" height="7" x="14" y="14" rx="1" />
+      <rect width="7" height="7" x="3" y="14" rx="1" />
+    </svg>
+  `,
 } as const;
-
-export type IconName = keyof typeof icons;
 
 export function icon(name: IconName): TemplateResult {
   return icons[name];

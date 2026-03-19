@@ -59,6 +59,7 @@ import type { DevicePairingList } from "./controllers/devices.ts";
 import type { ExecApprovalRequest } from "./controllers/exec-approval.ts";
 import type { ExecApprovalsFile, ExecApprovalsSnapshot } from "./controllers/exec-approvals.ts";
 import type { SkillMessage } from "./controllers/skills.ts";
+import type { HubSkillMessage, HubSkillMessageMap } from "./controllers/skills-hub.ts";
 import type { GatewayBrowserClient, GatewayHelloOk } from "./gateway.ts";
 import type { Tab } from "./navigation.ts";
 import { loadSettings, type UiSettings } from "./storage.ts";
@@ -401,6 +402,19 @@ export class OpenClawApp extends LitElement {
   @state() skillEdits: Record<string, string> = {};
   @state() skillsBusyKey: string | null = null;
   @state() skillMessages: Record<string, SkillMessage> = {};
+
+  // skills-hub 独立状态（不与 skills 菜单共享）
+  @state() hubSkillsLoading = false;
+  @state() hubSkillsReport: SkillStatusReport | null = null;
+  @state() hubSkillsError: string | null = null;
+  @state() hubSkillsFilter = "";
+  @state() hubSkillEdits: Record<string, string> = {};
+  @state() hubSkillsBusyKey: string | null = null;
+  @state() hubSkillMessages: HubSkillMessageMap = {};
+  // skills-hub catalog（已安装+可安装合并目录）
+  @state() hubCatalogLoading = false;
+  @state() hubCatalog: import("./types.ts").SkillHubCatalog | null = null;
+  @state() hubCatalogError: string | null = null;
 
   @state() healthLoading = false;
   @state() healthResult: HealthSummary | null = null;

@@ -77,6 +77,15 @@ import {
   updateSkillEdit,
   updateSkillEnabled,
 } from "./controllers/skills.ts";
+import {
+  fetchHubCatalog,
+  getHubAllSkills,
+  installHubSkill,
+  loadSkillsHub,
+  saveHubSkillApiKey,
+  updateHubSkillEdit,
+  updateHubSkillEnabled,
+} from "./controllers/skills-hub.ts";
 import "./components/dashboard-header.ts";
 import { buildExternalLinkRel, EXTERNAL_LINK_TARGET } from "./external-link.ts";
 import { icons } from "./icons.ts";
@@ -129,6 +138,7 @@ const lazyLogs = createLazy(() => import("./views/logs.ts"));
 const lazyNodes = createLazy(() => import("./views/nodes.ts"));
 const lazySessions = createLazy(() => import("./views/sessions.ts"));
 const lazySkills = createLazy(() => import("./views/skills.ts"));
+const lazySkillsHub = createLazy(() => import("./views/skills-hub.ts"));
 
 function lazyRender<M>(getter: () => M | null, render: (mod: M) => unknown) {
   const mod = getter();
@@ -1241,6 +1251,35 @@ export function renderApp(state: AppViewState) {
                   onSaveKey: (key) => saveSkillApiKey(state, key),
                   onInstall: (skillKey, name, installId) =>
                     installSkill(state, skillKey, name, installId),
+                }),
+              )
+            : nothing
+        }
+
+        ${
+          state.tab === "skillsHub"
+            ? lazyRender(lazySkillsHub, (m) =>
+                m.renderSkillsHub({
+                  connected: state.connected,
+                  loading: state.hubSkillsLoading || state.hubCatalogLoading,
+                  allSkills: getHubAllSkills(state),
+                  error: state.hubSkillsError ?? state.hubCatalogError,
+                  filter: state.hubSkillsFilter,
+                  edits: state.hubSkillEdits,
+                  messages: state.hubSkillMessages,
+                  busyKey: state.hubSkillsBusyKey,
+                  onFilterChange: (next) => (state.hubSkillsFilter = next),
+                  onRefresh: () =>
+                    Promise.all([
+                      loadSkillsHub(state, { clearMessages: true }),
+                      fetchHubCatalog(state, { clearMessages: true }),
+                    ]),
+                  onToggle: (key, enabled) => updateHubSkillEnabled(state, key, enabled),
+                  onEdit: (key, value) => updateHubSkillEdit(state, key, value),
+                  onSaveKey: (key) => saveHubSkillApiKey(state, key),
+                  onInstall: (skillKey, name, installId) =>
+                    installHubSkill(state, skillKey, name, installId),
+                  onRequestUpdate: requestHostUpdate,
                 }),
               )
             : nothing

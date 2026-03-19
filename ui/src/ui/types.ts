@@ -607,6 +607,25 @@ export type SkillStatusReport = {
   skills: SkillStatusEntry[];
 };
 
+/**
+ * A single entry in the skills-hub catalog, augmented with an `installed`
+ * flag that indicates whether the skill is locally installed.
+ * Installed skills come from the bundled/managed/workspace skills directory;
+ * available skills come from the remote repository (not yet installed).
+ */
+export type SkillHubItem = SkillStatusEntry & {
+  installed: boolean;
+};
+
+export type SkillHubCatalog = {
+  /** Skills discovered locally (installed). */
+  installed: SkillHubItem[];
+  /** Skills available from the remote repository (not yet installed). */
+  available: SkillHubItem[];
+  /** All items merged (installed first, then available). */
+  all: SkillHubItem[];
+};
+
 export type StatusSummary = Record<string, unknown>;
 
 export type HealthSnapshot = Record<string, unknown>;

@@ -1,0 +1,15 @@
+:root {
+    --bg: #f4f6f9;
+    --panel: #ffffff;
+    --panel-soft: #f8fafc;
+    --line: #e1e6ef;
+    --line-strong: #cfd7e3;
+    --text: #18202b;
+    --muted: #6b7280;
+    --brand: #e4553a;
+    --brand-strong: #cf462e;
+    --chip: #f3f4f6;
+    --mono: "IBM Plex Mono", Menlo, Consolas, monospace;
+    --sans: "Inter", "Segoe UI", system-ui, sans-serif;
+    --shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 10px 28px rgba(15, 23, 42, 0.04);
+}

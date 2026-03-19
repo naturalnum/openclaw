@@ -22,6 +22,7 @@ import { loadNodes } from "./controllers/nodes.ts";
 import { loadPresence } from "./controllers/presence.ts";
 import { loadSessions } from "./controllers/sessions.ts";
 import { loadSkills } from "./controllers/skills.ts";
+import { fetchHubCatalog, loadSkillsHub } from "./controllers/skills-hub.ts";
 import { loadUsage } from "./controllers/usage.ts";
 import {
   inferBasePathFromPathname,
@@ -227,6 +228,12 @@ export async function refreshActiveTab(host: SettingsHost) {
   }
   if (host.tab === "skills") {
     await loadSkills(host as unknown as OpenClawApp);
+  }
+  if (host.tab === "skillsHub") {
+    await Promise.all([
+      loadSkillsHub(host as unknown as OpenClawApp),
+      fetchHubCatalog(host as unknown as OpenClawApp),
+    ]);
   }
   if (host.tab === "agents") {
     await loadAgents(host as unknown as OpenClawApp);
