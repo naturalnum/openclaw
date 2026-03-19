@@ -1,14 +1,7 @@
 import { LitElement, html } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { parseAgentSessionKey } from "../../src/routing/session-key.ts";
-import {
-  i18n,
-  I18nController,
-  SUPPORTED_LOCALES,
-  t,
-  type Locale,
-} from "../../ui/src/i18n/index.ts";
-import { resolveNavigatorLocale } from "../../ui/src/i18n/lib/registry.ts";
+import { i18n, I18nController, type Locale } from "../../ui/src/i18n/index.ts";
 import { DEFAULT_CRON_FORM } from "../../ui/src/ui/app-defaults.ts";
 import {
   handleChatScroll,
@@ -79,7 +72,11 @@ import {
 } from "../../ui/src/ui/views/agents-utils.ts";
 import { GatewayWorkbenchAdapter } from "./adapters/gateway-workbench-adapter.ts";
 import type { WorkbenchSnapshot } from "./adapters/mock-workbench-adapter.ts";
-import type { WorkbenchAdapter, WorkbenchAdapterEvent } from "./adapters/workbench-adapter.ts";
+import type {
+  WorkbenchAdapter,
+  WorkbenchAdapterEvent,
+  WorkbenchDirectoryEntry,
+} from "./adapters/workbench-adapter.ts";
 import {
   renderWorkbench,
   type WorkbenchModelConfig,
@@ -104,6 +101,85 @@ function resolveBasePath() {
     : inferBasePathFromPathname(window.location.pathname);
 }
 
+function resolveInitialSettings(settings: UiSettings): {
+  settings: UiSettings;
+  urlSessionKey: string | null;
+} {
+  if (typeof window === "undefined") {
+    return { settings, urlSessionKey: null };
+  }
+  if (!window.location.search && !window.location.hash) {
+    return { settings, urlSessionKey: null };
+  }
+  const url = new URL(window.location.href);
+  const params = new URLSearchParams(url.search);
+  const hashParams = new URLSearchParams(url.hash.startsWith("#") ? url.hash.slice(1) : url.hash);
+  let nextSettings = settings;
+  let urlSessionKey: string | null = null;
+  let shouldCleanUrl = false;
+
+  if (params.has("token")) {
+    const token = params.get("token")?.trim() ?? "";
+    if (token && token !== nextSettings.token) {
+      nextSettings = { ...nextSettings, token };
+    }
+    params.delete("token");
+    shouldCleanUrl = true;
+  }
+
+  if (hashParams.has("token")) {
+    const token = hashParams.get("token")?.trim() ?? "";
+    if (token && token !== nextSettings.token) {
+      nextSettings = { ...nextSettings, token };
+    }
+    hashParams.delete("token");
+    shouldCleanUrl = true;
+  }
+
+  const sessionRaw = params.get("session") ?? hashParams.get("session");
+  if (sessionRaw != null) {
+    const sessionKey = sessionRaw.trim();
+    if (sessionKey) {
+      urlSessionKey = sessionKey;
+      nextSettings = {
+        ...nextSettings,
+        sessionKey,
+        lastActiveSessionKey: sessionKey,
+      };
+    }
+    params.delete("session");
+    hashParams.delete("session");
+    shouldCleanUrl = true;
+  }
+
+  if (params.has("gatewayUrl")) {
+    const gatewayUrl = params.get("gatewayUrl")?.trim() ?? "";
+    if (gatewayUrl) {
+      nextSettings = { ...nextSettings, gatewayUrl };
+    }
+    params.delete("gatewayUrl");
+    shouldCleanUrl = true;
+  }
+
+  if (hashParams.has("gatewayUrl")) {
+    const gatewayUrl = hashParams.get("gatewayUrl")?.trim() ?? "";
+    if (gatewayUrl) {
+      nextSettings = { ...nextSettings, gatewayUrl };
+    }
+    hashParams.delete("gatewayUrl");
+    shouldCleanUrl = true;
+  }
+
+  if (shouldCleanUrl) {
+    url.search = params.toString();
+    const nextHash = hashParams.toString();
+    url.hash = nextHash ? `#${nextHash}` : "";
+    window.history.replaceState({}, "", url.toString());
+  }
+
+  return { settings: nextSettings, urlSessionKey };
+}
+
 function applyTheme(settings: UiSettings) {
   const resolved = resolveTheme(settings.theme, settings.themeMode);
   const mode = resolved.includes("light") ? "light" : "dark";
@@ -123,6 +199,10 @@ const CRON_TIMEZONE_SUGGESTIONS = [
   "Europe/Berlin",
   "Asia/Tokyo",
 ];
+const SETTINGS_LOCALE_OPTIONS = [
+  { value: "zh-CN", label: "简体中文" },
+  { value: "en", label: "English" },
+] as const;
 
 function normalizeSuggestionValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -151,6 +231,7 @@ function isHttpUrl(value: string): boolean {
 }
 
 const POWER_MODEL_CONFIGS_KEY = "openclaw.power-ui.models.v1";
+const INITIAL_SETTINGS = resolveInitialSettings(loadSettings());
 
 function createLocalId() {
   if (
@@ -311,7 +392,7 @@ export class OpenClawPowerApp extends LitElement {
 
   @state() ready = false;
   @state() connected = false;
-  @state() settings: UiSettings = loadSettings();
+  @state() settings: UiSettings = INITIAL_SETTINGS.settings;
   @state() themeResolved = applyTheme(this.settings);
   @state() assistantName = "Power UI Prototype";
   @state() currentModelId = this.adapter.getDefaultModelId();
@@ -331,6 +412,14 @@ export class OpenClawPowerApp extends LitElement {
   @state() workbenchSettingsOpen = false;
   @state() workbenchSettingsTab: WorkbenchSettingsTab = "general";
   @state() modelConfigs: WorkbenchModelConfig[] = loadModelConfigs();
+  @state() projectDirectoryDialogOpen = false;
+  @state() projectDirectoryLoading = false;
+  @state() projectDirectoryError: string | null = null;
+  @state() projectDirectoryRoots: WorkbenchDirectoryEntry[] = [];
+  @state() projectDirectoryCurrentPath: string | null = null;
+  @state() projectDirectoryCurrentName: string | null = null;
+  @state() projectDirectoryParentPath: string | null = null;
+  @state() projectDirectoryEntries: WorkbenchDirectoryEntry[] = [];
 
   @state() agentsList: AgentsListResult | null = null;
   @state() agentIdentityById: Record<string, AgentIdentityResult> = {};
@@ -343,11 +432,13 @@ export class OpenClawPowerApp extends LitElement {
 
   constructor() {
     super();
+    saveSettings(this.settings);
     if (this.settings.locale) {
       void i18n.setLocale(this.settings.locale as Locale);
     }
   }
   private readonly chatRuntimeBySessionKey = new Map<string, SessionRuntimeState>();
+  private readonly initialSessionKeyFromUrl = INITIAL_SETTINGS.urlSessionKey;
 
   connectedCallback() {
     super.connectedCallback();
@@ -506,8 +597,7 @@ export class OpenClawPowerApp extends LitElement {
 
   private async bootstrap() {
     try {
-      const initialSessionKey =
-        this.settings.sessionKey.trim() || this.settings.lastActiveSessionKey.trim() || null;
+      const initialSessionKey = this.initialSessionKeyFromUrl?.trim() || null;
       const initialProjectId = initialSessionKey
         ? (parseAgentSessionKey(initialSessionKey)?.agentId ?? null)
         : null;
@@ -680,9 +770,9 @@ export class OpenClawPowerApp extends LitElement {
   }
 
   private async setLocale(next: string) {
-    const locale = next.trim();
-    await i18n.setLocale((locale || resolveNavigatorLocale(navigator.language || "en")) as Locale);
-    this.persistSettings({ locale: locale || undefined });
+    const locale = (next.trim() || "zh-CN") as Locale;
+    await i18n.setLocale(locale);
+    this.persistSettings({ locale });
     this.requestUpdate();
   }
 
@@ -762,29 +852,101 @@ export class OpenClawPowerApp extends LitElement {
     await this.refreshSnapshot(sessionKey, projectId);
   }
 
-  private openProjectFolderPicker() {
-    const input = this.querySelector<HTMLInputElement>("[data-project-folder-input]");
-    input?.click();
-  }
-
   private openChatFilePicker() {
     const input = this.querySelector<HTMLInputElement>("[data-chat-file-input]");
     input?.click();
   }
 
-  private async handleProjectFolderSelection(event: Event) {
-    const input = event.target as HTMLInputElement;
-    const files = Array.from(input.files ?? []);
-    let projectId: string | null = null;
+  private async createProjectFromWorkspace(workspace: string) {
+    const validation = await this.adapter.validateProjectWorkspace(workspace);
+    const normalizedName = validation.name.trim();
+    const normalizedWorkspace = validation.path.trim();
+    if (!normalizedName || !normalizedWorkspace) {
+      return null;
+    }
+    return await this.adapter.createProject(normalizedName, normalizedWorkspace);
+  }
+
+  private async loadProjectDirectoryRoots() {
+    const { roots } = await this.adapter.listProjectRoots();
+    this.projectDirectoryRoots = roots;
+    this.projectDirectoryCurrentPath = null;
+    this.projectDirectoryCurrentName = null;
+    this.projectDirectoryParentPath = null;
+    this.projectDirectoryEntries = [];
+  }
+
+  private async browseProjectDirectory(path: string | null) {
+    if (!path) {
+      await this.loadProjectDirectoryRoots();
+      return;
+    }
+    const listing = await this.adapter.listProjectDirectories(path);
+    this.projectDirectoryCurrentPath = listing.path;
+    this.projectDirectoryCurrentName = listing.name;
+    this.projectDirectoryParentPath = listing.parentPath;
+    this.projectDirectoryEntries = listing.entries;
+  }
+
+  private async openProjectDirectoryDialog() {
     try {
-      projectId = await this.adapter.createProjectFromFolder(files);
+      this.projectDirectoryDialogOpen = true;
+      this.projectDirectoryLoading = true;
+      this.projectDirectoryError = null;
+      await this.loadProjectDirectoryRoots();
       this.lastError = null;
     } catch (error) {
-      this.lastError = error instanceof Error ? error.message : String(error);
+      const message = error instanceof Error ? error.message : String(error);
+      this.projectDirectoryError = message;
+      this.lastError = message;
+    } finally {
+      this.projectDirectoryLoading = false;
     }
-    input.value = "";
-    if (projectId) {
+  }
+
+  private closeProjectDirectoryDialog() {
+    this.projectDirectoryDialogOpen = false;
+    this.projectDirectoryLoading = false;
+    this.projectDirectoryError = null;
+    this.projectDirectoryCurrentPath = null;
+    this.projectDirectoryCurrentName = null;
+    this.projectDirectoryParentPath = null;
+    this.projectDirectoryEntries = [];
+  }
+
+  private async handleProjectDirectoryNavigate(path: string | null) {
+    try {
+      this.projectDirectoryLoading = true;
+      this.projectDirectoryError = null;
+      await this.browseProjectDirectory(path);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.projectDirectoryError = message;
+      this.lastError = message;
+    } finally {
+      this.projectDirectoryLoading = false;
+    }
+  }
+
+  private async handleCreateProjectFromDirectory(path: string | null) {
+    if (!path) {
+      return;
+    }
+    try {
+      this.projectDirectoryLoading = true;
+      this.projectDirectoryError = null;
+      const projectId = await this.createProjectFromWorkspace(path);
+      if (!projectId) {
+        throw new Error("Failed to create project from selected directory.");
+      }
+      this.closeProjectDirectoryDialog();
       await this.selectProject(projectId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.projectDirectoryError = message;
+      this.lastError = message;
+    } finally {
+      this.projectDirectoryLoading = false;
     }
   }
 
@@ -1215,20 +1377,7 @@ export class OpenClawPowerApp extends LitElement {
         locale: this.settings.locale,
       },
       settingsView: {
-        localeOptions: [
-          { value: "", label: "Auto" },
-          ...SUPPORTED_LOCALES.map((locale) => ({
-            value: locale,
-            label:
-              locale === "zh-CN"
-                ? "简体中文"
-                : locale === "zh-TW"
-                  ? "繁體中文"
-                  : t(
-                      `languages.${locale === "pt-BR" ? "ptBR" : locale === "zh-CN" ? "zhCN" : locale === "zh-TW" ? "zhTW" : locale}`,
-                    ),
-          })),
-        ],
+        localeOptions: SETTINGS_LOCALE_OPTIONS.map((option) => ({ ...option })),
         modelConfigs: this.modelConfigs,
         onLocaleChange: (value) => {
           void this.setLocale(value);
@@ -1335,7 +1484,24 @@ export class OpenClawPowerApp extends LitElement {
       },
       onCreateProject: () => {
         this.newTaskProjectMenuOpen = false;
-        this.openProjectFolderPicker();
+        void this.openProjectDirectoryDialog();
+      },
+      projectDirectoryOpen: this.projectDirectoryDialogOpen,
+      projectDirectoryLoading: this.projectDirectoryLoading,
+      projectDirectoryError: this.projectDirectoryError,
+      projectDirectoryRoots: this.projectDirectoryRoots,
+      projectDirectoryCurrentPath: this.projectDirectoryCurrentPath,
+      projectDirectoryCurrentName: this.projectDirectoryCurrentName,
+      projectDirectoryParentPath: this.projectDirectoryParentPath,
+      projectDirectoryEntries: this.projectDirectoryEntries,
+      onCloseProjectDirectory: () => {
+        this.closeProjectDirectoryDialog();
+      },
+      onBrowseProjectDirectory: (path) => {
+        void this.handleProjectDirectoryNavigate(path);
+      },
+      onCreateProjectFromDirectory: (path) => {
+        void this.handleCreateProjectFromDirectory(path);
       },
       onToggleSidebar: () => {
         this.sidebarCollapsed = !this.sidebarCollapsed;
@@ -1361,14 +1527,6 @@ export class OpenClawPowerApp extends LitElement {
     const view = this.renderView();
     return html`
       ${view}
-      <input
-        hidden
-        data-project-folder-input
-        type="file"
-        webkitdirectory
-        multiple
-        @change=${(event: Event) => this.handleProjectFolderSelection(event)}
-      />
       <input
         hidden
         data-chat-file-input

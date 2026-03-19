@@ -36,6 +36,8 @@ export type UiSettings = {
   locale?: string;
 };
 
+const DEFAULT_LOCALE = "zh-CN";
+
 function isViteDevPage(): boolean {
   if (typeof document === "undefined") {
     return false;
@@ -183,6 +185,7 @@ export function loadSettings(): UiSettings {
     navCollapsed: false,
     navWidth: 220,
     navGroupsCollapsed: {},
+    locale: DEFAULT_LOCALE,
   };
 
   try {
@@ -235,7 +238,7 @@ export function loadSettings(): UiSettings {
         typeof parsed.navGroupsCollapsed === "object" && parsed.navGroupsCollapsed !== null
           ? parsed.navGroupsCollapsed
           : defaults.navGroupsCollapsed,
-      locale: isSupportedLocale(parsed.locale) ? parsed.locale : undefined,
+      locale: isSupportedLocale(parsed.locale) ? parsed.locale : DEFAULT_LOCALE,
     };
     if ("token" in parsed) {
       persistSettings(settings);
