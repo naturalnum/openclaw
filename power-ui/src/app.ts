@@ -408,12 +408,15 @@ export class OpenClawPowerApp extends LitElement {
   @state() workbenchSelectedProjectId: string | null = null;
   @state() workbenchSelectedSessionKey: string | null = null;
   @state() workbenchToolsOpen = false;
+  @state() workbenchToolsClosing = false;
   @state() workbenchToolQuery = "";
   @state() workbenchToolsCategory: WorkbenchToolsCategory = "builtIn";
   @state() workbenchSettingsOpen = false;
+  @state() workbenchSettingsClosing = false;
   @state() workbenchSettingsTab: WorkbenchSettingsTab = "general";
   @state() modelConfigs: WorkbenchModelConfig[] = loadModelConfigs();
   @state() projectDirectoryDialogOpen = false;
+  @state() projectDirectoryDialogClosing = false;
   @state() projectDirectoryLoading = false;
   @state() projectDirectoryError: string | null = null;
   @state() projectDirectoryRoots: WorkbenchDirectoryEntry[] = [];
@@ -440,6 +443,7 @@ export class OpenClawPowerApp extends LitElement {
   }
   private readonly chatRuntimeBySessionKey = new Map<string, SessionRuntimeState>();
   private readonly initialSessionKeyFromUrl = INITIAL_SETTINGS.urlSessionKey;
+  private modalCloseTimers = new Map<"tools" | "settings" | "projectDirectory", number>();
 
   connectedCallback() {
     super.connectedCallback();
@@ -895,6 +899,7 @@ export class OpenClawPowerApp extends LitElement {
   private async openProjectDirectoryDialog() {
     try {
       this.projectDirectoryDialogOpen = true;
+      this.projectDirectoryDialogClosing = false;
       this.projectDirectoryLoading = true;
       this.projectDirectoryError = null;
       await this.loadProjectDirectoryRoots();
@@ -908,14 +913,53 @@ export class OpenClawPowerApp extends LitElement {
     }
   }
 
-  private closeProjectDirectoryDialog() {
+  private finalizeCloseProjectDirectoryDialog() {
     this.projectDirectoryDialogOpen = false;
+    this.projectDirectoryDialogClosing = false;
     this.projectDirectoryLoading = false;
     this.projectDirectoryError = null;
     this.projectDirectoryCurrentPath = null;
     this.projectDirectoryCurrentName = null;
     this.projectDirectoryParentPath = null;
     this.projectDirectoryEntries = [];
+  }
+
+  private beginCloseModal(kind: "tools" | "settings" | "projectDirectory") {
+    const existing = this.modalCloseTimers.get(kind);
+    if (existing) {
+      window.clearTimeout(existing);
+      this.modalCloseTimers.delete(kind);
+    }
+
+    const durationMs = 180;
+    if (kind === "tools") {
+      this.workbenchToolsClosing = true;
+      const timer = window.setTimeout(() => {
+        this.workbenchToolsOpen = false;
+        this.workbenchToolsClosing = false;
+        this.modalCloseTimers.delete(kind);
+      }, durationMs);
+      this.modalCloseTimers.set(kind, timer);
+      return;
+    }
+
+    if (kind === "settings") {
+      this.workbenchSettingsClosing = true;
+      const timer = window.setTimeout(() => {
+        this.workbenchSettingsOpen = false;
+        this.workbenchSettingsClosing = false;
+        this.modalCloseTimers.delete(kind);
+      }, durationMs);
+      this.modalCloseTimers.set(kind, timer);
+      return;
+    }
+
+    this.projectDirectoryDialogClosing = true;
+    const timer = window.setTimeout(() => {
+      this.finalizeCloseProjectDirectoryDialog();
+      this.modalCloseTimers.delete(kind);
+    }, durationMs);
+    this.modalCloseTimers.set(kind, timer);
   }
 
   private async handleProjectDirectoryNavigate(path: string | null) {
@@ -947,7 +991,7 @@ export class OpenClawPowerApp extends LitElement {
         projectId,
         ...this.priorityProjectIds.filter((id) => id !== projectId),
       ];
-      this.closeProjectDirectoryDialog();
+      this.beginCloseModal("projectDirectory");
       await this.selectProject(projectId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1409,9 +1453,11 @@ export class OpenClawPowerApp extends LitElement {
       },
       section: this.workbenchSection,
       toolsOpen: this.workbenchToolsOpen,
+      toolsClosing: this.workbenchToolsClosing,
       toolQuery: this.workbenchToolQuery,
       toolsCategory: this.workbenchToolsCategory,
       settingsOpen: this.workbenchSettingsOpen,
+      settingsClosing: this.workbenchSettingsClosing,
       settingsTab: this.workbenchSettingsTab,
       onNavigateLegacy: () => {
         const base = this.basePath || "";
@@ -1469,9 +1515,10 @@ export class OpenClawPowerApp extends LitElement {
       },
       onOpenTools: () => {
         this.workbenchToolsOpen = true;
+        this.workbenchToolsClosing = false;
       },
       onCloseTools: () => {
-        this.workbenchToolsOpen = false;
+        this.beginCloseModal("tools");
       },
       onToolQueryChange: (value) => {
         this.workbenchToolQuery = value;
@@ -1481,9 +1528,10 @@ export class OpenClawPowerApp extends LitElement {
       },
       onOpenSettings: () => {
         this.workbenchSettingsOpen = true;
+        this.workbenchSettingsClosing = false;
       },
       onCloseSettings: () => {
-        this.workbenchSettingsOpen = false;
+        this.beginCloseModal("settings");
       },
       onSettingsTabChange: (value) => {
         this.workbenchSettingsTab = value;
@@ -1496,6 +1544,7 @@ export class OpenClawPowerApp extends LitElement {
         void this.openProjectDirectoryDialog();
       },
       projectDirectoryOpen: this.projectDirectoryDialogOpen,
+      projectDirectoryClosing: this.projectDirectoryDialogClosing,
       projectDirectoryLoading: this.projectDirectoryLoading,
       projectDirectoryError: this.projectDirectoryError,
       projectDirectoryRoots: this.projectDirectoryRoots,
@@ -1504,7 +1553,7 @@ export class OpenClawPowerApp extends LitElement {
       projectDirectoryParentPath: this.projectDirectoryParentPath,
       projectDirectoryEntries: this.projectDirectoryEntries,
       onCloseProjectDirectory: () => {
-        this.closeProjectDirectoryDialog();
+        this.beginCloseModal("projectDirectory");
       },
       onBrowseProjectDirectory: (path) => {
         void this.handleProjectDirectoryNavigate(path);
