@@ -1,10 +1,18 @@
 {
   "id": "workspace-guard-plugin",
   "name": "Workspace Guard Plugin",
-  "description": "Blocks exec/bash tool calls that attempt to run dangerous commands.",
+  "description": "Restricts writes/deletes to the workspace and keeps configured paths read-only.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
-    "properties": {}
+    "properties": {
+      "readonlyPaths": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Workspace read-only paths. Relative paths resolve from the current workspace; absolute paths stay absolute."
+      }
+    }
   }
 }

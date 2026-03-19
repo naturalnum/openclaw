@@ -5,7 +5,6 @@ blockedCommands: 要检查的 shell 网络命令列表
 
 **openclaw.json配置**
 
-{
 "plugins": {
 "allow": ["network-guard-plugin"],
 "entries": {
@@ -15,7 +14,6 @@ blockedCommands: 要检查的 shell 网络命令列表
 "blockedHosts": ["10.86.188.84","10.86.188.126"],
 "blockedUrlPrefixes": ["https://ai.sgcc.com.cn/"],
 "blockedCommands": ["curl", "wget", "ssh", "scp", "sftp", "nc", "ncat", "telnet"]
-}
 }
 }
 }

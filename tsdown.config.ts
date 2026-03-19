@@ -55,6 +55,7 @@ function nodeBuildConfig(config: Record<string, unknown>) {
     env,
     fixedExtension: false,
     platform: "node",
+    sourcemap: true,
     inputOptions: buildInputOptions,
   };
 }
