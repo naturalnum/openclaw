@@ -11,7 +11,14 @@
 }
 
 **硬防护：启用拦截插件**
+
+_系统默认保护路径_
+const DEFAULT_READONLY_PATHS = ["skills", "extensions", ".agents/skills", ".openclaw/extensions"];
+
 _启用插件（openclaw.json）_
+
+_配置项与系统默认配置合集为黑白名_
+
 "plugins": {
 "allow": ["workspace-guard-plugin"],
 "entries": {

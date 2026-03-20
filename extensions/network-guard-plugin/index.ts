@@ -8,6 +8,8 @@ type NetworkGuardConfig = {
   blockedCommands: string[];
 };
 
+const DEFAULT_BLOCKED_HOSTS = ["example.com"];
+const DEFAULT_BLOCKED_URL_PREFIXES = ["https://example.com/"];
 const DEFAULT_BLOCKED_COMMANDS = ["curl", "wget", "ssh", "scp", "sftp", "nc", "ncat", "telnet"];
 const URL_VALUE_KEYS = new Set(["baseUrl", "cdpUrl", "endpoint", "targetUrl", "url", "webhookUrl"]);
 type ResolveHostAddresses = (host: string) => Promise<string[]>;
@@ -20,26 +22,33 @@ function normalizeToken(value: string): string {
   return value.trim().toLowerCase();
 }
 
+function mergeLists(base: string[], extra: string[]): string[] {
+  return [...new Set([...base, ...extra])];
+}
+
 function normalizeConfig(value: unknown): NetworkGuardConfig {
   const raw = isRecord(value) ? value : {};
-  const blockedHosts = Array.isArray(raw.blockedHosts)
+  const blockedHostsExtra = Array.isArray(raw.blockedHosts)
     ? raw.blockedHosts
         .filter((entry): entry is string => typeof entry === "string")
         .map(normalizeToken)
         .filter(Boolean)
     : [];
-  const blockedUrlPrefixes = Array.isArray(raw.blockedUrlPrefixes)
+  const blockedUrlPrefixesExtra = Array.isArray(raw.blockedUrlPrefixes)
     ? raw.blockedUrlPrefixes
         .filter((entry): entry is string => typeof entry === "string")
         .map((entry) => entry.trim())
         .filter(Boolean)
     : [];
-  const blockedCommands = Array.isArray(raw.blockedCommands)
+  const blockedCommandsExtra = Array.isArray(raw.blockedCommands)
     ? raw.blockedCommands
         .filter((entry): entry is string => typeof entry === "string")
         .map(normalizeToken)
         .filter(Boolean)
-    : DEFAULT_BLOCKED_COMMANDS;
+    : [];
+  const blockedHosts = mergeLists(DEFAULT_BLOCKED_HOSTS, blockedHostsExtra);
+  const blockedUrlPrefixes = mergeLists(DEFAULT_BLOCKED_URL_PREFIXES, blockedUrlPrefixesExtra);
+  const blockedCommands = mergeLists(DEFAULT_BLOCKED_COMMANDS, blockedCommandsExtra);
   return { blockedHosts, blockedUrlPrefixes, blockedCommands };
 }
 
@@ -364,6 +373,8 @@ export async function evaluateNetworkToolCall(params: {
   }
   return null;
 }
+
+export { normalizeConfig };
 
 const plugin = {
   id: "network-guard-plugin",

@@ -40,6 +40,10 @@ function normalizeToken(value: string): string {
   return value.trim();
 }
 
+function mergeLists(base: string[], extra: string[]): string[] {
+  return [...new Set([...base, ...extra])];
+}
+
 function isInsideDir(rootDir: string, candidatePath: string): boolean {
   const root = normalizeFsPath(rootDir);
   const candidate = normalizeFsPath(candidatePath);
@@ -59,12 +63,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function normalizePluginConfig(value: unknown): WorkspaceGuardConfig {
   const raw = isRecord(value) ? value : {};
-  const readonlyPaths = Array.isArray(raw.readonlyPaths)
+  const readonlyPathsExtra = Array.isArray(raw.readonlyPaths)
     ? raw.readonlyPaths
         .filter((entry): entry is string => typeof entry === "string")
         .map(normalizeToken)
         .filter(Boolean)
-    : DEFAULT_READONLY_PATHS;
+    : [];
+  const readonlyPaths = mergeLists(DEFAULT_READONLY_PATHS, readonlyPathsExtra);
   return { readonlyPaths };
 }
 
@@ -434,6 +439,7 @@ export {
   isInsideDir,
   isProtectedResolvedPath,
   isWorkspaceProtectedPath,
+  normalizePluginConfig,
   resolveReadonlyPaths,
   resolveWorkspaceDir,
   resolvePathAgainstWorkspace,
