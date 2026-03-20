@@ -309,6 +309,17 @@ select {
   color: var(--text-strong);
 }
 
+::selection {
+  /* Override default selection color (avoid red accent). */
+  background: var(--card-highlight);
+  color: var(--text-strong);
+}
+
+::-moz-selection {
+  background: var(--card-highlight);
+  color: var(--text-strong);
+}
+
 /* Scrollbar styling - Minimal, barely visible */
 ::-webkit-scrollbar {
   width: 6px;

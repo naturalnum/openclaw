@@ -136,6 +136,7 @@ export type WorkbenchProps = {
   projectDirectoryCurrentName: string | null;
   projectDirectoryParentPath: string | null;
   projectDirectoryEntries: WorkbenchDirectoryEntry[];
+  projectCreateName: string;
   onNavigateLegacy: () => void;
   onSectionChange: (section: WorkbenchSection) => void;
   onSelectProject: (projectId: string) => void;
@@ -161,6 +162,8 @@ export type WorkbenchProps = {
   onCloseProjectDirectory: () => void;
   onBrowseProjectDirectory: (path: string | null) => void;
   onCreateProjectFromDirectory: (path: string | null) => void;
+  onProjectCreateNameChange: (value: string) => void;
+  onCreateProjectFromName: (name: string) => void;
   onToggleSidebar: () => void;
   onToggleProjects: () => void;
   onToggleRightRail: () => void;
@@ -493,17 +496,35 @@ function renderNewTaskView(
                     (model) => html`<option value=${model.id}>${model.id}</option>`,
                   )}
                 </select>
-                <span class="workbench-model-select__chevron">${icons.chevronDown}</span>
+                <span
+                  class="workbench-model-select__chevron"
+                  role="button"
+                  tabindex="0"
+                  @click=${(event: Event) => {
+                    const root = (event.currentTarget as HTMLElement).closest(
+                      ".workbench-model-select",
+                    );
+                    const select = root?.querySelector("select") as HTMLSelectElement | null;
+                    if (!select) {
+                      return;
+                    }
+                    // Prefer native picker if supported (better than click+focus).
+                    select.showPicker?.();
+                    // Fallback for browsers without showPicker().
+                    select.focus();
+                    select.click();
+                  }}
+                  @keydown=${(event: KeyboardEvent) => {
+                    if (event.key !== "Enter" && event.key !== " ") {
+                      return;
+                    }
+                    event.preventDefault();
+                    (event.currentTarget as HTMLElement).click();
+                  }}
+                >
+                  ${icons.chevronDown}
+                </span>
               </label>
-              <button
-                type="button"
-                class="workbench-circle-button"
-                title=${tLocale(locale, "Open tools", "打开工具")}
-                aria-label=${tLocale(locale, "Open tools", "打开工具")}
-                @click=${props.onOpenTools}
-              >
-                ${icons.wrench}
-              </button>
             </div>
             <button
               type="button"
@@ -523,17 +544,14 @@ function renderNewTaskView(
 }
 
 function renderProjectDirectoryDialog(props: WorkbenchProps) {
-  const showingRoots = !props.projectDirectoryCurrentPath;
-  const entries = showingRoots ? props.projectDirectoryRoots : props.projectDirectoryEntries;
-  const selectedPath = props.projectDirectoryCurrentPath;
+  const locale = props.settings.locale;
   return html`
     <div class="workbench-overlay ${props.projectDirectoryClosing ? "is-closing" : ""}">
       <div class="workbench-overlay__backdrop" @click=${props.onCloseProjectDirectory}></div>
       <div class="workbench-dialog workbench-dialog--directory">
         <div class="workbench-dialog__topbar">
           <div>
-            <h3>Select Project Directory</h3>
-            <p>Choose a server-side directory. The project name will match the selected folder.</p>
+            <h3>${tLocale(locale, "Create Project", "创建项目")}</h3>
           </div>
           <button
             type="button"
@@ -545,80 +563,42 @@ function renderProjectDirectoryDialog(props: WorkbenchProps) {
         </div>
 
         <div class="workbench-dialog__body">
-          <div class="workbench-directory-toolbar">
-            <button
-              type="button"
-              class="workbench-secondary-button"
-              ?disabled=${props.projectDirectoryLoading}
-              @click=${() =>
-                props.onBrowseProjectDirectory(
-                  showingRoots ? null : (props.projectDirectoryParentPath ?? null),
-                )}
-            >
-              ${showingRoots ? "Roots" : "Up"}
-            </button>
-            <div class="workbench-directory-path">
-              ${showingRoots ? "Allowed roots" : props.projectDirectoryCurrentPath}
-            </div>
-            <button
-              type="button"
-              class="workbench-primary-button"
-              ?disabled=${props.projectDirectoryLoading || !selectedPath}
-              @click=${() => props.onCreateProjectFromDirectory(selectedPath)}
-            >
-              Create Project Here
-            </button>
-          </div>
-
           ${
             props.projectDirectoryError
               ? html`<div class="workbench-callout workbench-callout--danger">${props.projectDirectoryError}</div>`
               : nothing
           }
 
-          ${
-            props.projectDirectoryLoading
-              ? html`
-                  <div class="workbench-empty workbench-empty--small">Loading directories…</div>
-                `
-              : entries.length === 0
-                ? html`
-                    <div class="workbench-empty workbench-empty--small">No directories available.</div>
-                  `
-                : html`
-                    <div class="workbench-directory-list">
-                      ${repeat(
-                        entries,
-                        (entry) => entry.path,
-                        (entry) => html`
-                          <button
-                            type="button"
-                            class="workbench-directory-entry"
-                            @click=${() => props.onBrowseProjectDirectory(entry.path)}
-                          >
-                            <span class="workbench-directory-entry__icon">${icons.folder}</span>
-                            <span class="workbench-directory-entry__name">${entry.name}</span>
-                            <span class="workbench-directory-entry__path">${entry.path}</span>
-                          </button>
-                        `,
-                      )}
-                    </div>
-                  `
-          }
+          <section class="workbench-create-project">
+            <label class="workbench-settings-field workbench-create-project__field">
+              <span>${tLocale(locale, "Project Name", "项目名称")}</span>
+              <input
+                type="text"
+                .value=${props.projectCreateName}
+                placeholder=${tLocale(locale, "e.g. my-project", "例如：my-project")}
+                @input=${(event: Event) =>
+                  props.onProjectCreateNameChange((event.target as HTMLInputElement).value)}
+              />
+            </label>
 
-          ${
-            selectedPath
-              ? html`
-                  <div class="workbench-directory-selection">
-                    <div class="workbench-directory-selection__label">Selected directory</div>
-                    <div class="workbench-directory-selection__name">
-                      ${props.projectDirectoryCurrentName}
-                    </div>
-                    <div class="workbench-directory-selection__path">${selectedPath}</div>
-                  </div>
-                `
-              : nothing
-          }
+            <div class="workbench-create-project__actions">
+              <button
+                type="button"
+                class="workbench-secondary-button"
+                @click=${props.onCloseProjectDirectory}
+              >
+                ${tLocale(locale, "Cancel", "取消")}
+              </button>
+              <button
+                type="button"
+                class="workbench-secondary-button"
+                ?disabled=${props.projectDirectoryLoading || !props.projectCreateName.trim()}
+                @click=${() => props.onCreateProjectFromName(props.projectCreateName)}
+              >
+                ${tLocale(locale, "Create", "创建")}
+              </button>
+            </div>
+          </section>
         </div>
       </div>
     </div>
@@ -721,8 +701,8 @@ function renderSessionView(
   const locale = props.settings.locale;
   const assistantAvatar = resolveAgentAvatarUrl({
     identity: {
-      avatar: null,
-      avatarUrl: null,
+      avatar: undefined,
+      avatarUrl: undefined,
     },
   });
   const hasLiveMessages =
@@ -745,7 +725,7 @@ function renderSessionView(
           basePath: props.basePath,
           onScroll: props.onChatScroll,
           emptyState: hasLiveMessages
-            ? nothing
+            ? null
             : html`
                 <div class="workbench-empty workbench-empty--chat">
                   <h4>${tLocale(locale, "No conversation yet", "暂无对话")}</h4>
@@ -792,17 +772,35 @@ function renderSessionView(
                     (model) => html`<option value=${model.id}>${model.id}</option>`,
                   )}
                 </select>
-                <span class="workbench-model-select__chevron">${icons.chevronDown}</span>
+                <span
+                  class="workbench-model-select__chevron"
+                  role="button"
+                  tabindex="0"
+                  @click=${(event: Event) => {
+                    const root = (event.currentTarget as HTMLElement).closest(
+                      ".workbench-model-select",
+                    );
+                    const select = root?.querySelector("select") as HTMLSelectElement | null;
+                    if (!select) {
+                      return;
+                    }
+                    // Prefer native picker if supported (better than click+focus).
+                    select.showPicker?.();
+                    // Fallback for browsers without showPicker().
+                    select.focus();
+                    select.click();
+                  }}
+                  @keydown=${(event: KeyboardEvent) => {
+                    if (event.key !== "Enter" && event.key !== " ") {
+                      return;
+                    }
+                    event.preventDefault();
+                    (event.currentTarget as HTMLElement).click();
+                  }}
+                >
+                  ${icons.chevronDown}
+                </span>
               </label>
-              <button
-                type="button"
-                class="workbench-circle-button"
-                title=${tLocale(locale, "Open tools", "打开工具")}
-                aria-label=${tLocale(locale, "Open tools", "打开工具")}
-                @click=${props.onOpenTools}
-              >
-                ${icons.wrench}
-              </button>
             </div>
             ${
               props.chatRunId
@@ -1433,9 +1431,9 @@ function resolveProjects(props: WorkbenchProps): WorkbenchProject[] {
   return agents
     .map((agent) => {
       const identity = props.agentIdentityById[agent.id];
-      const sessions = (sessionsByAgent.get(agent.id) ?? []).toSorted(
-        (left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0),
-      );
+      const sessions = (sessionsByAgent.get(agent.id) ?? [])
+        .slice()
+        .toSorted((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
       const updatedAt = sessions[0]?.updatedAt ?? null;
       const workspace =
         props.agentFilesList?.agentId === agent.id ? props.agentFilesList.workspace : null;
@@ -1449,6 +1447,7 @@ function resolveProjects(props: WorkbenchProps): WorkbenchProject[] {
         sessions,
       };
     })
+    .slice()
     .toSorted((left, right) => {
       const leftPriority = priorityOrder.get(left.id);
       const rightPriority = priorityOrder.get(right.id);

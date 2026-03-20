@@ -424,6 +424,7 @@ export class OpenClawPowerApp extends LitElement {
   @state() projectDirectoryCurrentName: string | null = null;
   @state() projectDirectoryParentPath: string | null = null;
   @state() projectDirectoryEntries: WorkbenchDirectoryEntry[] = [];
+  @state() projectCreateName = "";
 
   @state() agentsList: AgentsListResult | null = null;
   @state() agentIdentityById: Record<string, AgentIdentityResult> = {};
@@ -900,16 +901,14 @@ export class OpenClawPowerApp extends LitElement {
     try {
       this.projectDirectoryDialogOpen = true;
       this.projectDirectoryDialogClosing = false;
-      this.projectDirectoryLoading = true;
+      this.projectDirectoryLoading = false;
       this.projectDirectoryError = null;
-      await this.loadProjectDirectoryRoots();
+      this.projectCreateName = "";
       this.lastError = null;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.projectDirectoryError = message;
       this.lastError = message;
-    } finally {
-      this.projectDirectoryLoading = false;
     }
   }
 
@@ -922,6 +921,7 @@ export class OpenClawPowerApp extends LitElement {
     this.projectDirectoryCurrentName = null;
     this.projectDirectoryParentPath = null;
     this.projectDirectoryEntries = [];
+    this.projectCreateName = "";
   }
 
   private beginCloseModal(kind: "tools" | "settings" | "projectDirectory") {
@@ -987,6 +987,40 @@ export class OpenClawPowerApp extends LitElement {
       if (!projectId) {
         throw new Error("Failed to create project from selected directory.");
       }
+      this.priorityProjectIds = [
+        projectId,
+        ...this.priorityProjectIds.filter((id) => id !== projectId),
+      ];
+      this.beginCloseModal("projectDirectory");
+      await this.selectProject(projectId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.projectDirectoryError = message;
+      this.lastError = message;
+    } finally {
+      this.projectDirectoryLoading = false;
+    }
+  }
+
+  private async handleCreateProjectFromName(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    // Prevent path traversal and accidental nested paths.
+    const safeName = trimmed.replace(/[/\\]+/g, "-");
+    const workspace = `/workspace/${safeName}`;
+
+    try {
+      this.projectDirectoryLoading = true;
+      this.projectDirectoryError = null;
+
+      const projectId = await this.createProjectFromWorkspace(workspace);
+      if (!projectId) {
+        throw new Error("Failed to create project.");
+      }
+
       this.priorityProjectIds = [
         projectId,
         ...this.priorityProjectIds.filter((id) => id !== projectId),
@@ -1552,6 +1586,7 @@ export class OpenClawPowerApp extends LitElement {
       projectDirectoryCurrentName: this.projectDirectoryCurrentName,
       projectDirectoryParentPath: this.projectDirectoryParentPath,
       projectDirectoryEntries: this.projectDirectoryEntries,
+      projectCreateName: this.projectCreateName,
       onCloseProjectDirectory: () => {
         this.beginCloseModal("projectDirectory");
       },
@@ -1560,6 +1595,12 @@ export class OpenClawPowerApp extends LitElement {
       },
       onCreateProjectFromDirectory: (path) => {
         void this.handleCreateProjectFromDirectory(path);
+      },
+      onProjectCreateNameChange: (value) => {
+        this.projectCreateName = value;
+      },
+      onCreateProjectFromName: (name) => {
+        void this.handleCreateProjectFromName(name);
       },
       onToggleSidebar: () => {
         this.sidebarCollapsed = !this.sidebarCollapsed;
