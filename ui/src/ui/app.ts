@@ -58,8 +58,8 @@ import { loadAssistantIdentity as loadAssistantIdentityInternal } from "./contro
 import type { DevicePairingList } from "./controllers/devices.ts";
 import type { ExecApprovalRequest } from "./controllers/exec-approval.ts";
 import type { ExecApprovalsFile, ExecApprovalsSnapshot } from "./controllers/exec-approvals.ts";
+import type { HubSkillMessageMap } from "./controllers/skills-hub.ts";
 import type { SkillMessage } from "./controllers/skills.ts";
-import type { HubSkillMessage, HubSkillMessageMap } from "./controllers/skills-hub.ts";
 import type { GatewayBrowserClient, GatewayHelloOk } from "./gateway.ts";
 import type { Tab } from "./navigation.ts";
 import { loadSettings, type UiSettings } from "./storage.ts";
@@ -415,6 +415,13 @@ export class OpenClawApp extends LitElement {
   @state() hubCatalogLoading = false;
   @state() hubCatalog: import("./types.ts").SkillHubCatalog | null = null;
   @state() hubCatalogError: string | null = null;
+  @state() hubCatalogPage = 1;
+  @state() hubCatalogPageSize = 20;
+  @state() hubCatalogKeyword = "";
+  // skills-hub 视图模式和数据源
+  @state() hubViewMode: "card" | "table" = "card";
+  @state() hubDataSource: "installed" | "repo" = "installed";
+  @state() hubUninstallConfirmKey: string | null = null;
 
   @state() healthLoading = false;
   @state() healthResult: HealthSummary | null = null;

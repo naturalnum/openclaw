@@ -4,6 +4,7 @@ import type { CronModelSuggestionsState, CronState } from "./controllers/cron.ts
 import type { DevicePairingList } from "./controllers/devices.ts";
 import type { ExecApprovalRequest } from "./controllers/exec-approval.ts";
 import type { ExecApprovalsFile, ExecApprovalsSnapshot } from "./controllers/exec-approvals.ts";
+import type { HubSkillMessageMap } from "./controllers/skills-hub.ts";
 import type { SkillMessage } from "./controllers/skills.ts";
 import type { GatewayBrowserClient, GatewayHelloOk } from "./gateway.ts";
 import type { Tab } from "./navigation.ts";
@@ -30,6 +31,7 @@ import type {
   SessionUsageTimeSeries,
   SessionsListResult,
   SkillStatusReport,
+  SkillHubCatalog,
   StatusSummary,
   ToolsCatalogResult,
 } from "./types.ts";
@@ -270,6 +272,23 @@ export type AppViewState = {
     skillEdits: Record<string, string>;
     skillMessages: Record<string, SkillMessage>;
     skillsBusyKey: string | null;
+    // Skills Hub fields
+    hubSkillsLoading: boolean;
+    hubSkillsReport: SkillStatusReport | null;
+    hubSkillsError: string | null;
+    hubSkillsBusyKey: string | null;
+    hubSkillEdits: Record<string, string>;
+    hubSkillMessages: HubSkillMessageMap;
+    hubSkillsFilter: string;
+    hubCatalogLoading: boolean;
+    hubCatalog: SkillHubCatalog | null;
+    hubCatalogError: string | null;
+    hubCatalogPage: number;
+    hubCatalogPageSize: number;
+    hubCatalogKeyword: string;
+    hubViewMode: "card" | "table";
+    hubDataSource: "installed" | "repo";
+    hubUninstallConfirmKey: string | null;
     healthLoading: boolean;
     healthResult: HealthSummary | null;
     healthError: string | null;

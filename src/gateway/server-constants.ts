@@ -21,8 +21,16 @@ export const __setMaxChatHistoryMessagesBytesForTest = (value?: number) => {
     maxChatHistoryMessagesBytes = value;
   }
 };
-export const DEFAULT_HANDSHAKE_TIMEOUT_MS = 3_000;
+export const DEFAULT_HANDSHAKE_TIMEOUT_MS = 5_000;
 export const getHandshakeTimeoutMs = () => {
+  // Production-configurable via OPENCLAW_HANDSHAKE_TIMEOUT_MS (clamped 500–30000ms).
+  if (process.env.OPENCLAW_HANDSHAKE_TIMEOUT_MS) {
+    const parsed = Number(process.env.OPENCLAW_HANDSHAKE_TIMEOUT_MS);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.max(500, Math.min(30_000, parsed));
+    }
+  }
+  // Backward-compatible test-only override.
   if (process.env.VITEST && process.env.OPENCLAW_TEST_HANDSHAKE_TIMEOUT_MS) {
     const parsed = Number(process.env.OPENCLAW_TEST_HANDSHAKE_TIMEOUT_MS);
     if (Number.isFinite(parsed) && parsed > 0) {

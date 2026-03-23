@@ -46,6 +46,9 @@ export async function startGatewaySidecars(params: {
   logChannels: { info: (msg: string) => void; error: (msg: string) => void };
   logBrowser: { error: (msg: string) => void };
 }) {
+  let phaseStart: number;
+
+  phaseStart = Date.now();
   try {
     const stateDir = resolveStateDir(process.env);
     const sessionDirs = await resolveAgentSessionDirs(stateDir);
@@ -60,22 +63,32 @@ export async function startGatewaySidecars(params: {
   } catch (err) {
     params.log.warn(`session lock cleanup failed on startup: ${String(err)}`);
   }
+  const lockCleanupMs = Date.now() - phaseStart;
+  if (lockCleanupMs > 100) params.log.warn(`[startup] session lock cleanup: ${lockCleanupMs}ms`);
 
   // Start OpenClaw browser control server (unless disabled via config).
   let browserControl: Awaited<ReturnType<typeof startBrowserControlServerIfEnabled>> = null;
+  phaseStart = Date.now();
   try {
     browserControl = await startBrowserControlServerIfEnabled();
   } catch (err) {
     params.logBrowser.error(`server failed to start: ${String(err)}`);
   }
+  const browserControlMs = Date.now() - phaseStart;
+  if (browserControlMs > 100)
+    params.log.warn(`[startup] browser control server: ${browserControlMs}ms`);
 
   // Start Gmail watcher if configured (hooks.gmail.account).
+  phaseStart = Date.now();
   await startGmailWatcherWithLogs({
     cfg: params.cfg,
     log: params.logHooks,
   });
+  const gmailMs = Date.now() - phaseStart;
+  if (gmailMs > 100) params.log.warn(`[startup] gmail watcher: ${gmailMs}ms`);
 
   // Validate hooks.gmail.model if configured.
+  phaseStart = Date.now();
   if (params.cfg.hooks?.gmail?.model) {
     const hooksModelRef = resolveHooksGmailModel({
       cfg: params.cfg,
@@ -121,12 +134,15 @@ export async function startGatewaySidecars(params: {
   } catch (err) {
     params.logHooks.error(`failed to load hooks: ${String(err)}`);
   }
+  const hooksMs = Date.now() - phaseStart;
+  if (hooksMs > 100) params.log.warn(`[startup] hooks + model catalog: ${hooksMs}ms`);
 
   // Launch configured channels so gateway replies via the surface the message came from.
   // Tests can opt out via OPENCLAW_SKIP_CHANNELS (or legacy OPENCLAW_SKIP_PROVIDERS).
   const skipChannels =
     isTruthyEnvValue(process.env.OPENCLAW_SKIP_CHANNELS) ||
     isTruthyEnvValue(process.env.OPENCLAW_SKIP_PROVIDERS);
+  phaseStart = Date.now();
   if (!skipChannels) {
     try {
       await params.startChannels();
@@ -138,6 +154,8 @@ export async function startGatewaySidecars(params: {
       "skipping channel start (OPENCLAW_SKIP_CHANNELS=1 or OPENCLAW_SKIP_PROVIDERS=1)",
     );
   }
+  const channelsMs = Date.now() - phaseStart;
+  if (channelsMs > 100) params.log.warn(`[startup] channels: ${channelsMs}ms`);
 
   if (params.cfg.hooks?.internal?.enabled) {
     setTimeout(() => {
@@ -151,6 +169,7 @@ export async function startGatewaySidecars(params: {
   }
 
   let pluginServices: PluginServicesHandle | null = null;
+  phaseStart = Date.now();
   try {
     pluginServices = await startPluginServices({
       registry: params.pluginRegistry,
@@ -160,6 +179,8 @@ export async function startGatewaySidecars(params: {
   } catch (err) {
     params.log.warn(`plugin services failed to start: ${String(err)}`);
   }
+  const pluginMs = Date.now() - phaseStart;
+  if (pluginMs > 100) params.log.warn(`[startup] plugin services: ${pluginMs}ms`);
 
   if (params.cfg.acp?.enabled) {
     void getAcpSessionManager()
@@ -177,9 +198,14 @@ export async function startGatewaySidecars(params: {
       });
   }
 
-  void startGatewayMemoryBackend({ cfg: params.cfg, log: params.log }).catch((err) => {
-    params.log.warn(`qmd memory startup initialization failed: ${String(err)}`);
-  });
+  const skipQmd = isTruthyEnvValue(process.env.OPENCLAW_SKIP_QMD);
+  if (!skipQmd) {
+    void startGatewayMemoryBackend({ cfg: params.cfg, log: params.log }).catch((err) => {
+      params.log.warn(`qmd memory startup initialization failed: ${String(err)}`);
+    });
+  } else {
+    params.log.warn("skipping qmd memory startup (OPENCLAW_SKIP_QMD=1)");
+  }
 
   if (shouldWakeFromRestartSentinel()) {
     setTimeout(() => {

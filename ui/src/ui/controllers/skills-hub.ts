@@ -39,6 +39,15 @@ export type SkillsHubState = {
   hubCatalogLoading: boolean;
   hubCatalog: SkillHubCatalog | null;
   hubCatalogError: string | null;
+  // 分页
+  hubCatalogPage: number;
+  hubCatalogPageSize: number;
+  hubCatalogKeyword: string;
+  // 视图模式和数据源
+  hubViewMode: "card" | "table";
+  hubDataSource: "installed" | "repo";
+  // 卸载确认弹窗
+  hubUninstallConfirmKey: string | null;
 };
 
 type LoadSkillsHubOptions = {
@@ -47,11 +56,7 @@ type LoadSkillsHubOptions = {
 
 // ─── 内部工具 ─────────────────────────────────────────────────────────────────
 
-function setHubSkillMessage(
-  state: SkillsHubState,
-  key: string,
-  message?: HubSkillMessage,
-) {
+function setHubSkillMessage(state: SkillsHubState, key: string, message?: HubSkillMessage) {
   if (!key.trim()) {
     return;
   }
@@ -77,10 +82,7 @@ function getErrorMessage(err: unknown) {
  * 从网关拉取已安装技能状态，写入 hub 专属状态。
  * 保留旧接口完整性，面板内部仍可以使用。
  */
-export async function loadSkillsHub(
-  state: SkillsHubState,
-  options?: LoadSkillsHubOptions,
-) {
+export async function loadSkillsHub(state: SkillsHubState, options?: LoadSkillsHubOptions) {
   if (options?.clearMessages && Object.keys(state.hubSkillMessages).length > 0) {
     state.hubSkillMessages = {};
   }
@@ -93,10 +95,7 @@ export async function loadSkillsHub(
   state.hubSkillsLoading = true;
   state.hubSkillsError = null;
   try {
-    const res = await state.client.request<SkillStatusReport | undefined>(
-      "skillsHub.status",
-      {},
-    );
+    const res = await state.client.request<SkillStatusReport | undefined>("skillsHub.status", {});
     if (res) {
       state.hubSkillsReport = res;
     }
@@ -113,10 +112,7 @@ export async function loadSkillsHub(
  *   - 已安装：来自本地 skills/ 目录，installed=true
  *   - 未安装：来自远端仓库（当前 stub，返回空列表），installed=false
  */
-export async function fetchHubCatalog(
-  state: SkillsHubState,
-  options?: LoadSkillsHubOptions,
-) {
+export async function fetchHubCatalog(state: SkillsHubState, options?: LoadSkillsHubOptions) {
   if (options?.clearMessages && Object.keys(state.hubSkillMessages).length > 0) {
     state.hubSkillMessages = {};
   }
@@ -129,10 +125,11 @@ export async function fetchHubCatalog(
   state.hubCatalogLoading = true;
   state.hubCatalogError = null;
   try {
-    const res = await state.client.request<SkillHubCatalog | undefined>(
-      "skillsHub.catalog",
-      {},
-    );
+    const res = await state.client.request<SkillHubCatalog | undefined>("skillsHub.catalog", {
+      page: state.hubCatalogPage,
+      pageSize: state.hubCatalogPageSize || 20,
+      keyword: state.hubCatalogKeyword || undefined,
+    });
     if (res) {
       state.hubCatalog = res;
     }
@@ -144,11 +141,7 @@ export async function fetchHubCatalog(
 }
 
 /** 更新 API Key 编辑暂存值 */
-export function updateHubSkillEdit(
-  state: SkillsHubState,
-  skillKey: string,
-  value: string,
-) {
+export function updateHubSkillEdit(state: SkillsHubState, skillKey: string, value: string) {
   state.hubSkillEdits = { ...state.hubSkillEdits, [skillKey]: value };
 }
 
@@ -181,10 +174,7 @@ export async function updateHubSkillEnabled(
 }
 
 /** 保存 API Key */
-export async function saveHubSkillApiKey(
-  state: SkillsHubState,
-  skillKey: string,
-) {
+export async function saveHubSkillApiKey(state: SkillsHubState, skillKey: string) {
   if (!state.client || !state.connected) {
     return;
   }
@@ -220,10 +210,11 @@ export async function installHubSkill(
   state.hubSkillsBusyKey = skillKey;
   state.hubSkillsError = null;
   try {
-    const result = await state.client.request<{ message?: string }>(
-      "skillsHub.install",
-      { name, installId, timeoutMs: 120000 },
-    );
+    const result = await state.client.request<{ message?: string }>("skillsHub.install", {
+      name,
+      installId,
+      timeoutMs: 120000,
+    });
     // 安装完成后刷新 catalog（已安装列表会增加）
     await fetchHubCatalog(state);
     setHubSkillMessage(state, skillKey, {
@@ -239,6 +230,41 @@ export async function installHubSkill(
   }
 }
 
+/** 从远端仓库下载并安装技能 */
+export async function installHubSkillFromRepo(
+  state: SkillsHubState,
+  slug: string,
+  downloadUrl: string,
+  version?: string,
+) {
+  if (!state.client || !state.connected) {
+    return;
+  }
+  state.hubSkillsBusyKey = slug;
+  state.hubSkillsError = null;
+  try {
+    const result = await state.client.request<{ message?: string }>("skillsHub.installFromRepo", {
+      slug,
+      downloadUrl,
+      version: version ?? "",
+      timeoutMs: 120000,
+    });
+    // Refresh both installed list and repo catalog, then switch to the installed tab.
+    await Promise.all([loadSkillsHub(state), fetchHubCatalog(state)]);
+    state.hubDataSource = "installed";
+    setHubSkillMessage(state, slug, {
+      kind: "success",
+      message: result?.message ?? "安装成功",
+    });
+  } catch (err) {
+    const message = getErrorMessage(err);
+    state.hubSkillsError = message;
+    setHubSkillMessage(state, slug, { kind: "error", message });
+  } finally {
+    state.hubSkillsBusyKey = null;
+  }
+}
+
 /**
  * 从 catalog 获取所有技能列表（包含已安装和未安装）。
  * 当 catalog 数据不可用时回退到 hubSkillsReport。
@@ -249,4 +275,71 @@ export function getHubAllSkills(state: SkillsHubState): SkillHubItem[] {
   }
   // 将旧版数据适配为 SkillHubItem
   return (state.hubSkillsReport?.skills ?? []).map((s) => ({ ...s, installed: true }));
+}
+
+/** 切换分页并重新加载 catalog */
+export async function setHubCatalogPage(state: SkillsHubState, page: number) {
+  state.hubCatalogPage = page;
+  await fetchHubCatalog(state);
+}
+
+/** 切换每页数量并重置到第 1 页 */
+export async function setHubCatalogPageSize(state: SkillsHubState, pageSize: number) {
+  state.hubCatalogPageSize = pageSize;
+  state.hubCatalogPage = 1;
+  await fetchHubCatalog(state);
+}
+
+/**
+ * 触发浏览器下载技能压缩包（.tar.gz）
+ * 通过网关代理 HTTP 端点 /api/skills-hub/download?slug=xxx 获取文件流
+ */
+export function downloadHubSkill(
+  _state: SkillsHubState,
+  slug: string,
+  gatewayUrl: string,
+  gatewayToken: string,
+) {
+  // The gatewayUrl may be a WebSocket URL (ws:// / wss://) – convert to HTTP(S)
+  // so the browser can use it as a normal anchor download href.
+  const base = gatewayUrl
+    .replace(/^ws:\/\//, "http://")
+    .replace(/^wss:\/\//, "https://")
+    .replace(/\/+$/, "");
+  const token = gatewayToken.trim();
+  if (!base || !slug) {
+    return;
+  }
+
+  // Build the download URL; attach token as query param for simple anchor-click downloads
+  // (Bearer header not settable via <a href>)
+  const url = `${base}/api/skills-hub/download?slug=${encodeURIComponent(slug)}${token ? `&token=${encodeURIComponent(token)}` : ""}`;
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `${slug}.tar.gz`;
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+}
+
+/** 卸载已安装技能（仅 managed skills） */
+export async function uninstallHubSkill(state: SkillsHubState, skillKey: string) {
+  if (!state.client || !state.connected) {
+    return;
+  }
+  state.hubSkillsBusyKey = skillKey;
+  state.hubUninstallConfirmKey = null;
+  state.hubSkillsError = null;
+  try {
+    await state.client.request("skillsHub.uninstall", { skillKey });
+    await Promise.all([fetchHubCatalog(state), loadSkillsHub(state)]);
+    setHubSkillMessage(state, skillKey, { kind: "success", message: "已卸载" });
+  } catch (err) {
+    const message = getErrorMessage(err);
+    state.hubSkillsError = message;
+    setHubSkillMessage(state, skillKey, { kind: "error", message });
+  } finally {
+    state.hubSkillsBusyKey = null;
+  }
 }

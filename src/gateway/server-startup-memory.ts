@@ -18,12 +18,17 @@ export async function startGatewayMemoryBackend(params: {
       continue;
     }
 
+    const t0 = Date.now();
     const { manager, error } = await getMemorySearchManager({ cfg: params.cfg, agentId });
+    const elapsed = Date.now() - t0;
     if (!manager) {
       params.log.warn(
         `qmd memory startup initialization failed for agent "${agentId}": ${error ?? "unknown error"}`,
       );
       continue;
+    }
+    if (elapsed > 2_000) {
+      params.log.warn(`qmd initialization slow for agent "${agentId}": ${elapsed}ms`);
     }
     params.log.info?.(`qmd memory startup initialization armed for agent "${agentId}"`);
   }

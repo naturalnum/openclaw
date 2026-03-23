@@ -53,6 +53,8 @@ const BASE_METHODS = [
   "skillsHub.install",
   "skillsHub.update",
   "skillsHub.catalog",
+  "skillsHub.installFromRepo",
+  "skillsHub.uninstall",
   "update.run",
   "voicewake.get",
   "voicewake.set",

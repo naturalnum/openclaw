@@ -71,21 +71,26 @@ import { loadNodes } from "./controllers/nodes.ts";
 import { loadPresence } from "./controllers/presence.ts";
 import { deleteSessionAndRefresh, loadSessions, patchSession } from "./controllers/sessions.ts";
 import {
+  downloadHubSkill,
+  fetchHubCatalog,
+  getHubAllSkills,
+  installHubSkill,
+  installHubSkillFromRepo,
+  loadSkillsHub,
+  saveHubSkillApiKey,
+  setHubCatalogPage,
+  setHubCatalogPageSize,
+  uninstallHubSkill,
+  updateHubSkillEdit,
+  updateHubSkillEnabled,
+} from "./controllers/skills-hub.ts";
+import {
   installSkill,
   loadSkills,
   saveSkillApiKey,
   updateSkillEdit,
   updateSkillEnabled,
 } from "./controllers/skills.ts";
-import {
-  fetchHubCatalog,
-  getHubAllSkills,
-  installHubSkill,
-  loadSkillsHub,
-  saveHubSkillApiKey,
-  updateHubSkillEdit,
-  updateHubSkillEnabled,
-} from "./controllers/skills-hub.ts";
 import "./components/dashboard-header.ts";
 import { buildExternalLinkRel, EXTERNAL_LINK_TARGET } from "./external-link.ts";
 import { icons } from "./icons.ts";
@@ -1268,18 +1273,43 @@ export function renderApp(state: AppViewState) {
                   edits: state.hubSkillEdits,
                   messages: state.hubSkillMessages,
                   busyKey: state.hubSkillsBusyKey,
+                  pagination: state.hubCatalog?.pagination,
+                  viewMode: state.hubViewMode,
+                  dataSource: state.hubDataSource,
+                  uninstallConfirmKey: state.hubUninstallConfirmKey,
                   onFilterChange: (next) => (state.hubSkillsFilter = next),
-                  onRefresh: () =>
-                    Promise.all([
+                  onViewModeChange: (mode) => (state.hubViewMode = mode),
+                  onDataSourceChange: (src) => (state.hubDataSource = src),
+                  onRefresh: () => {
+                    // 仓库模式：把当前搜索词作为关键词传给后端
+                    if (state.hubDataSource === "repo") {
+                      state.hubCatalogKeyword = state.hubSkillsFilter.trim();
+                    }
+                    return Promise.all([
                       loadSkillsHub(state, { clearMessages: true }),
                       fetchHubCatalog(state, { clearMessages: true }),
-                    ]),
+                    ]);
+                  },
                   onToggle: (key, enabled) => updateHubSkillEnabled(state, key, enabled),
                   onEdit: (key, value) => updateHubSkillEdit(state, key, value),
                   onSaveKey: (key) => saveHubSkillApiKey(state, key),
                   onInstall: (skillKey, name, installId) =>
                     installHubSkill(state, skillKey, name, installId),
+                  onInstallFromRepo: (slug, downloadUrl, version) =>
+                    installHubSkillFromRepo(state, slug, downloadUrl, version),
+                  onDownload: (slug) =>
+                    downloadHubSkill(
+                      state,
+                      slug,
+                      state.settings.gatewayUrl ?? "",
+                      state.settings.token ?? "",
+                    ),
+                  onUninstallRequest: (key) => (state.hubUninstallConfirmKey = key),
+                  onUninstallConfirm: (key) => uninstallHubSkill(state, key),
+                  onUninstallCancel: () => (state.hubUninstallConfirmKey = null),
                   onRequestUpdate: requestHostUpdate,
+                  onPageChange: (page) => setHubCatalogPage(state, page),
+                  onPageSizeChange: (size) => setHubCatalogPageSize(state, size),
                 }),
               )
             : nothing

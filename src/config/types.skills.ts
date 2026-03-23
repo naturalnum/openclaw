@@ -37,6 +37,18 @@ export type SkillsLimitsConfig = {
   maxSkillFileBytes?: number;
 };
 
+export type SkillsHubConfig = {
+  /** skills-hub API base URL (env: CLAWHUB_REGISTRY), e.g. "http://localhost:8081". */
+  registry?: string;
+  /** skills-hub site URL (env: CLAWHUB_SITE), e.g. "http://localhost:8081". */
+  site?: string;
+  /** Request timeout in ms (default 15 000). */
+  timeoutMs?: number;
+  /** Page size when fetching the remote catalog (default 50). */
+  pageSize?: number;
+  // Future: auth?: { token?: string };
+};
+
 export type SkillsConfig = {
   /** Optional bundled-skill allowlist (only affects bundled skills). */
   allowBundled?: string[];
@@ -44,4 +56,6 @@ export type SkillsConfig = {
   install?: SkillsInstallConfig;
   limits?: SkillsLimitsConfig;
   entries?: Record<string, SkillConfig>;
+  /** Connection settings for the remote skills-hub repository. */
+  hub?: SkillsHubConfig;
 };

@@ -613,5 +613,7 @@ vi.mock("../plugins/loader.js", async () => {
 
 process.env.OPENCLAW_SKIP_CHANNELS = "1";
 process.env.OPENCLAW_SKIP_CRON = "1";
+process.env.OPENCLAW_SKIP_QMD = "1";
 process.env.OPENCLAW_SKIP_CHANNELS = "1";
 process.env.OPENCLAW_SKIP_CRON = "1";
+process.env.OPENCLAW_SKIP_QMD = "1";

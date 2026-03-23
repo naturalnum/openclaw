@@ -39,6 +39,7 @@ describe("gateway e2e", () => {
         "OPENCLAW_SKIP_CHANNELS",
         "OPENCLAW_SKIP_GMAIL_WATCHER",
         "OPENCLAW_SKIP_CRON",
+        "OPENCLAW_SKIP_QMD",
         "OPENCLAW_SKIP_CANVAS_HOST",
         "OPENCLAW_SKIP_BROWSER_CONTROL_SERVER",
       ]);
@@ -50,6 +51,7 @@ describe("gateway e2e", () => {
       process.env.OPENCLAW_SKIP_CHANNELS = "1";
       process.env.OPENCLAW_SKIP_GMAIL_WATCHER = "1";
       process.env.OPENCLAW_SKIP_CRON = "1";
+      process.env.OPENCLAW_SKIP_QMD = "1";
       process.env.OPENCLAW_SKIP_CANVAS_HOST = "1";
       process.env.OPENCLAW_SKIP_BROWSER_CONTROL_SERVER = "1";
 
@@ -137,6 +139,7 @@ describe("gateway e2e", () => {
         "OPENCLAW_SKIP_CHANNELS",
         "OPENCLAW_SKIP_GMAIL_WATCHER",
         "OPENCLAW_SKIP_CRON",
+        "OPENCLAW_SKIP_QMD",
         "OPENCLAW_SKIP_CANVAS_HOST",
         "OPENCLAW_SKIP_BROWSER_CONTROL_SERVER",
       ]);
@@ -144,6 +147,7 @@ describe("gateway e2e", () => {
       process.env.OPENCLAW_SKIP_CHANNELS = "1";
       process.env.OPENCLAW_SKIP_GMAIL_WATCHER = "1";
       process.env.OPENCLAW_SKIP_CRON = "1";
+      process.env.OPENCLAW_SKIP_QMD = "1";
       process.env.OPENCLAW_SKIP_CANVAS_HOST = "1";
       process.env.OPENCLAW_SKIP_BROWSER_CONTROL_SERVER = "1";
       delete process.env.OPENCLAW_GATEWAY_TOKEN;

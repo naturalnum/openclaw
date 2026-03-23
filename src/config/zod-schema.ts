@@ -878,6 +878,15 @@ export const OpenClawSchema = z
           .strict()
           .optional(),
         entries: z.record(z.string(), SkillEntrySchema).optional(),
+        hub: z
+          .object({
+            registry: z.string().url().optional(),
+            site: z.string().url().optional(),
+            timeoutMs: z.number().int().min(1000).max(60000).optional(),
+            pageSize: z.number().int().min(1).max(100).optional(),
+          })
+          .strict()
+          .optional(),
       })
       .strict()
       .optional(),

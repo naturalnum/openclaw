@@ -55,6 +55,7 @@ const GATEWAY_TEST_ENV_KEYS = [
   "OPENCLAW_SKIP_CHANNELS",
   "OPENCLAW_SKIP_PROVIDERS",
   "OPENCLAW_SKIP_CRON",
+  "OPENCLAW_SKIP_QMD",
   "OPENCLAW_TEST_MINIMAL_GATEWAY",
 ] as const;
 
@@ -107,6 +108,7 @@ function applyGatewaySkipEnv() {
   process.env.OPENCLAW_SKIP_CHANNELS = "1";
   process.env.OPENCLAW_SKIP_PROVIDERS = "1";
   process.env.OPENCLAW_SKIP_CRON = "1";
+  process.env.OPENCLAW_SKIP_QMD = "1";
   process.env.OPENCLAW_TEST_MINIMAL_GATEWAY = "1";
   process.env.OPENCLAW_BUNDLED_PLUGINS_DIR = tempHome
     ? path.join(tempHome, "openclaw-test-no-bundled-extensions")

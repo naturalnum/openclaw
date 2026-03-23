@@ -565,7 +565,7 @@ export type SkillsStatusConfigCheck = {
 
 export type SkillInstallOption = {
   id: string;
-  kind: "brew" | "node" | "go" | "uv";
+  kind: "brew" | "node" | "go" | "uv" | "download";
   label: string;
   bins: string[];
 };
@@ -615,6 +615,29 @@ export type SkillStatusReport = {
  */
 export type SkillHubItem = SkillStatusEntry & {
   installed: boolean;
+  // ── Remote repository fields (optional, only set for repo-sourced items) ──
+  slug?: string;
+  displayName?: string;
+  summary?: string | null;
+  tags?: string[];
+  downloads?: number;
+  repoUpdatedAt?: number;
+  repoCreatedAt?: number;
+  latestVersion?: {
+    version: string;
+    changelog: string;
+    size: number;
+    downloadUrl: string;
+    reviewStatus: string;
+  } | null;
+};
+
+export type SkillHubPagination = {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  hasMore: boolean;
 };
 
 export type SkillHubCatalog = {
@@ -624,6 +647,8 @@ export type SkillHubCatalog = {
   available: SkillHubItem[];
   /** All items merged (installed first, then available). */
   all: SkillHubItem[];
+  /** Pagination metadata for the remote repository results. */
+  pagination?: SkillHubPagination;
 };
 
 export type StatusSummary = Record<string, unknown>;

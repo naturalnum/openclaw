@@ -3,7 +3,6 @@ packages:
   - ui
   - packages/*
   - extensions/*
-#  - skills-hub
 
 onlyBuiltDependencies:
   - "@lydell/node-pty"

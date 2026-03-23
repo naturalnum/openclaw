@@ -208,6 +208,16 @@ export const SkillsUpdateParamsSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const SkillsHubCatalogParamsSchema = Type.Object(
+  {
+    agentId: Type.Optional(NonEmptyString),
+    page: Type.Optional(Type.Integer({ minimum: 1 })),
+    pageSize: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+    keyword: Type.Optional(Type.String()),
+  },
+  { additionalProperties: false },
+);
+
 export const ToolsCatalogParamsSchema = Type.Object(
   {
     agentId: Type.Optional(NonEmptyString),
