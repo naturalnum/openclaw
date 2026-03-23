@@ -118,6 +118,7 @@ export type SkillHubCatalog = {
  */
 function resolveHubBaseUrl(cfg: OpenClawConfig): string | undefined {
   const envUrl = process.env.CLAWHUB_REGISTRY?.trim();
+
   if (envUrl) {
     return envUrl;
   }
@@ -599,6 +600,14 @@ export const skillsHubHandlers: GatewayRequestHandlers = {
     const fullUrl = downloadUrl.startsWith("http")
       ? downloadUrl
       : `${baseUrl.replace(/\/+$/, "")}/${downloadUrl.replace(/^\/+/, "")}`;
+    console.log(
+      "[skills-hub][installFromRepo] baseUrl:",
+      baseUrl,
+      "downloadUrl:",
+      downloadUrl,
+      "fullUrl:",
+      fullUrl,
+    );
 
     // Allow the operator-configured hub hostname (including localhost for local dev).
     let hubHostname: string | undefined;

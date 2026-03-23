@@ -299,6 +299,7 @@ export function downloadHubSkill(
   slug: string,
   gatewayUrl: string,
   gatewayToken: string,
+  downloadUrl?: string,
 ) {
   // The gatewayUrl may be a WebSocket URL (ws:// / wss://) – convert to HTTP(S)
   // so the browser can use it as a normal anchor download href.
@@ -313,10 +314,21 @@ export function downloadHubSkill(
 
   // Build the download URL; attach token as query param for simple anchor-click downloads
   // (Bearer header not settable via <a href>)
-  const url = `${base}/api/skills-hub/download?slug=${encodeURIComponent(slug)}${token ? `&token=${encodeURIComponent(token)}` : ""}`;
+  // Also pass downloadUrl as query param so the gateway can skip the catalog lookup.
+  const dlParam = downloadUrl?.trim()
+    ? `&downloadUrl=${encodeURIComponent(downloadUrl.trim())}`
+    : "";
+  const url = `${base}/api/skills-hub/download?slug=${encodeURIComponent(slug)}${token ? `&token=${encodeURIComponent(token)}` : ""}${dlParam}`;
+  // Infer file extension from downloadUrl for the save-as dialog
+  const dlLower = (downloadUrl?.trim() ?? "").split("?")[0]?.toLowerCase() ?? "";
+  const ext = dlLower.endsWith(".zip")
+    ? ".zip"
+    : dlLower.endsWith(".tar.bz2")
+      ? ".tar.bz2"
+      : ".tar.gz";
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = `${slug}.tar.gz`;
+  anchor.download = `${slug}${ext}`;
   anchor.style.display = "none";
   document.body.appendChild(anchor);
   anchor.click();

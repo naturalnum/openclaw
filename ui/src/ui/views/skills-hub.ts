@@ -31,7 +31,7 @@ export type SkillsHubProps = {
   onSaveKey: (skillKey: string) => void;
   onInstall: (skillKey: string, name: string, installId: string) => void;
   onInstallFromRepo?: (slug: string, downloadUrl: string, version?: string) => void;
-  onDownload?: (slug: string) => void;
+  onDownload?: (slug: string, downloadUrl?: string) => void;
   onUninstallRequest: (skillKey: string) => void;
   onUninstallConfirm: (skillKey: string) => void;
   onUninstallCancel: () => void;
@@ -704,7 +704,7 @@ function renderActionButtons(
       parts.push(html`
         <button
           class="btn btn--sm"
-          @click=${() => props.onDownload!(skill.slug ?? skill.name)}
+          @click=${() => props.onDownload!(skill.slug ?? skill.name, skill.latestVersion?.downloadUrl)}
           title="下载 .tar.gz 到本地"
         >
           下载
@@ -723,7 +723,7 @@ function renderActionButtons(
     parts.push(html`
       <button
         class="btn btn--sm"
-        @click=${() => props.onDownload!(skill.slug ?? skill.name)}
+        @click=${() => props.onDownload!(skill.slug ?? skill.name, skill.latestVersion?.downloadUrl)}
         title="下载 .tar.gz 到本地"
       >
         下载

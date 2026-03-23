@@ -95,8 +95,22 @@ export async function handleSkillsHubDownloadRequest(
   }
 
   const timeoutMs = cfg.skills?.hub?.timeoutMs ?? 60_000;
+
+  // If the client already knows the downloadUrl (passed as query param), skip the catalog lookup.
+  const queryDownloadUrl = url.searchParams.get("downloadUrl")?.trim() ?? "";
+
   // Fetch archive list to resolve the download URL for the given slug
   const catalogUrl = `${baseUrl.replace(/\/+$/, "")}/api/v1/skills/${encodeURIComponent(slug)}`;
+  console.log(
+    "[skills-hub-http][download] baseUrl:",
+    baseUrl,
+    "slug:",
+    slug,
+    "catalogUrl:",
+    catalogUrl,
+    "queryDownloadUrl:",
+    queryDownloadUrl || "(none)",
+  );
 
   // Allow the operator-configured hub hostname (including localhost for local dev).
   let hubHostname: string | undefined;
@@ -106,6 +120,88 @@ export async function handleSkillsHubDownloadRequest(
     // ignore malformed baseUrl
   }
   const hubPolicy = hubHostname ? { allowedHostnames: [hubHostname] } : undefined;
+
+  // If downloadUrl query param is provided, skip catalog lookup and download directly.
+  if (queryDownloadUrl) {
+    const fullUrl = queryDownloadUrl.startsWith("http")
+      ? queryDownloadUrl
+      : `${baseUrl.replace(/\/+$/, "")}/${queryDownloadUrl.replace(/^\/+/, "")}`;
+    console.log("[skills-hub-http][download] using query downloadUrl directly, fullUrl:", fullUrl);
+    let release: (() => Promise<void>) | undefined;
+    try {
+      const downloadResult = await fetchWithSsrFGuard({
+        url: fullUrl,
+        mode: "trusted_env_proxy",
+        timeoutMs,
+        auditContext: "skills-hub-download-stream",
+        policy: hubPolicy,
+      });
+      release = downloadResult.release;
+      if (!downloadResult.response.ok) {
+        res.statusCode = 502;
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: `download failed: ${downloadResult.response.status}`,
+          }),
+        );
+        return true;
+      }
+      // Derive filename: prefer upstream Content-Disposition > infer from URL > fallback slug.tar.gz
+      const upstreamCd = downloadResult.response.headers.get("content-disposition") ?? "";
+      const cdFilenameMatch = /filename\*?=(?:UTF-8'')?["']?([^"';\r\n]+)["']?/i.exec(upstreamCd);
+      const upstreamFilename = cdFilenameMatch?.[1]?.trim();
+      let inferredExt = ".tar.gz";
+      const urlBasename = queryDownloadUrl.split("?")[0]?.split("/").pop() ?? "";
+      if (urlBasename.toLowerCase().endsWith(".zip")) {
+        inferredExt = ".zip";
+      } else if (urlBasename.toLowerCase().endsWith(".tar.bz2")) {
+        inferredExt = ".tar.bz2";
+      } else if (urlBasename.toLowerCase().endsWith(".tar")) {
+        inferredExt = ".tar";
+      }
+      const filename = upstreamFilename || urlBasename || `${slug}${inferredExt}`;
+      res.statusCode = 200;
+      res.setHeader(
+        "Content-Type",
+        downloadResult.response.headers.get("content-type") || "application/gzip",
+      );
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Cache-Control", "no-store");
+      const body = downloadResult.response.body as unknown;
+      if (!body) {
+        res.statusCode = 502;
+        res.end("empty response body");
+        return true;
+      }
+      const readable =
+        typeof (body as NodeJS.ReadableStream).pipe === "function"
+          ? (body as NodeJS.ReadableStream as InstanceType<typeof Readable>)
+          : Readable.fromWeb(body as NodeReadableStream);
+      await new Promise<void>((resolve, reject) => {
+        readable.pipe(res);
+        readable.on("error", reject);
+        res.on("error", reject);
+        res.on("finish", resolve);
+      });
+      return true;
+    } catch (err) {
+      if (!res.headersSent) {
+        res.statusCode = 500;
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: err instanceof Error ? err.message : "internal error",
+          }),
+        );
+      }
+      return true;
+    } finally {
+      await release?.();
+    }
+  }
 
   let release: (() => Promise<void>) | undefined;
   try {
@@ -120,6 +216,14 @@ export async function handleSkillsHubDownloadRequest(
     release = catalogResult.release;
 
     if (!catalogResult.response.ok) {
+      const catalogBody = await catalogResult.response.text().catch(() => "(unreadable)");
+      console.log(
+        "[skills-hub-http][download] catalog request failed:",
+        catalogResult.response.status,
+        catalogResult.response.statusText,
+        "body:",
+        catalogBody,
+      );
       res.statusCode = catalogResult.response.status === 404 ? 404 : 502;
       res.setHeader("Content-Type", "application/json; charset=utf-8");
       res.end(
@@ -139,6 +243,10 @@ export async function handleSkillsHubDownloadRequest(
 
     const relativeUrl = entry?.latestVersion?.downloadUrl?.trim();
     const version = entry?.latestVersion?.version?.trim() ?? "";
+    console.log(
+      "[skills-hub-http][download] catalog entry latestVersion:",
+      JSON.stringify(entry?.latestVersion),
+    );
     if (!relativeUrl) {
       res.statusCode = 404;
       res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -149,6 +257,7 @@ export async function handleSkillsHubDownloadRequest(
     const fullUrl = relativeUrl.startsWith("http")
       ? relativeUrl
       : `${baseUrl.replace(/\/+$/, "")}/${relativeUrl.replace(/^\/+/, "")}`;
+    console.log("[skills-hub-http][download] relativeUrl:", relativeUrl, "fullUrl:", fullUrl);
 
     // Step 2: stream the archive to the client
     const downloadResult = await fetchWithSsrFGuard({

@@ -1297,12 +1297,13 @@ export function renderApp(state: AppViewState) {
                     installHubSkill(state, skillKey, name, installId),
                   onInstallFromRepo: (slug, downloadUrl, version) =>
                     installHubSkillFromRepo(state, slug, downloadUrl, version),
-                  onDownload: (slug) =>
+                  onDownload: (slug, downloadUrl) =>
                     downloadHubSkill(
                       state,
                       slug,
                       state.settings.gatewayUrl ?? "",
                       state.settings.token ?? "",
+                      downloadUrl,
                     ),
                   onUninstallRequest: (key) => (state.hubUninstallConfirmKey = key),
                   onUninstallConfirm: (key) => uninstallHubSkill(state, key),
