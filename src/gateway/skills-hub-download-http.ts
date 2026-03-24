@@ -17,13 +17,8 @@ import { log } from "node:console";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
-import { c } from "tar";
 import { loadConfig } from "../config/config.js";
 import { fetchWithSsrFGuard } from "../infra/net/fetch-guard.js";
-import type { AuthRateLimiter } from "./auth-rate-limit.js";
-import { authorizeHttpGatewayConnect, type ResolvedGatewayAuth } from "./auth.js";
-import { sendGatewayAuthFailure } from "./http-common.js";
-import { getBearerToken } from "./http-utils.js";
 
 const DOWNLOAD_PATH = "/api/skills-hub/download";
 const SAFE_SLUG_RE = /^[a-zA-Z0-9_-]+$/;
@@ -39,12 +34,6 @@ function resolveHubBaseUrl(cfg: ReturnType<typeof loadConfig>): string | undefin
 export async function handleSkillsHubDownloadRequest(
   req: IncomingMessage,
   res: ServerResponse,
-  opts: {
-    resolvedAuth: ResolvedGatewayAuth;
-    trustedProxies: string[];
-    allowRealIpFallback: boolean;
-    rateLimiter?: AuthRateLimiter;
-  },
 ): Promise<boolean> {
   const url = new URL(req.url ?? "/", "http://localhost");
   if (url.pathname !== DOWNLOAD_PATH) {
@@ -58,24 +47,6 @@ export async function handleSkillsHubDownloadRequest(
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
     res.end("Method Not Allowed");
     return true;
-  }
-
-  // Auth check – support Bearer header OR query param token (needed for anchor-click downloads).
-  // When auth mode is "none" (loopback/no-password deployments), skip token validation entirely.
-  if (opts.resolvedAuth.mode !== "none") {
-    const bearerToken = getBearerToken(req) || url.searchParams.get("token")?.trim() || undefined;
-    const authResult = await authorizeHttpGatewayConnect({
-      auth: opts.resolvedAuth,
-      connectAuth: bearerToken ? { token: bearerToken, password: bearerToken } : null,
-      req,
-      trustedProxies: opts.trustedProxies,
-      allowRealIpFallback: opts.allowRealIpFallback,
-      rateLimiter: opts.rateLimiter,
-    });
-    if (!authResult.ok) {
-      sendGatewayAuthFailure(res, authResult);
-      return true;
-    }
   }
 
   // Validate slug param

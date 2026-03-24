@@ -803,13 +803,7 @@ export function createGatewayHttpServer(opts: {
         },
         {
           name: "skills-hub-download",
-          run: () =>
-            handleSkillsHubDownloadRequest(req, res, {
-              resolvedAuth,
-              trustedProxies,
-              allowRealIpFallback,
-              rateLimiter,
-            }),
+          run: () => handleSkillsHubDownloadRequest(req, res),
         },
         {
           name: "slack",
