@@ -13,9 +13,11 @@
  * Auth: requires a valid gateway bearer token (same as other protected endpoints).
  */
 
+import { log } from "node:console";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
+import { c } from "tar";
 import { loadConfig } from "../config/config.js";
 import { fetchWithSsrFGuard } from "../infra/net/fetch-guard.js";
 import type { AuthRateLimiter } from "./auth-rate-limit.js";
@@ -116,6 +118,7 @@ export async function handleSkillsHubDownloadRequest(
     const fullUrl = queryDownloadUrl.startsWith("http")
       ? queryDownloadUrl
       : `${baseUrl.replace(/\/+$/, "")}/${queryDownloadUrl.replace(/^\/+/, "")}`;
+
     let release: (() => Promise<void>) | undefined;
     try {
       const downloadResult = await fetchWithSsrFGuard({
@@ -137,6 +140,7 @@ export async function handleSkillsHubDownloadRequest(
         );
         return true;
       }
+
       // Derive filename: prefer upstream Content-Disposition > infer from URL > fallback slug.tar.gz
       const upstreamCd = downloadResult.response.headers.get("content-disposition") ?? "";
       const cdFilenameMatch = /filename\*?=(?:UTF-8'')?["']?([^"';\r\n]+)["']?/i.exec(upstreamCd);

@@ -36,6 +36,10 @@ function resolveTaskName(env: GatewayServiceEnv): string {
 function shouldFallbackToStartupEntry(params: { code: number; detail: string }): boolean {
   return (
     /access is denied/i.test(params.detail) ||
+    // Win32 ERROR_ACCESS_DENIED (code 5) covers non-English Windows locales where
+    // schtasks outputs a localized "access denied" message that won't match the
+    // English regex above (e.g. Chinese: "拒绝访问").
+    params.code === 5 ||
     params.code === 124 ||
     /schtasks timed out/i.test(params.detail) ||
     /schtasks produced no output/i.test(params.detail)

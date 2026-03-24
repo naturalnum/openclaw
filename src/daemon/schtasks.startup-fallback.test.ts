@@ -122,6 +122,29 @@ describe("Windows startup fallback", () => {
     });
   });
 
+  it("falls back to a Startup-folder launcher when schtasks create is denied on non-English Windows (exit code 5)", async () => {
+    await withWindowsEnv("openclaw-win-startup-", async ({ env }) => {
+      // Simulate a non-English locale where the error text is not "Access is denied"
+      // but the Win32 ERROR_ACCESS_DENIED exit code (5) is still returned.
+      schtasksResponses.push(
+        { code: 0, stdout: "", stderr: "" },
+        { code: 5, stdout: "", stderr: "\u9519\u8bef: \u62d2\u7edd\u8bbf\u95ee\u3002" },
+      );
+
+      const stdout = new PassThrough();
+      const result = await installScheduledTask({
+        env,
+        stdout,
+        programArguments: ["node", "gateway.js", "--port", "18789"],
+        environment: { OPENCLAW_GATEWAY_PORT: "18789" },
+      });
+
+      await expect(fs.access(resolveStartupEntryPath(env))).resolves.toBeUndefined();
+      expect(result.scriptPath).toBe(resolveTaskScriptPath(env));
+      expectStartupFallbackSpawn(env);
+    });
+  });
+
   it("falls back to a Startup-folder launcher when schtasks create hangs", async () => {
     await withWindowsEnv("openclaw-win-startup-", async ({ env }) => {
       schtasksResponses.push(

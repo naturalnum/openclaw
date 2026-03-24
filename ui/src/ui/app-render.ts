@@ -1302,7 +1302,7 @@ export function renderApp(state: AppViewState) {
                       state,
                       slug,
                       state.settings.gatewayUrl ?? "",
-                      state.settings.token ?? "",
+                      state.hello?.auth?.deviceToken?.trim() || state.settings.token || "",
                       downloadUrl,
                     ),
                   onUninstallRequest: (key) => (state.hubUninstallConfirmKey = key),

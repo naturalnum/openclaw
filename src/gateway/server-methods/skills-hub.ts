@@ -39,7 +39,7 @@ import { assertCanonicalPathWithinBase } from "../../infra/install-safe-path.js"
 import { fetchWithSsrFGuard } from "../../infra/net/fetch-guard.js";
 import { getRemoteSkillEligibility } from "../../infra/skills-remote.js";
 import { normalizeAgentId } from "../../routing/session-key.js";
-import { CONFIG_DIR, ensureDir } from "../../utils.js";
+import { ensureDir } from "../../utils.js";
 import { normalizeSecretInput } from "../../utils/normalize-secret-input.js";
 import {
   ErrorCodes,
@@ -511,10 +511,14 @@ export const skillsHubHandlers: GatewayRequestHandlers = {
 
     // 1. Locally installed skills (full status report)
     const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
+    // Hub-sourced skills live under the workspace skills directory
+    // (~/.openclaw/workspace/skills/) so they are separate from bundled skills.
+    const managedSkillsDir = path.join(workspaceDir, "skills");
     let localReport: SkillStatusReport;
     try {
       localReport = buildWorkspaceSkillStatus(workspaceDir, {
         config: cfg,
+        managedSkillsDir,
         eligibility: { remote: getRemoteSkillEligibility() },
       });
     } catch (err) {
@@ -564,7 +568,7 @@ export const skillsHubHandlers: GatewayRequestHandlers = {
    * skillsHub.installFromRepo
    *
    * Downloads a skill archive from the remote skills-hub repository and
-   * extracts it into the managed skills directory (~/.openclaw/skills/<slug>/).
+   * extracts it into the managed skills directory (~/.openclaw/workspace/skills/<slug>/).
    * After extraction the catalog is automatically refreshed so the frontend
    * sees the newly installed skill immediately.
    *
@@ -610,7 +614,10 @@ export const skillsHubHandlers: GatewayRequestHandlers = {
     }
     const installPolicy = hubHostname ? { allowedHostnames: [hubHostname] } : undefined;
 
-    const managedSkillsDir = path.join(CONFIG_DIR, "skills");
+    // Hub-sourced skills are installed under the default agent workspace skills dir
+    // (~/.openclaw/workspace/skills/<slug>/) so they are isolated from bundled skills.
+    const workspaceDir = resolveAgentWorkspaceDir(cfg, resolveDefaultAgentId(cfg));
+    const managedSkillsDir = path.join(workspaceDir, "skills");
     await ensureDir(managedSkillsDir);
 
     // Sanitize slug to prevent path traversal
@@ -785,6 +792,30 @@ export const skillsHubHandlers: GatewayRequestHandlers = {
         return;
       }
 
+      // Collapse single-level nesting: if extraction produced exactly one
+      // subdirectory and no SKILL.md at the top level, hoist its contents
+      // up one level so the scanner can find SKILL.md directly inside skillDir.
+      // This handles archives whose internal layout is <name>/<name>/SKILL.md
+      // after stripComponents:1 leaves <name>/SKILL.md one level too deep.
+      const skillMdDirect = path.join(skillDir, "SKILL.md");
+      if (!fs.existsSync(skillMdDirect)) {
+        const children = await fs.promises.readdir(skillDir);
+        const visibleChildren = children.filter((c) => !c.startsWith("."));
+        if (visibleChildren.length === 1) {
+          const onlyChild = path.join(skillDir, visibleChildren[0]);
+          const childStat = await fs.promises.stat(onlyChild).catch(() => null);
+          const childSkillMd = path.join(onlyChild, "SKILL.md");
+          if (childStat?.isDirectory() && fs.existsSync(childSkillMd)) {
+            // Move all contents of onlyChild up into skillDir, then remove onlyChild.
+            const childEntries = await fs.promises.readdir(onlyChild);
+            for (const entry of childEntries) {
+              await fs.promises.rename(path.join(onlyChild, entry), path.join(skillDir, entry));
+            }
+            await fs.promises.rmdir(onlyChild);
+          }
+        }
+      }
+
       respond(
         true,
         {
@@ -808,8 +839,8 @@ export const skillsHubHandlers: GatewayRequestHandlers = {
   /**
    * skillsHub.uninstall
    *
-   * Removes a managed skill from the local skills directory
-   * (~/.openclaw/skills/<slug>/). Only managed skills (source = "openclaw-managed")
+   * Removes a managed skill from the workspace skills directory
+   * (~/.openclaw/workspace/skills/<slug>/). Only managed skills (source = "openclaw-managed")
    * can be uninstalled; bundled/workspace skills are rejected.
    *
    * Params:
@@ -833,7 +864,11 @@ export const skillsHubHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const managedSkillsDir = path.join(CONFIG_DIR, "skills");
+    // Hub-sourced skills live under the default agent workspace skills dir
+    // (~/.openclaw/workspace/skills/<slug>/).
+    const cfg = loadConfig();
+    const workspaceDir = resolveAgentWorkspaceDir(cfg, resolveDefaultAgentId(cfg));
+    const managedSkillsDir = path.join(workspaceDir, "skills");
     const skillDir = path.join(managedSkillsDir, safeName);
 
     // Ensure we're not escaping the managed dir

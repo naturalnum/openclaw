@@ -2,7 +2,6 @@ import path from "node:path";
 import type { OpenClawConfig } from "../config/config.js";
 import { evaluateEntryRequirementsForCurrentPlatform } from "../shared/entry-status.js";
 import type { RequirementConfigCheck, Requirements } from "../shared/requirements.js";
-import { CONFIG_DIR } from "../utils.js";
 import {
   hasBinary,
   isBundledSkillAllowed,
@@ -233,7 +232,10 @@ export function buildWorkspaceSkillStatus(
     eligibility?: SkillEligibilityContext;
   },
 ): SkillStatusReport {
-  const managedSkillsDir = opts?.managedSkillsDir ?? path.join(CONFIG_DIR, "skills");
+  // Default managed skills dir is under the workspace itself
+  // (~/.openclaw/workspace/skills/) so hub-installed skills are isolated
+  // from bundled skills and co-located with the workspace they belong to.
+  const managedSkillsDir = opts?.managedSkillsDir ?? path.join(workspaceDir, "skills");
   const bundledContext = resolveBundledSkillsContext();
   const skillEntries =
     opts?.entries ??
