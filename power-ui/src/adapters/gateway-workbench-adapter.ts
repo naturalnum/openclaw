@@ -19,9 +19,13 @@ import type {
   WorkbenchAdapterEvent,
   WorkbenchDirectoryListResult,
   WorkbenchDirectoryRootsResult,
+  WorkbenchFileDownloadResult,
+  WorkbenchFileEntry,
+  WorkbenchFileListResult,
   WorkbenchSelection,
   WorkbenchSendResult,
   WorkbenchSkillMessage,
+  WorkbenchUploadedFile,
   WorkbenchWorkspaceValidationResult,
 } from "./workbench-adapter.ts";
 
@@ -257,6 +261,68 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
         path,
       }),
       "power.fs.validateWorkspace",
+    );
+  }
+
+  async listProjectFiles(agentId: string, path?: string | null): Promise<WorkbenchFileListResult> {
+    return await requiredRequest(
+      this.gateway.request<WorkbenchFileListResult>("power.fs.listWorkspace", {
+        agentId,
+        path: path?.trim() || null,
+      }),
+      "power.fs.listWorkspace",
+    );
+  }
+
+  async createProjectFolder(
+    agentId: string,
+    path: string | null,
+    name: string,
+  ): Promise<WorkbenchFileEntry> {
+    const result = await requiredRequest<{ entry: WorkbenchFileEntry }>(
+      this.gateway.request("power.fs.createFolder", {
+        agentId,
+        path: path?.trim() || null,
+        name,
+      }),
+      "power.fs.createFolder",
+    );
+    return result.entry;
+  }
+
+  async uploadProjectFiles(
+    agentId: string,
+    path: string | null,
+    files: WorkbenchUploadedFile[],
+  ): Promise<WorkbenchFileEntry[]> {
+    const result = await requiredRequest<{ entries: WorkbenchFileEntry[] }>(
+      this.gateway.request("power.fs.uploadFiles", {
+        agentId,
+        path: path?.trim() || null,
+        files,
+      }),
+      "power.fs.uploadFiles",
+    );
+    return Array.isArray(result.entries) ? result.entries : [];
+  }
+
+  async downloadProjectFile(agentId: string, path: string): Promise<WorkbenchFileDownloadResult> {
+    return await requiredRequest(
+      this.gateway.request<WorkbenchFileDownloadResult>("power.fs.downloadFile", {
+        agentId,
+        path,
+      }),
+      "power.fs.downloadFile",
+    );
+  }
+
+  async deleteProjectEntry(agentId: string, path: string): Promise<void> {
+    await requiredRequest(
+      this.gateway.request("power.fs.deleteEntry", {
+        agentId,
+        path,
+      }),
+      "power.fs.deleteEntry",
     );
   }
 

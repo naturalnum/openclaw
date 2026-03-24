@@ -76,6 +76,8 @@ import type {
   WorkbenchAdapter,
   WorkbenchAdapterEvent,
   WorkbenchDirectoryEntry,
+  WorkbenchFileEntry,
+  WorkbenchUploadedFile,
 } from "./adapters/workbench-adapter.ts";
 import {
   renderWorkbench,
@@ -241,6 +243,33 @@ function createLocalId() {
     return globalThis.crypto.randomUUID();
   }
   return `power-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+async function readBrowserFileAsBase64(file: File): Promise<string> {
+  const arrayBuffer = await file.arrayBuffer();
+  let binary = "";
+  const bytes = new Uint8Array(arrayBuffer);
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, index + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+function triggerBrowserDownload(params: { name: string; contentBase64: string }) {
+  const binary = atob(params.contentBase64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  const blob = new Blob([bytes]);
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = params.name;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 function createEmptyModelConfig(): WorkbenchModelConfig {
@@ -421,6 +450,25 @@ export class OpenClawPowerApp extends LitElement {
   @state() projectDirectoryCurrentName: string | null = null;
   @state() projectDirectoryParentPath: string | null = null;
   @state() projectDirectoryEntries: WorkbenchDirectoryEntry[] = [];
+  @state() fileManagerDialogOpen = false;
+  @state() fileManagerLoading = false;
+  @state() fileManagerError: string | null = null;
+  @state() fileManagerAgentId: string | null = null;
+  @state() fileManagerWorkspace: string | null = null;
+  @state() fileManagerCurrentPath: string | null = null;
+  @state() fileManagerCurrentName: string | null = null;
+  @state() fileManagerParentPath: string | null = null;
+  @state() fileManagerEntries: WorkbenchFileEntry[] = [];
+  @state() fileManagerBackStack: string[] = [];
+  @state() fileManagerForwardStack: string[] = [];
+  @state() fileManagerBusyPath: string | null = null;
+  @state() fileManagerCreateFolderOpen = false;
+  @state() fileManagerNewFolderName = "";
+  @state() projectFilesLoading = false;
+  @state() projectFilesError: string | null = null;
+  @state() projectFilesAgentId: string | null = null;
+  @state() projectFilesWorkspace: string | null = null;
+  @state() projectFilesEntries: WorkbenchFileEntry[] = [];
 
   @state() agentsList: AgentsListResult | null = null;
   @state() agentIdentityById: Record<string, AgentIdentityResult> = {};
@@ -440,6 +488,8 @@ export class OpenClawPowerApp extends LitElement {
   }
   private readonly chatRuntimeBySessionKey = new Map<string, SessionRuntimeState>();
   private readonly initialSessionKeyFromUrl = INITIAL_SETTINGS.urlSessionKey;
+  private pendingProjectFileUploadAgentId: string | null = null;
+  private pendingProjectFileUploadPath: string | null = null;
 
   connectedCallback() {
     super.connectedCallback();
@@ -606,6 +656,7 @@ export class OpenClawPowerApp extends LitElement {
         ? { projectId: initialProjectId, sessionKey: initialSessionKey }
         : this.adapter.getDefaultSelection();
       this.applySnapshot(await this.adapter.snapshot(selection));
+      await this.refreshProjectFiles(selection.projectId);
       this.connected = true;
       for (const runtime of this.chatRuntimeBySessionKey.values()) {
         runtime.connected = true;
@@ -674,6 +725,7 @@ export class OpenClawPowerApp extends LitElement {
         sessionKey,
       });
       this.applySnapshot(snapshot);
+      await this.refreshProjectFiles(projectId);
       this.lastError = null;
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : String(error);
@@ -861,6 +913,308 @@ export class OpenClawPowerApp extends LitElement {
     input?.click();
   }
 
+  private openProjectFilePicker(agentId: string, path: string | null) {
+    this.pendingProjectFileUploadAgentId = agentId;
+    this.pendingProjectFileUploadPath = path;
+    const input = this.querySelector<HTMLInputElement>("[data-project-file-input]");
+    input?.click();
+  }
+
+  private clearFileManagerState() {
+    this.fileManagerLoading = false;
+    this.fileManagerError = null;
+    this.fileManagerAgentId = null;
+    this.fileManagerWorkspace = null;
+    this.fileManagerCurrentPath = null;
+    this.fileManagerCurrentName = null;
+    this.fileManagerParentPath = null;
+    this.fileManagerEntries = [];
+    this.fileManagerBackStack = [];
+    this.fileManagerForwardStack = [];
+    this.fileManagerBusyPath = null;
+    this.fileManagerCreateFolderOpen = false;
+    this.fileManagerNewFolderName = "";
+  }
+
+  private clearProjectFilesState() {
+    this.projectFilesLoading = false;
+    this.projectFilesError = null;
+    this.projectFilesAgentId = null;
+    this.projectFilesWorkspace = null;
+    this.projectFilesEntries = [];
+  }
+
+  private async refreshProjectFiles(agentId = this.workbenchSelectedProjectId) {
+    const targetAgentId = agentId?.trim() ?? "";
+    if (!targetAgentId) {
+      this.clearProjectFilesState();
+      return;
+    }
+    this.projectFilesLoading = true;
+    this.projectFilesError = null;
+    try {
+      const listing = await this.adapter.listProjectFiles(targetAgentId, null);
+      if ((this.workbenchSelectedProjectId ?? "") !== targetAgentId) {
+        return;
+      }
+      this.projectFilesAgentId = listing.agentId;
+      this.projectFilesWorkspace = listing.workspace;
+      this.projectFilesEntries = listing.entries;
+      this.lastError = null;
+    } catch (error) {
+      if ((this.workbenchSelectedProjectId ?? "") !== targetAgentId) {
+        return;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      this.projectFilesError = message;
+      this.lastError = message;
+      this.projectFilesAgentId = targetAgentId;
+      this.projectFilesWorkspace = null;
+      this.projectFilesEntries = [];
+    } finally {
+      if ((this.workbenchSelectedProjectId ?? "") === targetAgentId) {
+        this.projectFilesLoading = false;
+      }
+    }
+  }
+
+  private async loadFileManagerPath(
+    agentId: string,
+    path: string | null,
+    historyMode: "replace" | "push" | "back" | "forward" = "replace",
+  ) {
+    const previousPath = this.fileManagerCurrentPath;
+    const listing = await this.adapter.listProjectFiles(agentId, path);
+    this.fileManagerAgentId = listing.agentId;
+    this.fileManagerWorkspace = listing.workspace;
+    this.fileManagerCurrentPath = listing.path;
+    this.fileManagerCurrentName = listing.name;
+    this.fileManagerParentPath = listing.parentPath;
+    this.fileManagerEntries = listing.entries;
+    this.fileManagerCreateFolderOpen = false;
+    this.fileManagerNewFolderName = "";
+
+    if (!previousPath || previousPath === listing.path) {
+      return;
+    }
+    if (historyMode === "push") {
+      this.fileManagerBackStack = [...this.fileManagerBackStack, previousPath];
+      this.fileManagerForwardStack = [];
+      return;
+    }
+    if (historyMode === "back") {
+      this.fileManagerForwardStack = [...this.fileManagerForwardStack, previousPath];
+      return;
+    }
+    if (historyMode === "forward") {
+      this.fileManagerBackStack = [...this.fileManagerBackStack, previousPath];
+    }
+  }
+
+  private async openFileManagerDialog(agentId: string, path: string | null = null) {
+    try {
+      this.fileManagerDialogOpen = true;
+      this.fileManagerLoading = true;
+      this.fileManagerError = null;
+      this.fileManagerBackStack = [];
+      this.fileManagerForwardStack = [];
+      await this.loadFileManagerPath(agentId, path, "replace");
+      this.lastError = null;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.fileManagerError = message;
+      this.lastError = message;
+    } finally {
+      this.fileManagerLoading = false;
+    }
+  }
+
+  private async openFileManagerForCreateFolder(agentId: string, path: string | null = null) {
+    await this.openFileManagerDialog(agentId, path);
+    this.fileManagerCreateFolderOpen = true;
+    this.fileManagerNewFolderName = "";
+  }
+
+  private closeFileManagerDialog() {
+    this.fileManagerDialogOpen = false;
+    this.clearFileManagerState();
+  }
+
+  private async navigateFileManagerTo(path: string | null) {
+    if (!this.fileManagerAgentId) {
+      return;
+    }
+    try {
+      this.fileManagerLoading = true;
+      this.fileManagerError = null;
+      await this.loadFileManagerPath(this.fileManagerAgentId, path, "push");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.fileManagerError = message;
+      this.lastError = message;
+    } finally {
+      this.fileManagerLoading = false;
+    }
+  }
+
+  private async navigateFileManagerBack() {
+    const targetPath = this.fileManagerBackStack.at(-1) ?? null;
+    if (!targetPath || !this.fileManagerAgentId) {
+      return;
+    }
+    try {
+      this.fileManagerLoading = true;
+      this.fileManagerError = null;
+      this.fileManagerBackStack = this.fileManagerBackStack.slice(0, -1);
+      await this.loadFileManagerPath(this.fileManagerAgentId, targetPath, "back");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.fileManagerError = message;
+      this.lastError = message;
+    } finally {
+      this.fileManagerLoading = false;
+    }
+  }
+
+  private async navigateFileManagerForward() {
+    const targetPath = this.fileManagerForwardStack.at(-1) ?? null;
+    if (!targetPath || !this.fileManagerAgentId) {
+      return;
+    }
+    try {
+      this.fileManagerLoading = true;
+      this.fileManagerError = null;
+      this.fileManagerForwardStack = this.fileManagerForwardStack.slice(0, -1);
+      await this.loadFileManagerPath(this.fileManagerAgentId, targetPath, "forward");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.fileManagerError = message;
+      this.lastError = message;
+    } finally {
+      this.fileManagerLoading = false;
+    }
+  }
+
+  private async refreshFileManager() {
+    if (!this.fileManagerAgentId) {
+      return;
+    }
+    try {
+      this.fileManagerLoading = true;
+      this.fileManagerError = null;
+      await this.loadFileManagerPath(
+        this.fileManagerAgentId,
+        this.fileManagerCurrentPath,
+        "replace",
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.fileManagerError = message;
+      this.lastError = message;
+    } finally {
+      this.fileManagerLoading = false;
+    }
+  }
+
+  private async createFileManagerFolder() {
+    const agentId = this.fileManagerAgentId;
+    const name = this.fileManagerNewFolderName.trim();
+    if (!agentId || !name) {
+      return;
+    }
+    try {
+      this.fileManagerLoading = true;
+      this.fileManagerError = null;
+      await this.adapter.createProjectFolder(agentId, this.fileManagerCurrentPath, name);
+      await this.loadFileManagerPath(agentId, this.fileManagerCurrentPath, "replace");
+      await this.refreshProjectFiles(agentId);
+      await this.refreshSnapshot();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.fileManagerError = message;
+      this.lastError = message;
+    } finally {
+      this.fileManagerLoading = false;
+    }
+  }
+
+  private async deleteProjectEntry(agentId: string, path: string) {
+    const confirmed = window.confirm("Delete this item? This action cannot be undone.");
+    if (!confirmed) {
+      return;
+    }
+    try {
+      this.fileManagerBusyPath = path;
+      await this.adapter.deleteProjectEntry(agentId, path);
+      await this.refreshProjectFiles(agentId);
+      await this.refreshSnapshot();
+      if (this.fileManagerDialogOpen && this.fileManagerAgentId === agentId) {
+        await this.refreshFileManager();
+      }
+      this.lastError = null;
+    } catch (error) {
+      this.lastError = error instanceof Error ? error.message : String(error);
+      this.fileManagerError = this.lastError;
+    } finally {
+      this.fileManagerBusyPath = null;
+    }
+  }
+
+  private async downloadProjectFile(agentId: string, path: string) {
+    try {
+      this.fileManagerBusyPath = path;
+      const result = await this.adapter.downloadProjectFile(agentId, path);
+      triggerBrowserDownload({
+        name: result.file.name,
+        contentBase64: result.file.contentBase64,
+      });
+      this.lastError = null;
+    } catch (error) {
+      this.lastError = error instanceof Error ? error.message : String(error);
+      this.fileManagerError = this.lastError;
+    } finally {
+      this.fileManagerBusyPath = null;
+    }
+  }
+
+  private async uploadProjectFiles(
+    agentId: string,
+    path: string | null,
+    files: File[],
+    options?: { refreshManager?: boolean },
+  ) {
+    if (files.length === 0) {
+      return;
+    }
+    try {
+      this.fileManagerLoading = true;
+      this.fileManagerError = null;
+      const payloads: WorkbenchUploadedFile[] = await Promise.all(
+        files.map(async (file) => ({
+          name: file.name,
+          contentBase64: await readBrowserFileAsBase64(file),
+        })),
+      );
+      await this.adapter.uploadProjectFiles(agentId, path, payloads);
+      await this.refreshProjectFiles(agentId);
+      await this.refreshSnapshot();
+      if (
+        options?.refreshManager &&
+        this.fileManagerDialogOpen &&
+        this.fileManagerAgentId === agentId
+      ) {
+        await this.refreshFileManager();
+      }
+      this.lastError = null;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.fileManagerError = message;
+      this.lastError = message;
+    } finally {
+      this.fileManagerLoading = false;
+    }
+  }
+
   private async createProjectFromWorkspace(workspace: string) {
     const validation = await this.adapter.validateProjectWorkspace(workspace);
     const normalizedName = validation.name.trim();
@@ -966,6 +1320,20 @@ export class OpenClawPowerApp extends LitElement {
       this.lastError = null;
     }
     input.value = "";
+  }
+
+  private handleProjectFileSelection(event: Event) {
+    const input = event.target as HTMLInputElement;
+    const files = Array.from(input.files ?? []);
+    const agentId = this.pendingProjectFileUploadAgentId;
+    const path = this.pendingProjectFileUploadPath;
+    this.pendingProjectFileUploadAgentId = null;
+    this.pendingProjectFileUploadPath = null;
+    input.value = "";
+    if (!agentId || files.length === 0) {
+      return;
+    }
+    void this.uploadProjectFiles(agentId, path, files, { refreshManager: true });
   }
 
   private handleComposerKeyDown(event: KeyboardEvent) {
@@ -1197,8 +1565,11 @@ export class OpenClawPowerApp extends LitElement {
       agentsList: this.agentsList,
       agentIdentityById: this.agentIdentityById,
       agentFilesList: this.agentFilesList,
-      agentFilesLoading: false,
-      agentFilesError: null,
+      projectFilesLoading: this.projectFilesLoading,
+      projectFilesError: this.projectFilesError,
+      projectFilesAgentId: this.projectFilesAgentId,
+      projectFilesWorkspace: this.projectFilesWorkspace,
+      projectFilesEntries: this.projectFilesEntries,
       sessionsResult: this.sessionsResult,
       chatMessages: activeRuntime?.chatMessages ?? [],
       chatMessage: this.chatMessage,
@@ -1503,6 +1874,20 @@ export class OpenClawPowerApp extends LitElement {
       projectDirectoryCurrentName: this.projectDirectoryCurrentName,
       projectDirectoryParentPath: this.projectDirectoryParentPath,
       projectDirectoryEntries: this.projectDirectoryEntries,
+      fileManagerOpen: this.fileManagerDialogOpen,
+      fileManagerLoading: this.fileManagerLoading,
+      fileManagerError: this.fileManagerError,
+      fileManagerAgentId: this.fileManagerAgentId,
+      fileManagerWorkspace: this.fileManagerWorkspace,
+      fileManagerCurrentPath: this.fileManagerCurrentPath,
+      fileManagerCurrentName: this.fileManagerCurrentName,
+      fileManagerParentPath: this.fileManagerParentPath,
+      fileManagerEntries: this.fileManagerEntries,
+      fileManagerBackCount: this.fileManagerBackStack.length,
+      fileManagerForwardCount: this.fileManagerForwardStack.length,
+      fileManagerBusyPath: this.fileManagerBusyPath,
+      fileManagerCreateFolderOpen: this.fileManagerCreateFolderOpen,
+      fileManagerNewFolderName: this.fileManagerNewFolderName,
       onCloseProjectDirectory: () => {
         this.closeProjectDirectoryDialog();
       },
@@ -1511,6 +1896,46 @@ export class OpenClawPowerApp extends LitElement {
       },
       onCreateProjectFromDirectory: (path) => {
         void this.handleCreateProjectFromDirectory(path);
+      },
+      onOpenFileManager: (agentId, path) => {
+        void this.openFileManagerDialog(agentId, path);
+      },
+      onOpenFileManagerForCreateFolder: (agentId, path) => {
+        void this.openFileManagerForCreateFolder(agentId, path);
+      },
+      onCloseFileManager: () => {
+        this.closeFileManagerDialog();
+      },
+      onNavigateFileManager: (path) => {
+        void this.navigateFileManagerTo(path);
+      },
+      onNavigateFileManagerBack: () => {
+        void this.navigateFileManagerBack();
+      },
+      onNavigateFileManagerForward: () => {
+        void this.navigateFileManagerForward();
+      },
+      onRefreshFileManager: () => {
+        void this.refreshFileManager();
+      },
+      onOpenProjectFilePicker: (agentId, path) => {
+        this.openProjectFilePicker(agentId, path);
+      },
+      onDownloadProjectFile: (agentId, path) => {
+        void this.downloadProjectFile(agentId, path);
+      },
+      onDeleteProjectEntry: (agentId, path) => {
+        void this.deleteProjectEntry(agentId, path);
+      },
+      onToggleCreateFolder: () => {
+        this.fileManagerCreateFolderOpen = !this.fileManagerCreateFolderOpen;
+        this.fileManagerNewFolderName = "";
+      },
+      onFileManagerFolderNameChange: (value) => {
+        this.fileManagerNewFolderName = value;
+      },
+      onCreateFileManagerFolder: () => {
+        void this.createFileManagerFolder();
       },
       onToggleSidebar: () => {
         this.sidebarCollapsed = !this.sidebarCollapsed;
@@ -1542,6 +1967,13 @@ export class OpenClawPowerApp extends LitElement {
         type="file"
         multiple
         @change=${(event: Event) => this.handleChatFileSelection(event)}
+      />
+      <input
+        hidden
+        data-project-file-input
+        type="file"
+        multiple
+        @change=${(event: Event) => this.handleProjectFileSelection(event)}
       />
     `;
   }

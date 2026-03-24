@@ -18,6 +18,14 @@ export type WorkbenchDirectoryEntry = {
   path: string;
 };
 
+export type WorkbenchFileEntry = {
+  name: string;
+  path: string;
+  kind: "file" | "directory";
+  size?: number;
+  updatedAtMs?: number;
+};
+
 export type WorkbenchDirectoryRootsResult = {
   roots: WorkbenchDirectoryEntry[];
 };
@@ -27,6 +35,32 @@ export type WorkbenchDirectoryListResult = {
   name: string;
   parentPath: string | null;
   entries: WorkbenchDirectoryEntry[];
+};
+
+export type WorkbenchFileListResult = {
+  agentId: string;
+  workspace: string;
+  path: string;
+  name: string;
+  parentPath: string | null;
+  entries: WorkbenchFileEntry[];
+};
+
+export type WorkbenchFileDownloadResult = {
+  agentId: string;
+  workspace: string;
+  file: {
+    name: string;
+    path: string;
+    size: number;
+    updatedAtMs: number;
+    contentBase64: string;
+  };
+};
+
+export type WorkbenchUploadedFile = {
+  name: string;
+  contentBase64: string;
 };
 
 export type WorkbenchWorkspaceValidationResult = {
@@ -70,6 +104,19 @@ export interface WorkbenchAdapter {
   listProjectRoots(): Promise<WorkbenchDirectoryRootsResult>;
   listProjectDirectories(path?: string | null): Promise<WorkbenchDirectoryListResult>;
   validateProjectWorkspace(path: string): Promise<WorkbenchWorkspaceValidationResult>;
+  listProjectFiles(agentId: string, path?: string | null): Promise<WorkbenchFileListResult>;
+  createProjectFolder(
+    agentId: string,
+    path: string | null,
+    name: string,
+  ): Promise<WorkbenchFileEntry>;
+  uploadProjectFiles(
+    agentId: string,
+    path: string | null,
+    files: WorkbenchUploadedFile[],
+  ): Promise<WorkbenchFileEntry[]>;
+  downloadProjectFile(agentId: string, path: string): Promise<WorkbenchFileDownloadResult>;
+  deleteProjectEntry(agentId: string, path: string): Promise<void>;
   createProject(name: string, workspace: string): Promise<string | null>;
   startTask(projectId: string, text: string, modelId: string): Promise<WorkbenchSendResult>;
   addUserMessage(sessionKey: string, text: string, modelId: string): Promise<WorkbenchSendResult>;

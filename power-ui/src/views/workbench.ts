@@ -18,6 +18,7 @@ import {
 } from "../../../ui/src/ui/views/agents-utils.ts";
 import { renderCron, type CronProps } from "../../../ui/src/ui/views/cron.ts";
 import { renderSkills, type SkillsProps } from "../../../ui/src/ui/views/skills.ts";
+import type { WorkbenchFileEntry } from "../adapters/workbench-adapter.ts";
 import { renderPowerChatThread } from "../integrations/openclaw/chat/thread.ts";
 
 export type WorkbenchSection = "newTask" | "automations" | "skills";
@@ -71,8 +72,11 @@ export type WorkbenchProps = {
   agentsList: AgentsListResult | null;
   agentIdentityById: Record<string, AgentIdentityResult>;
   agentFilesList: AgentsFilesListResult | null;
-  agentFilesLoading: boolean;
-  agentFilesError: string | null;
+  projectFilesLoading: boolean;
+  projectFilesError: string | null;
+  projectFilesAgentId: string | null;
+  projectFilesWorkspace: string | null;
+  projectFilesEntries: WorkbenchFileEntry[];
   sessionsResult: SessionsListResult | null;
   chatMessages: unknown[];
   chatMessage: string;
@@ -125,6 +129,20 @@ export type WorkbenchProps = {
   projectDirectoryCurrentName: string | null;
   projectDirectoryParentPath: string | null;
   projectDirectoryEntries: WorkbenchDirectoryEntry[];
+  fileManagerOpen: boolean;
+  fileManagerLoading: boolean;
+  fileManagerError: string | null;
+  fileManagerAgentId: string | null;
+  fileManagerWorkspace: string | null;
+  fileManagerCurrentPath: string | null;
+  fileManagerCurrentName: string | null;
+  fileManagerParentPath: string | null;
+  fileManagerEntries: WorkbenchFileEntry[];
+  fileManagerBackCount: number;
+  fileManagerForwardCount: number;
+  fileManagerBusyPath: string | null;
+  fileManagerCreateFolderOpen: boolean;
+  fileManagerNewFolderName: string;
   onNavigateLegacy: () => void;
   onSectionChange: (section: WorkbenchSection) => void;
   onSelectProject: (projectId: string) => void;
@@ -150,6 +168,19 @@ export type WorkbenchProps = {
   onCloseProjectDirectory: () => void;
   onBrowseProjectDirectory: (path: string | null) => void;
   onCreateProjectFromDirectory: (path: string | null) => void;
+  onOpenFileManager: (agentId: string, path: string | null) => void;
+  onOpenFileManagerForCreateFolder: (agentId: string, path: string | null) => void;
+  onCloseFileManager: () => void;
+  onNavigateFileManager: (path: string | null) => void;
+  onNavigateFileManagerBack: () => void;
+  onNavigateFileManagerForward: () => void;
+  onRefreshFileManager: () => void;
+  onOpenProjectFilePicker: (agentId: string, path: string | null) => void;
+  onDownloadProjectFile: (agentId: string, path: string) => void;
+  onDeleteProjectEntry: (agentId: string, path: string) => void;
+  onToggleCreateFolder: () => void;
+  onFileManagerFolderNameChange: (value: string) => void;
+  onCreateFileManagerFolder: () => void;
   onToggleSidebar: () => void;
   onToggleProjects: () => void;
   onToggleRightRail: () => void;
@@ -342,7 +373,7 @@ export function renderWorkbench(props: WorkbenchProps) {
 
           ${
             showRightRail && activeProject && activeSession
-              ? renderRightRail(props, activeProject, activeSession)
+              ? renderRightRail(props, activeProject)
               : nothing
           }
         </div>
@@ -350,6 +381,7 @@ export function renderWorkbench(props: WorkbenchProps) {
       ${props.toolsOpen ? renderToolsDialog(props) : nothing}
       ${props.settingsOpen ? renderSettingsDialog(props) : nothing}
       ${props.projectDirectoryOpen ? renderProjectDirectoryDialog(props) : nothing}
+      ${props.fileManagerOpen ? renderFileManagerDialog(props) : nothing}
     </div>
   `;
 }
@@ -610,6 +642,249 @@ function renderProjectDirectoryDialog(props: WorkbenchProps) {
   `;
 }
 
+function buildFileManagerBreadcrumbs(props: WorkbenchProps) {
+  const workspace = props.fileManagerWorkspace?.trim() || "";
+  const currentPath = props.fileManagerCurrentPath?.trim() || "";
+  if (!workspace || !currentPath || !currentPath.startsWith(workspace)) {
+    return [];
+  }
+  const relative = currentPath.slice(workspace.length).replace(/^\/+/, "");
+  if (!relative) {
+    return [{ label: props.fileManagerCurrentName || "Workspace", path: workspace }];
+  }
+  const segments = relative.split("/").filter(Boolean);
+  const breadcrumbs: Array<{ label: string; path: string }> = [
+    {
+      label:
+        props.fileManagerCurrentName && segments.length === 0
+          ? props.fileManagerCurrentName
+          : "Workspace",
+      path: workspace,
+    },
+  ];
+  let cursor = workspace;
+  for (const segment of segments) {
+    cursor = `${cursor}/${segment}`.replace(/\/+/g, "/");
+    breadcrumbs.push({ label: segment, path: cursor });
+  }
+  return breadcrumbs;
+}
+
+function renderFileManagerDialog(props: WorkbenchProps) {
+  const breadcrumbs = buildFileManagerBreadcrumbs(props);
+  const currentPath = props.fileManagerCurrentPath;
+  return html`
+    <div class="workbench-overlay">
+      <div class="workbench-overlay__backdrop" @click=${props.onCloseFileManager}></div>
+      <div class="workbench-dialog workbench-dialog--files">
+        <div class="workbench-dialog__topbar">
+          <div>
+            <h3>File Manager</h3>
+            <p>Browse the current project workspace, upload files, create folders, and manage assets.</p>
+          </div>
+          <button type="button" class="workbench-icon-button" @click=${props.onCloseFileManager}>
+            ${icons.x}
+          </button>
+        </div>
+
+        <div class="workbench-dialog__body">
+          <div class="workbench-file-toolbar">
+            <div class="workbench-file-toolbar__nav">
+              <button
+                type="button"
+                class="workbench-secondary-button workbench-file-toolbar__button"
+                title="返回"
+                aria-label="返回"
+                ?disabled=${props.fileManagerLoading || props.fileManagerBackCount === 0}
+                @click=${props.onNavigateFileManagerBack}
+              >
+                返回
+              </button>
+              <button
+                type="button"
+                class="workbench-secondary-button workbench-file-toolbar__button"
+                ?disabled=${props.fileManagerLoading || !props.fileManagerParentPath}
+                @click=${() => props.onNavigateFileManager(props.fileManagerParentPath)}
+              >
+                向上
+              </button>
+            </div>
+
+            <div class="workbench-file-breadcrumbs">
+              ${repeat(
+                breadcrumbs,
+                (item) => item.path,
+                (item, index) => html`
+                  <button
+                    type="button"
+                    class="workbench-file-breadcrumb ${index === breadcrumbs.length - 1 ? "is-active" : ""}"
+                    ?disabled=${index === breadcrumbs.length - 1}
+                    @click=${() => props.onNavigateFileManager(item.path)}
+                  >
+                    ${item.label}
+                  </button>
+                `,
+              )}
+            </div>
+
+            <div class="workbench-file-toolbar__actions">
+              <button
+                type="button"
+                class="workbench-secondary-button"
+                ?disabled=${props.fileManagerLoading || !props.fileManagerAgentId}
+                @click=${() =>
+                  props.fileManagerAgentId &&
+                  props.onOpenProjectFilePicker(props.fileManagerAgentId, currentPath)}
+              >
+                ${icons.plus}
+                Upload
+              </button>
+              <button
+                type="button"
+                class="workbench-secondary-button"
+                ?disabled=${props.fileManagerLoading || !props.fileManagerAgentId}
+                @click=${props.onToggleCreateFolder}
+              >
+                ${icons.folder}
+                New Folder
+              </button>
+              <button
+                type="button"
+                class="workbench-secondary-button"
+                ?disabled=${props.fileManagerLoading || !props.fileManagerAgentId}
+                @click=${props.onRefreshFileManager}
+              >
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          ${
+            props.fileManagerCreateFolderOpen
+              ? html`
+                  <div class="workbench-file-create">
+                    <input
+                      type="text"
+                      .value=${props.fileManagerNewFolderName}
+                      placeholder="Folder name"
+                      @input=${(event: Event) =>
+                        props.onFileManagerFolderNameChange(
+                          (event.target as HTMLInputElement).value,
+                        )}
+                    />
+                    <button
+                      type="button"
+                      class="workbench-primary-button"
+                      ?disabled=${props.fileManagerLoading || !props.fileManagerNewFolderName.trim()}
+                      @click=${props.onCreateFileManagerFolder}
+                    >
+                      Create
+                    </button>
+                    <button
+                      type="button"
+                      class="workbench-secondary-button"
+                      ?disabled=${props.fileManagerLoading}
+                      @click=${props.onToggleCreateFolder}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                `
+              : nothing
+          }
+
+          ${
+            props.fileManagerError
+              ? html`<div class="workbench-callout workbench-callout--danger">${props.fileManagerError}</div>`
+              : nothing
+          }
+
+          ${
+            props.fileManagerLoading
+              ? html`
+                  <div class="workbench-empty workbench-empty--small">Loading files…</div>
+                `
+              : props.fileManagerEntries.length === 0
+                ? html`
+                    <div class="workbench-empty workbench-empty--small">This folder is empty.</div>
+                  `
+                : html`
+                    <div class="workbench-file-list">
+                      ${repeat(
+                        props.fileManagerEntries,
+                        (entry) => entry.path,
+                        (entry) => html`
+                          <div class="workbench-file-row">
+                            <button
+                              type="button"
+                              class="workbench-file-row__main ${entry.kind === "directory" ? "is-directory" : ""}"
+                              @click=${() =>
+                                entry.kind === "directory"
+                                  ? props.onNavigateFileManager(entry.path)
+                                  : props.onDownloadProjectFile(
+                                      props.fileManagerAgentId ?? "",
+                                      entry.path,
+                                    )}
+                            >
+                              <span class="workbench-file-row__icon">
+                                ${entry.kind === "directory" ? icons.folder : icons.fileText}
+                              </span>
+                              <span class="workbench-file-row__name">${entry.name}</span>
+                              <span class="workbench-file-row__meta">
+                                ${
+                                  entry.kind === "directory"
+                                    ? "Folder"
+                                    : `${formatBytes(entry.size ?? 0)}${entry.updatedAtMs ? ` · ${formatTimestamp(entry.updatedAtMs)}` : ""}`
+                                }
+                              </span>
+                            </button>
+                            <div class="workbench-file-row__actions">
+                              ${
+                                entry.kind === "file"
+                                  ? html`
+                                      <button
+                                        type="button"
+                                        class="workbench-icon-button"
+                                        title="Download file"
+                                        aria-label="Download file"
+                                        ?disabled=${props.fileManagerBusyPath === entry.path}
+                                        @click=${() =>
+                                          props.fileManagerAgentId &&
+                                          props.onDownloadProjectFile(
+                                            props.fileManagerAgentId,
+                                            entry.path,
+                                          )}
+                                      >
+                                        ${icons.download}
+                                      </button>
+                                    `
+                                  : nothing
+                              }
+                              <button
+                                type="button"
+                                class="workbench-icon-button"
+                                title="Delete item"
+                                aria-label="Delete item"
+                                ?disabled=${props.fileManagerBusyPath === entry.path}
+                                @click=${() =>
+                                  props.fileManagerAgentId &&
+                                  props.onDeleteProjectEntry(props.fileManagerAgentId, entry.path)}
+                              >
+                                ${icons.trash}
+                              </button>
+                            </div>
+                          </div>
+                        `,
+                      )}
+                    </div>
+                  `
+          }
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderNavButton(
   key: string,
   label: string,
@@ -832,123 +1107,115 @@ function renderSkillsPage(props: WorkbenchProps) {
   `;
 }
 
-function renderRightRail(
-  props: WorkbenchProps,
-  project: WorkbenchProject,
-  activeSession: WorkbenchSession,
-) {
-  const files = props.agentFilesList?.agentId === project.id ? props.agentFilesList.files : [];
-  const toolEntries = resolveToolSections(props.toolsCatalogResult)
-    .flatMap((section) => section.tools)
-    .slice(0, 8);
+function renderRightRail(props: WorkbenchProps, project: WorkbenchProject) {
+  const entries = props.projectFilesAgentId === project.id ? props.projectFilesEntries : [];
+  const workspacePath =
+    props.projectFilesAgentId === project.id ? props.projectFilesWorkspace : project.workspace;
 
   return html`
     <aside class="workbench-rail">
       <section class="workbench-sidecard">
         <div class="workbench-sidecard__header">
-          <h4>Current task</h4>
-          <span>${props.chatRunId ? "Live" : "Idle"}</span>
-        </div>
-        <div class="workbench-sidecard__body">
-          <div class="workbench-progress-row">
-            <span>Status</span>
-            <strong>${props.chatRunId ? "Running" : activeSession ? "Ready" : "Waiting"}</strong>
-          </div>
-          <div class="workbench-progress-row">
-            <span>Project</span>
-            <strong>${project.label}</strong>
-          </div>
-          <div class="workbench-progress-row">
-            <span>Session</span>
-            <strong>${activeSession?.label ?? "Not selected"}</strong>
-          </div>
-          <div class="workbench-progress-row">
-            <span>Assistant</span>
-            <strong>${props.assistantName}</strong>
-          </div>
-          ${
-            props.lastError
-              ? html`<div class="workbench-callout workbench-callout--danger">${props.lastError}</div>`
-              : nothing
-          }
-        </div>
-      </section>
-
-      <section class="workbench-sidecard">
-        <div class="workbench-sidecard__header">
           <h4>Project files</h4>
-          <button type="button" class="workbench-link-button" @click=${props.onRefreshContext}>
-            Manage
-          </button>
+          <div class="workbench-sidecard__actions">
+            <button
+              type="button"
+              class="workbench-icon-button"
+              title="Create folder"
+              aria-label="Create folder"
+              ?disabled=${!workspacePath}
+              @click=${() =>
+                workspacePath && props.onOpenFileManagerForCreateFolder(project.id, workspacePath)}
+            >
+              ${icons.folder}
+            </button>
+            <button
+              type="button"
+              class="workbench-icon-button"
+              title="Upload files"
+              aria-label="Upload files"
+              ?disabled=${!workspacePath}
+              @click=${() => workspacePath && props.onOpenProjectFilePicker(project.id, workspacePath)}
+            >
+              ${icons.plus}
+            </button>
+            <button
+              type="button"
+              class="workbench-icon-button"
+              title="Open file manager"
+              aria-label="Open file manager"
+              ?disabled=${!workspacePath}
+              @click=${() => props.onOpenFileManager(project.id, workspacePath)}
+            >
+              ${icons.externalLink}
+            </button>
+          </div>
         </div>
-        <div class="workbench-sidecard__body">
+        <div class="workbench-sidecard__body workbench-sidecard__body--scroll">
           ${
-            props.agentFilesError
-              ? html`<div class="workbench-callout workbench-callout--danger">${props.agentFilesError}</div>`
+            props.projectFilesError
+              ? html`<div class="workbench-callout workbench-callout--danger">${props.projectFilesError}</div>`
               : nothing
           }
           ${
-            props.agentFilesLoading
+            props.projectFilesLoading
               ? html`
                   <div class="workbench-skeleton">Loading files…</div>
                 `
-              : files.length === 0
+              : entries.length === 0
                 ? html`
                     <div class="workbench-empty workbench-empty--tiny">
-                      Generic upload/list APIs are pending. Showing workspace bootstrap files when available.
+                      No files yet. Upload from the plus button or open the manager to create folders.
                     </div>
                   `
                 : repeat(
-                    files.slice(0, 6),
-                    (file) => file.path,
-                    (file) => html`
-                    <div class="workbench-mini-row">
-                      <span class="workbench-mini-row__icon">${icons.fileText}</span>
-                      <div>
-                        <div>${file.name}</div>
-                        <div class="workbench-mini-row__meta">${formatBytes(file.size ?? 0)}</div>
+                    entries,
+                    (entry) => entry.path,
+                    (entry) => html`
+                      <div class="workbench-mini-row workbench-mini-row--file">
+                        <span class="workbench-mini-row__icon">
+                          ${entry.kind === "directory" ? icons.folder : icons.fileText}
+                        </span>
+                        <button
+                          type="button"
+                          class="workbench-mini-row__content ${entry.kind === "directory" ? "is-directory" : ""}"
+                          @dblclick=${() =>
+                            entry.kind === "directory" &&
+                            props.onOpenFileManager(project.id, entry.path)}
+                        >
+                          <span class="workbench-mini-row__name">${entry.name}</span>
+                          <div class="workbench-mini-row__meta">
+                            ${entry.kind === "directory" ? "Folder" : formatBytes(entry.size ?? 0)}
+                          </div>
+                        </button>
+                        <div class="workbench-mini-row__actions">
+                          ${
+                            entry.kind === "file"
+                              ? html`
+                                  <button
+                                    type="button"
+                                    class="workbench-icon-button"
+                                    title="Download file"
+                                    aria-label="Download file"
+                                    @click=${() => props.onDownloadProjectFile(project.id, entry.path)}
+                                  >
+                                    ${icons.download}
+                                  </button>
+                                `
+                              : nothing
+                          }
+                          <button
+                            type="button"
+                            class="workbench-icon-button"
+                            title=${entry.kind === "directory" ? "Delete folder" : "Delete file"}
+                            aria-label=${entry.kind === "directory" ? "Delete folder" : "Delete file"}
+                            @click=${() => props.onDeleteProjectEntry(project.id, entry.path)}
+                          >
+                            ${icons.trash}
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  `,
-                  )
-          }
-        </div>
-      </section>
-
-      <section class="workbench-sidecard">
-        <div class="workbench-sidecard__header">
-          <h4>Project tools</h4>
-          <button type="button" class="workbench-link-button" @click=${props.onOpenTools}>
-            Open
-          </button>
-        </div>
-        <div class="workbench-sidecard__body">
-          ${
-            props.toolsCatalogError
-              ? html`<div class="workbench-callout workbench-callout--danger">${props.toolsCatalogError}</div>`
-              : nothing
-          }
-          ${
-            props.toolsCatalogLoading
-              ? html`
-                  <div class="workbench-skeleton">Loading tools…</div>
-                `
-              : toolEntries.length === 0
-                ? html`
-                    <div class="workbench-empty workbench-empty--tiny">No tools loaded yet.</div>
-                  `
-                : repeat(
-                    toolEntries,
-                    (tool) => tool.id,
-                    (tool) => html`
-                    <div class="workbench-mini-row">
-                      <span class="workbench-mini-row__icon">${icons.wrench}</span>
-                      <div>
-                        <div>${tool.label}</div>
-                        <div class="workbench-mini-row__meta">${tool.description}</div>
-                      </div>
-                    </div>
-                  `,
+                    `,
                   )
           }
         </div>
@@ -1450,7 +1717,11 @@ function resolveProjects(props: WorkbenchProps): WorkbenchProject[] {
       );
       const updatedAt = sessions[0]?.updatedAt ?? null;
       const workspace =
-        props.agentFilesList?.agentId === agent.id ? props.agentFilesList.workspace : null;
+        props.projectFilesAgentId === agent.id
+          ? props.projectFilesWorkspace
+          : props.agentFilesList?.agentId === agent.id
+            ? props.agentFilesList.workspace
+            : null;
       return {
         id: agent.id,
         label: normalizeAgentLabel(agent),
@@ -1533,4 +1804,17 @@ function formatBytes(bytes: number) {
     return `${(bytes / 1024).toFixed(1)} KB`;
   }
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatTimestamp(timestamp: number) {
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(timestamp);
+  } catch {
+    return "";
+  }
 }

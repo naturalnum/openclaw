@@ -19,7 +19,11 @@ import type {
   WorkbenchAdapterEvent,
   WorkbenchDirectoryListResult,
   WorkbenchDirectoryRootsResult,
+  WorkbenchFileDownloadResult,
+  WorkbenchFileEntry,
+  WorkbenchFileListResult,
   WorkbenchSendResult,
+  WorkbenchUploadedFile,
   WorkbenchWorkspaceValidationResult,
 } from "../adapters/workbench-adapter.ts";
 
@@ -596,6 +600,113 @@ export class MockWorkbenchAdapter implements WorkbenchAdapter {
       path: normalizedPath,
       name: normalizedPath.split("/").filter(Boolean).pop() ?? normalizedPath,
     };
+  }
+
+  async listProjectFiles(agentId: string, path?: string | null): Promise<WorkbenchFileListResult> {
+    const project = this.requireProject(agentId);
+    const currentPath = path?.trim() || project.workspace;
+    const entries: WorkbenchFileEntry[] = [];
+
+    for (const file of project.files) {
+      const filePath = file.path.startsWith("/")
+        ? file.path
+        : `${project.workspace}/${file.path}`.replace(/\/+/g, "/");
+      const parent = filePath.split("/").slice(0, -1).join("/") || project.workspace;
+      if (parent !== currentPath) {
+        continue;
+      }
+      entries.push({
+        name: file.name,
+        path: filePath,
+        kind: "file",
+        size: file.size,
+        updatedAtMs: file.updatedAtMs,
+      });
+    }
+
+    return {
+      agentId,
+      workspace: project.workspace,
+      path: currentPath,
+      name: currentPath.split("/").filter(Boolean).pop() ?? currentPath,
+      parentPath:
+        currentPath === project.workspace ? null : currentPath.split("/").slice(0, -1).join("/"),
+      entries: entries.toSorted((left, right) => left.name.localeCompare(right.name)),
+    };
+  }
+
+  async createProjectFolder(
+    _agentId: string,
+    path: string | null,
+    name: string,
+  ): Promise<WorkbenchFileEntry> {
+    return {
+      name: name.trim(),
+      path: `${path?.trim() || "/workspace"}/${name.trim()}`.replace(/\/+/g, "/"),
+      kind: "directory",
+      updatedAtMs: Date.now(),
+    };
+  }
+
+  async uploadProjectFiles(
+    agentId: string,
+    path: string | null,
+    files: WorkbenchUploadedFile[],
+  ): Promise<WorkbenchFileEntry[]> {
+    const project = this.requireProject(agentId);
+    const currentPath = path?.trim() || project.workspace;
+    const uploaded: WorkbenchFileEntry[] = [];
+    for (const file of files) {
+      const content = file.contentBase64.trim();
+      const size = Math.floor((content.length * 3) / 4);
+      const entryPath = `${currentPath}/${file.name}`.replace(/\/+/g, "/");
+      project.files.unshift({
+        name: file.name,
+        path: entryPath.startsWith(project.workspace)
+          ? entryPath.slice(project.workspace.length + 1)
+          : entryPath,
+        missing: false,
+        size,
+        updatedAtMs: Date.now(),
+      });
+      uploaded.push({
+        name: file.name,
+        path: entryPath,
+        kind: "file",
+        size,
+        updatedAtMs: Date.now(),
+      });
+    }
+    return uploaded;
+  }
+
+  async downloadProjectFile(
+    agentId: string,
+    filePath: string,
+  ): Promise<WorkbenchFileDownloadResult> {
+    const project = this.requireProject(agentId);
+    const name = filePath.split("/").filter(Boolean).pop() ?? "download.bin";
+    return {
+      agentId,
+      workspace: project.workspace,
+      file: {
+        name,
+        path: filePath,
+        size: 0,
+        updatedAtMs: Date.now(),
+        contentBase64: "",
+      },
+    };
+  }
+
+  async deleteProjectEntry(agentId: string, filePath: string): Promise<void> {
+    const project = this.requireProject(agentId);
+    project.files = project.files.filter((file) => {
+      const normalizedPath = file.path.startsWith("/")
+        ? file.path
+        : `${project.workspace}/${file.path}`.replace(/\/+/g, "/");
+      return normalizedPath !== filePath;
+    });
   }
 
   async createProject(name: string, workspace: string) {
