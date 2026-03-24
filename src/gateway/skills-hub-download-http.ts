@@ -101,16 +101,6 @@ export async function handleSkillsHubDownloadRequest(
 
   // Fetch archive list to resolve the download URL for the given slug
   const catalogUrl = `${baseUrl.replace(/\/+$/, "")}/api/v1/skills/${encodeURIComponent(slug)}`;
-  console.log(
-    "[skills-hub-http][download] baseUrl:",
-    baseUrl,
-    "slug:",
-    slug,
-    "catalogUrl:",
-    catalogUrl,
-    "queryDownloadUrl:",
-    queryDownloadUrl || "(none)",
-  );
 
   // Allow the operator-configured hub hostname (including localhost for local dev).
   let hubHostname: string | undefined;
@@ -126,7 +116,6 @@ export async function handleSkillsHubDownloadRequest(
     const fullUrl = queryDownloadUrl.startsWith("http")
       ? queryDownloadUrl
       : `${baseUrl.replace(/\/+$/, "")}/${queryDownloadUrl.replace(/^\/+/, "")}`;
-    console.log("[skills-hub-http][download] using query downloadUrl directly, fullUrl:", fullUrl);
     let release: (() => Promise<void>) | undefined;
     try {
       const downloadResult = await fetchWithSsrFGuard({
@@ -216,14 +205,6 @@ export async function handleSkillsHubDownloadRequest(
     release = catalogResult.release;
 
     if (!catalogResult.response.ok) {
-      const catalogBody = await catalogResult.response.text().catch(() => "(unreadable)");
-      console.log(
-        "[skills-hub-http][download] catalog request failed:",
-        catalogResult.response.status,
-        catalogResult.response.statusText,
-        "body:",
-        catalogBody,
-      );
       res.statusCode = catalogResult.response.status === 404 ? 404 : 502;
       res.setHeader("Content-Type", "application/json; charset=utf-8");
       res.end(
@@ -243,10 +224,6 @@ export async function handleSkillsHubDownloadRequest(
 
     const relativeUrl = entry?.latestVersion?.downloadUrl?.trim();
     const version = entry?.latestVersion?.version?.trim() ?? "";
-    console.log(
-      "[skills-hub-http][download] catalog entry latestVersion:",
-      JSON.stringify(entry?.latestVersion),
-    );
     if (!relativeUrl) {
       res.statusCode = 404;
       res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -257,8 +234,6 @@ export async function handleSkillsHubDownloadRequest(
     const fullUrl = relativeUrl.startsWith("http")
       ? relativeUrl
       : `${baseUrl.replace(/\/+$/, "")}/${relativeUrl.replace(/^\/+/, "")}`;
-    console.log("[skills-hub-http][download] relativeUrl:", relativeUrl, "fullUrl:", fullUrl);
-
     // Step 2: stream the archive to the client
     const downloadResult = await fetchWithSsrFGuard({
       url: fullUrl,
