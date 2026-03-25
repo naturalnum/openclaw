@@ -97,6 +97,16 @@ export async function resolvePackedRootDir(extractDir: string): Promise<string> 
     // ignore
   }
 
+  const rootSkillFile = path.join(extractDir, "SKILL.md");
+  try {
+    const stat = await fs.stat(rootSkillFile);
+    if (stat.isFile()) {
+      return extractDir;
+    }
+  } catch {
+    // ignore
+  }
+
   const entries = await fs.readdir(extractDir, { withFileTypes: true });
   const dirs = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
   if (dirs.length !== 1) {

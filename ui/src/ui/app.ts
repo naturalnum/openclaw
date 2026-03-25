@@ -80,6 +80,11 @@ import type {
   ChannelsStatusSnapshot,
   SessionsListResult,
   SkillStatusReport,
+  SkillsRegistryCatalogItem,
+  SkillsRegistryCategory,
+  SkillsRegistryInstallFilter,
+  SkillsRegistryPagination,
+  SkillsRegistrySortBy,
   StatusSummary,
   NostrProfile,
   ToolsCatalogResult,
@@ -397,9 +402,23 @@ export class OpenClawApp extends LitElement {
   @state() skillsReport: SkillStatusReport | null = null;
   @state() skillsError: string | null = null;
   @state() skillsFilter = "";
+  @state() skillsCatalog: SkillsRegistryCatalogItem[] = [];
+  @state() skillsCategories: SkillsRegistryCategory[] = [];
+  @state() skillsRegistryBaseUrl: string | null = null;
+  @state() skillsPagination: SkillsRegistryPagination = {
+    page: 1,
+    limit: 12,
+    total: 0,
+    totalPages: 1,
+  };
+  @state() skillsCategory: string | null = null;
+  @state() skillsSortBy: SkillsRegistrySortBy = "comprehensive";
+  @state() skillsInstallFilter: SkillsRegistryInstallFilter = "all";
   @state() skillEdits: Record<string, string> = {};
   @state() skillsBusyKey: string | null = null;
+  @state() skillsArchiveBusy = false;
   @state() skillMessages: Record<string, SkillMessage> = {};
+  @state() skillsNotice: SkillMessage | null = null;
 
   @state() healthLoading = false;
   @state() healthResult: HealthSummary | null = null;

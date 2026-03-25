@@ -30,13 +30,16 @@ describe("archive helpers", () => {
     expect(resolveArchiveKind(input)).toBe(expected);
   });
 
-  it("resolves packed roots from package dir or single extracted root dir", async () => {
+  it("resolves packed roots from package dir, root SKILL.md, or single extracted root dir", async () => {
     const directDir = await createTempDir();
+    const flatDir = await createTempDir();
     const fallbackDir = await createTempDir();
     await fs.mkdir(path.join(directDir, "package"), { recursive: true });
+    await fs.writeFile(path.join(flatDir, "SKILL.md"), "# Skill\n", "utf8");
     await fs.mkdir(path.join(fallbackDir, "bundle-root"), { recursive: true });
 
     await expect(resolvePackedRootDir(directDir)).resolves.toBe(path.join(directDir, "package"));
+    await expect(resolvePackedRootDir(flatDir)).resolves.toBe(flatDir);
     await expect(resolvePackedRootDir(fallbackDir)).resolves.toBe(
       path.join(fallbackDir, "bundle-root"),
     );
