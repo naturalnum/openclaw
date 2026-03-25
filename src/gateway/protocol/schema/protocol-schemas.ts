@@ -158,6 +158,18 @@ import {
   WizardStatusResultSchema,
   WizardStepSchema,
 } from "./wizard.js";
+import {
+  WorkspaceDeleteParamsSchema,
+  WorkspaceDownloadParamsSchema,
+  WorkspaceDownloadResultSchema,
+  WorkspaceEntrySchema,
+  WorkspaceListParamsSchema,
+  WorkspaceListResultSchema,
+  WorkspaceMkdirParamsSchema,
+  WorkspaceRenameParamsSchema,
+  WorkspaceUploadParamsSchema,
+  WorkspaceWriteResultSchema,
+} from "./workspace.js";
 
 export const ProtocolSchemas = {
   ConnectParams: ConnectParamsSchema,
@@ -296,6 +308,16 @@ export const ProtocolSchemas = {
   UpdateRunParams: UpdateRunParamsSchema,
   TickEvent: TickEventSchema,
   ShutdownEvent: ShutdownEventSchema,
+  WorkspaceEntry: WorkspaceEntrySchema,
+  WorkspaceListParams: WorkspaceListParamsSchema,
+  WorkspaceListResult: WorkspaceListResultSchema,
+  WorkspaceDownloadParams: WorkspaceDownloadParamsSchema,
+  WorkspaceDownloadResult: WorkspaceDownloadResultSchema,
+  WorkspaceMkdirParams: WorkspaceMkdirParamsSchema,
+  WorkspaceDeleteParams: WorkspaceDeleteParamsSchema,
+  WorkspaceRenameParams: WorkspaceRenameParamsSchema,
+  WorkspaceUploadParams: WorkspaceUploadParamsSchema,
+  WorkspaceWriteResult: WorkspaceWriteResultSchema,
 } satisfies Record<string, TSchema>;
 
 export const PROTOCOL_VERSION = 3 as const;

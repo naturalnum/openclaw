@@ -30,6 +30,7 @@ export type UiSettings = {
   chatShowThinking: boolean;
   chatShowToolCalls: boolean;
   splitRatio: number; // Sidebar split ratio (0.4 to 0.7, default 0.6)
+  workspaceSplitRatio: number; // Workspace browser split ratio (0.35 to 0.72, default 0.5)
   navCollapsed: boolean; // Collapsible sidebar state
   navWidth: number; // Sidebar width when expanded (240–400px)
   navGroupsCollapsed: Record<string, boolean>; // Which nav groups are collapsed
@@ -180,6 +181,7 @@ export function loadSettings(): UiSettings {
     chatShowThinking: true,
     chatShowToolCalls: true,
     splitRatio: 0.6,
+    workspaceSplitRatio: 0.5,
     navCollapsed: false,
     navWidth: 220,
     navGroupsCollapsed: {},
@@ -225,6 +227,10 @@ export function loadSettings(): UiSettings {
         parsed.splitRatio <= 0.7
           ? parsed.splitRatio
           : defaults.splitRatio,
+      workspaceSplitRatio: (() => {
+        const v = (parsed as { workspaceSplitRatio?: unknown }).workspaceSplitRatio;
+        return typeof v === "number" && v >= 0.35 && v <= 0.72 ? v : defaults.workspaceSplitRatio;
+      })(),
       navCollapsed:
         typeof parsed.navCollapsed === "boolean" ? parsed.navCollapsed : defaults.navCollapsed,
       navWidth:
@@ -285,6 +291,7 @@ function persistSettings(next: UiSettings) {
     chatShowThinking: next.chatShowThinking,
     chatShowToolCalls: next.chatShowToolCalls,
     splitRatio: next.splitRatio,
+    workspaceSplitRatio: next.workspaceSplitRatio,
     navCollapsed: next.navCollapsed,
     navWidth: next.navWidth,
     navGroupsCollapsed: next.navGroupsCollapsed,

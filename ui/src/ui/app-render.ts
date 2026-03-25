@@ -77,6 +77,16 @@ import {
   updateSkillEnabled,
 } from "./controllers/skills.ts";
 import "./components/dashboard-header.ts";
+import {
+  createWorkspaceDirectory,
+  deleteWorkspaceEntry,
+  downloadWorkspaceFile,
+  openWorkspaceEntry,
+  selectWorkspaceEntry,
+  refreshWorkspace,
+  renameWorkspaceEntry,
+  uploadWorkspaceFiles,
+} from "./controllers/workspace.ts";
 import { buildExternalLinkRel, EXTERNAL_LINK_TARGET } from "./external-link.ts";
 import { icons } from "./icons.ts";
 import { normalizeBasePath, TAB_GROUPS, subtitleForTab, titleForTab } from "./navigation.ts";
@@ -128,6 +138,7 @@ const lazyLogs = createLazy(() => import("./views/logs.ts"));
 const lazyNodes = createLazy(() => import("./views/nodes.ts"));
 const lazySessions = createLazy(() => import("./views/sessions.ts"));
 const lazySkills = createLazy(() => import("./views/skills.ts"));
+const lazyFiles = createLazy(() => import("./views/files.ts"));
 
 function lazyRender<M>(getter: () => M | null, render: (mod: M) => unknown) {
   const mod = getter();
@@ -1240,6 +1251,41 @@ export function renderApp(state: AppViewState) {
                   onSaveKey: (key) => saveSkillApiKey(state, key),
                   onInstall: (skillKey, name, installId) =>
                     installSkill(state, skillKey, name, installId),
+                }),
+              )
+            : nothing
+        }
+
+        ${
+          state.tab === "files"
+            ? lazyRender(lazyFiles, (m) =>
+                m.renderFiles({
+                  workspaceLoading: state.workspaceLoading,
+                  workspaceBusy: state.workspaceBusy,
+                  workspaceError: state.workspaceError,
+                  workspaceList: state.workspaceList,
+                  workspaceSelectedPath: state.workspaceSelectedPath,
+                  workspacePreview: state.workspacePreview,
+                  workspaceUpload: state.workspaceUpload,
+                  workspaceSplitRatio: state.workspaceSplitRatio,
+                  canNavigateBack: state.workspaceHistoryIndex > 0,
+                  canNavigateForward:
+                    state.workspaceHistoryIndex >= 0 &&
+                    state.workspaceHistoryIndex < state.workspaceHistory.length - 1,
+                  onRefreshWorkspace: () => refreshWorkspace(state),
+                  onSelectWorkspaceEntry: (entry) => selectWorkspaceEntry(state, entry),
+                  onOpenWorkspaceEntry: (entry) => openWorkspaceEntry(state, entry),
+                  onNavigateWorkspace: (nextPath) => state.navigateWorkspace(nextPath),
+                  onNavigateBack: () => state.handleWorkspaceBack(),
+                  onNavigateForward: () => state.handleWorkspaceForward(),
+                  onDownloadWorkspaceFile: (filePath) => downloadWorkspaceFile(state, filePath),
+                  onUploadWorkspaceFiles: (files) => uploadWorkspaceFiles(state, files),
+                  onCreateWorkspaceDirectory: (targetPath) =>
+                    createWorkspaceDirectory(state, targetPath),
+                  onRenameWorkspaceEntry: (entryPath, newName) =>
+                    renameWorkspaceEntry(state, entryPath, newName),
+                  onDeleteWorkspaceEntry: (entryPath) => deleteWorkspaceEntry(state, entryPath),
+                  onSplitRatioChange: (ratio) => state.handleWorkspaceSplitRatioChange(ratio),
                 }),
               )
             : nothing

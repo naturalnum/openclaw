@@ -86,6 +86,8 @@ const METHOD_SCOPE_GROUPS: Record<OperatorScope, readonly string[]> = {
     "talk.config",
     "agents.files.list",
     "agents.files.get",
+    "workspace.list",
+    "workspace.download",
   ],
   [WRITE_SCOPE]: [
     "send",
@@ -105,6 +107,7 @@ const METHOD_SCOPE_GROUPS: Record<OperatorScope, readonly string[]> = {
     "browser.request",
     "push.test",
     "node.pending.enqueue",
+    "workspace.upload",
   ],
   [ADMIN_SCOPE]: [
     "channels.logout",
@@ -130,6 +133,9 @@ const METHOD_SCOPE_GROUPS: Record<OperatorScope, readonly string[]> = {
     "set-heartbeats",
     "system-event",
     "agents.files.set",
+    "workspace.mkdir",
+    "workspace.delete",
+    "workspace.rename",
   ],
 };
 

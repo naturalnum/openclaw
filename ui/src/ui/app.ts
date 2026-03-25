@@ -59,6 +59,11 @@ import type { DevicePairingList } from "./controllers/devices.ts";
 import type { ExecApprovalRequest } from "./controllers/exec-approval.ts";
 import type { ExecApprovalsFile, ExecApprovalsSnapshot } from "./controllers/exec-approvals.ts";
 import type { SkillMessage } from "./controllers/skills.ts";
+import {
+  loadWorkspaceList,
+  type WorkspacePreviewState,
+  type WorkspaceUploadState,
+} from "./controllers/workspace.ts";
 import type { GatewayBrowserClient, GatewayHelloOk } from "./gateway.ts";
 import type { Tab } from "./navigation.ts";
 import { loadSettings, type UiSettings } from "./storage.ts";
@@ -83,6 +88,7 @@ import type {
   StatusSummary,
   NostrProfile,
   ToolsCatalogResult,
+  WorkspaceListResult,
 } from "./types.ts";
 import { type ChatAttachment, type ChatQueueItem, type CronFormState } from "./ui-types.ts";
 import { generateUUID } from "./uuid.ts";
@@ -173,6 +179,16 @@ export class OpenClawApp extends LitElement {
   @state() sidebarContent: string | null = null;
   @state() sidebarError: string | null = null;
   @state() splitRatio = this.settings.splitRatio;
+  @state() workspaceLoading = false;
+  @state() workspaceBusy = false;
+  @state() workspaceError: string | null = null;
+  @state() workspaceList: WorkspaceListResult | null = null;
+  @state() workspaceSelectedPath: string | null = null;
+  @state() workspacePreview: WorkspacePreviewState | null = null;
+  @state() workspaceUpload: WorkspaceUploadState | null = null;
+  @state() workspaceSplitRatio = this.settings.workspaceSplitRatio;
+  @state() workspaceHistoryIndex = -1;
+  workspaceHistory: string[] = [];
 
   @state() nodesLoading = false;
   @state() nodes: Array<Record<string, unknown>> = [];
@@ -713,6 +729,82 @@ export class OpenClawApp extends LitElement {
     const newRatio = Math.max(0.4, Math.min(0.7, ratio));
     this.splitRatio = newRatio;
     this.applySettings({ ...this.settings, splitRatio: newRatio });
+  }
+
+  private ensureWorkspaceHistory(path = this.workspaceList?.currentPath ?? "") {
+    if (this.workspaceHistoryIndex >= 0) {
+      return;
+    }
+    this.workspaceHistory = [path];
+    this.workspaceHistoryIndex = 0;
+  }
+
+  private commitWorkspaceHistory(path: string, mode: "push" | "replace") {
+    const normalized = path.trim();
+    if (this.workspaceHistoryIndex < 0) {
+      this.workspaceHistory = [normalized];
+      this.workspaceHistoryIndex = 0;
+      return;
+    }
+    if (mode === "replace") {
+      const nextHistory = [...this.workspaceHistory];
+      nextHistory[this.workspaceHistoryIndex] = normalized;
+      this.workspaceHistory = nextHistory;
+      return;
+    }
+    if (this.workspaceHistory[this.workspaceHistoryIndex] === normalized) {
+      return;
+    }
+    const nextHistory = this.workspaceHistory.slice(0, this.workspaceHistoryIndex + 1);
+    nextHistory.push(normalized);
+    this.workspaceHistory = nextHistory;
+    this.workspaceHistoryIndex = nextHistory.length - 1;
+  }
+
+  async navigateWorkspace(path: string, opts?: { history?: "push" | "replace" | "preserve" }) {
+    const historyMode = opts?.history ?? "push";
+    if (historyMode === "push" && this.workspaceList) {
+      this.ensureWorkspaceHistory(this.workspaceList.currentPath);
+    }
+    await loadWorkspaceList(this, path);
+    const resolvedPath = this.workspaceList?.currentPath;
+    if (typeof resolvedPath !== "string") {
+      return;
+    }
+    if (historyMode === "preserve") {
+      this.ensureWorkspaceHistory(resolvedPath);
+      return;
+    }
+    this.commitWorkspaceHistory(resolvedPath, historyMode);
+  }
+
+  async handleWorkspaceBack() {
+    if (this.workspaceHistoryIndex <= 0) {
+      return;
+    }
+    const nextIndex = this.workspaceHistoryIndex - 1;
+    const targetPath = this.workspaceHistory[nextIndex];
+    await this.navigateWorkspace(targetPath, { history: "preserve" });
+    this.workspaceHistoryIndex = nextIndex;
+  }
+
+  async handleWorkspaceForward() {
+    if (
+      this.workspaceHistoryIndex < 0 ||
+      this.workspaceHistoryIndex >= this.workspaceHistory.length - 1
+    ) {
+      return;
+    }
+    const nextIndex = this.workspaceHistoryIndex + 1;
+    const targetPath = this.workspaceHistory[nextIndex];
+    await this.navigateWorkspace(targetPath, { history: "preserve" });
+    this.workspaceHistoryIndex = nextIndex;
+  }
+
+  handleWorkspaceSplitRatioChange(ratio: number) {
+    const newRatio = Math.max(0.35, Math.min(0.72, ratio));
+    this.workspaceSplitRatio = newRatio;
+    this.applySettings({ ...this.settings, workspaceSplitRatio: newRatio });
   }
 
   render() {

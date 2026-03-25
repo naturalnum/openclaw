@@ -28,6 +28,7 @@ import {
   type ResolvedGatewayAuth,
 } from "./auth.js";
 import { normalizeCanvasScopedUrl } from "./canvas-capability.js";
+import { normalizeControlUiBasePath } from "./control-ui-shared.js";
 import {
   handleControlUiAvatarRequest,
   handleControlUiHttpRequest,
@@ -58,6 +59,10 @@ import { resolveRequestClientIp } from "./net.js";
 import { handleOpenAiHttpRequest } from "./openai-http.js";
 import { handleOpenResponsesHttpRequest } from "./openresponses-http.js";
 import { DEDUPE_MAX, DEDUPE_TTL_MS } from "./server-constants.js";
+import {
+  handleWorkspaceUploadHttpRequest,
+  WORKSPACE_UPLOAD_HTTP_PATH,
+} from "./server-methods/workspace.js";
 import {
   authorizeCanvasRequest,
   enforcePluginRouteGatewayAuth,
@@ -884,12 +889,26 @@ export function createGatewayHttpServer(opts: {
       );
 
       if (controlUiEnabled) {
+        const controlUiBase = normalizeControlUiBasePath(controlUiBasePath);
         requestStages.push({
           name: "control-ui-avatar",
           run: () =>
             handleControlUiAvatarRequest(req, res, {
               basePath: controlUiBasePath,
               resolveAvatar: (agentId) => resolveAgentAvatar(configSnapshot, agentId),
+            }),
+        });
+        requestStages.push({
+          name: "control-ui-workspace-upload",
+          run: () =>
+            handleWorkspaceUploadHttpRequest(req, res, {
+              pathname: controlUiBase
+                ? `${controlUiBase}${WORKSPACE_UPLOAD_HTTP_PATH}`
+                : WORKSPACE_UPLOAD_HTTP_PATH,
+              auth: resolvedAuth,
+              trustedProxies,
+              allowRealIpFallback,
+              rateLimiter,
             }),
         });
         requestStages.push({

@@ -664,3 +664,34 @@ export type AttentionItem = {
   href?: string;
   external?: boolean;
 };
+
+// ── Workspace ───────────────────────────────────────
+
+export type WorkspaceEntry = {
+  name: string;
+  path: string;
+  kind: "file" | "directory";
+  mimeType?: string;
+  size?: number;
+  updatedAtMs?: number;
+  previewKind?: "text" | "image" | "pdf" | "none";
+  extension?: string;
+};
+
+export type WorkspaceListResult = {
+  root: string;
+  currentPath: string;
+  parentPath: string | null;
+  entries: WorkspaceEntry[];
+};
+
+export type WorkspaceDownloadResult = {
+  file: {
+    name: string;
+    path: string;
+    mimeType: string;
+    size: number;
+    contentBase64: string;
+    previewKind: "text" | "image" | "pdf" | "none";
+  };
+};

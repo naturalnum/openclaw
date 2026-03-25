@@ -5,6 +5,7 @@ import type { DevicePairingList } from "./controllers/devices.ts";
 import type { ExecApprovalRequest } from "./controllers/exec-approval.ts";
 import type { ExecApprovalsFile, ExecApprovalsSnapshot } from "./controllers/exec-approvals.ts";
 import type { SkillMessage } from "./controllers/skills.ts";
+import type { WorkspacePreviewState, WorkspaceUploadState } from "./controllers/workspace.ts";
 import type { GatewayBrowserClient, GatewayHelloOk } from "./gateway.ts";
 import type { Tab } from "./navigation.ts";
 import type { UiSettings } from "./storage.ts";
@@ -31,6 +32,7 @@ import type {
   SkillStatusReport,
   StatusSummary,
   ToolsCatalogResult,
+  WorkspaceListResult,
 } from "./types.ts";
 import type { ChatAttachment, ChatQueueItem } from "./ui-types.ts";
 import type { NostrProfileFormState } from "./views/channels.nostr-profile-form.ts";
@@ -84,6 +86,9 @@ export type AppViewState = {
   sidebarContent: string | null;
   sidebarError: string | null;
   splitRatio: number;
+  workspaceSplitRatio: number;
+  workspaceHistoryIndex: number;
+  workspaceHistory: string[];
   scrollToBottom: (opts?: { smooth?: boolean }) => void;
   devicesLoading: boolean;
   devicesError: string | null;
@@ -269,6 +274,13 @@ export type AppViewState = {
     skillEdits: Record<string, string>;
     skillMessages: Record<string, SkillMessage>;
     skillsBusyKey: string | null;
+    workspaceLoading: boolean;
+    workspaceBusy: boolean;
+    workspaceError: string | null;
+    workspaceList: WorkspaceListResult | null;
+    workspaceSelectedPath: string | null;
+    workspacePreview: WorkspacePreviewState | null;
+    workspaceUpload: WorkspaceUploadState | null;
     healthLoading: boolean;
     healthResult: HealthSummary | null;
     healthError: string | null;
@@ -368,4 +380,11 @@ export type AppViewState = {
     handleOpenSidebar: (content: string) => void;
     handleCloseSidebar: () => void;
     handleSplitRatioChange: (ratio: number) => void;
+    navigateWorkspace: (
+      path: string,
+      opts?: { history?: "push" | "replace" | "preserve" },
+    ) => Promise<void>;
+    handleWorkspaceBack: () => Promise<void>;
+    handleWorkspaceForward: () => Promise<void>;
+    handleWorkspaceSplitRatioChange: (ratio: number) => void;
   };

@@ -226,6 +226,18 @@ import {
   TickEventSchema,
   type UpdateRunParams,
   UpdateRunParamsSchema,
+  type WorkspaceDeleteParams,
+  WorkspaceDeleteParamsSchema,
+  type WorkspaceDownloadParams,
+  WorkspaceDownloadParamsSchema,
+  type WorkspaceListParams,
+  WorkspaceListParamsSchema,
+  type WorkspaceMkdirParams,
+  WorkspaceMkdirParamsSchema,
+  type WorkspaceRenameParams,
+  WorkspaceRenameParamsSchema,
+  type WorkspaceUploadParams,
+  WorkspaceUploadParamsSchema,
   type WakeParams,
   WakeParamsSchema,
   type WebLoginStartParams,
@@ -391,6 +403,23 @@ export const validateDeviceTokenRotateParams = ajv.compile<DeviceTokenRotatePara
 );
 export const validateDeviceTokenRevokeParams = ajv.compile<DeviceTokenRevokeParams>(
   DeviceTokenRevokeParamsSchema,
+);
+export const validateWorkspaceListParams =
+  ajv.compile<WorkspaceListParams>(WorkspaceListParamsSchema);
+export const validateWorkspaceDownloadParams = ajv.compile<WorkspaceDownloadParams>(
+  WorkspaceDownloadParamsSchema,
+);
+export const validateWorkspaceMkdirParams = ajv.compile<WorkspaceMkdirParams>(
+  WorkspaceMkdirParamsSchema,
+);
+export const validateWorkspaceDeleteParams = ajv.compile<WorkspaceDeleteParams>(
+  WorkspaceDeleteParamsSchema,
+);
+export const validateWorkspaceRenameParams = ajv.compile<WorkspaceRenameParams>(
+  WorkspaceRenameParamsSchema,
+);
+export const validateWorkspaceUploadParams = ajv.compile<WorkspaceUploadParams>(
+  WorkspaceUploadParamsSchema,
 );
 export const validateExecApprovalsGetParams = ajv.compile<ExecApprovalsGetParams>(
   ExecApprovalsGetParamsSchema,

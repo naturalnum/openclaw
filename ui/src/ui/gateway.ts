@@ -14,6 +14,13 @@ import { clearDeviceAuthToken, loadDeviceAuthToken, storeDeviceAuthToken } from 
 import { loadOrCreateDeviceIdentity, signDevicePayload } from "./device-identity.ts";
 import { generateUUID } from "./uuid.ts";
 
+const WORKSPACE_UPLOAD_HTTP_PATH = "/api/workspace/upload";
+
+export type GatewayUploadProgress = {
+  loaded: number;
+  total: number | null;
+};
+
 export type GatewayEventFrame = {
   type: "event";
   event: string;
@@ -477,6 +484,77 @@ export class GatewayBrowserClient {
     });
     this.ws.send(JSON.stringify(frame));
     return p;
+  }
+
+  async uploadWorkspaceFile(params: {
+    path: string;
+    file: File;
+    onProgress?: (progress: GatewayUploadProgress) => void;
+  }): Promise<void> {
+    const url = this.buildWorkspaceUploadUrl(params.path, params.file.name);
+    await new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", url, true);
+      if (params.file.type) {
+        xhr.setRequestHeader("Content-Type", params.file.type);
+      }
+      const bearer = this.opts.token ?? this.opts.password;
+      if (bearer) {
+        xhr.setRequestHeader("Authorization", `Bearer ${bearer}`);
+      }
+      xhr.upload.addEventListener("progress", (event) => {
+        params.onProgress?.({
+          loaded: event.loaded,
+          total: event.lengthComputable ? event.total : null,
+        });
+      });
+      xhr.addEventListener("error", () => reject(new Error("upload failed")));
+      xhr.addEventListener("abort", () => reject(new Error("upload aborted")));
+      xhr.addEventListener("load", () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve();
+          return;
+        }
+        reject(new Error(this.readUploadError(xhr)));
+      });
+      xhr.send(params.file);
+    });
+  }
+
+  private buildWorkspaceUploadUrl(targetPath: string, fileName: string): string {
+    const gatewayUrl = new URL(this.opts.url);
+    gatewayUrl.protocol = gatewayUrl.protocol === "wss:" ? "https:" : "http:";
+    const basePath =
+      gatewayUrl.pathname === "/"
+        ? ""
+        : gatewayUrl.pathname.endsWith("/")
+          ? gatewayUrl.pathname.slice(0, -1)
+          : gatewayUrl.pathname;
+    gatewayUrl.pathname = `${basePath}${WORKSPACE_UPLOAD_HTTP_PATH}`;
+    gatewayUrl.search = new URLSearchParams({
+      path: targetPath,
+      name: fileName,
+    }).toString();
+    return gatewayUrl.toString();
+  }
+
+  private readUploadError(xhr: XMLHttpRequest): string {
+    try {
+      const body = JSON.parse(xhr.responseText);
+      if (
+        body &&
+        typeof body === "object" &&
+        "error" in body &&
+        body.error &&
+        typeof body.error === "object" &&
+        "message" in body.error
+      ) {
+        return String(body.error.message);
+      }
+    } catch {
+      // Fall through to generic status text.
+    }
+    return `${xhr.status} ${xhr.statusText || "Upload failed"}`;
   }
 
   private queueConnect() {

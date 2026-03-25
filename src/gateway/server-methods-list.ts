@@ -103,6 +103,12 @@ const BASE_METHODS = [
   "chat.history",
   "chat.abort",
   "chat.send",
+  "workspace.list",
+  "workspace.download",
+  "workspace.mkdir",
+  "workspace.delete",
+  "workspace.rename",
+  "workspace.upload",
 ];
 
 export function listGatewayMethods(): string[] {
