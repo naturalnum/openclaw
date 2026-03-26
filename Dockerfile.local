@@ -1,0 +1,70 @@
+# syntax=docker/dockerfile:1.7
+# Local build: uses pre-built dist/ and pruned node_modules from a staged build context.
+# Do NOT use directly with `docker build .` — use scripts/build-docker-local.sh instead.
+#
+# Build context is prepared by the script (temp dir, no .dockerignore conflicts).
+# Skips: Bun install, pnpm build, pnpm ui:build, corepack prepare (not needed at runtime).
+#
+# Default config bundled from default_config/:
+#   - default_config/openclaw.json -> /root/.openclaw/openclaw.json
+#   - default_config/.env          -> loaded as env vars at container startup via CMD
+
+ARG NODE_IMAGE="node:24-bookworm-slim"
+
+FROM ${NODE_IMAGE}
+
+LABEL org.opencontainers.image.source="https://github.com/openclaw/openclaw" \
+  org.opencontainers.image.url="https://openclaw.ai" \
+  org.opencontainers.image.licenses="MIT" \
+  org.opencontainers.image.title="OpenClaw" \
+  org.opencontainers.image.description="OpenClaw gateway (local build)"
+
+WORKDIR /app
+
+# Switch to aliyun mirror (HTTP, no ca-certificates needed in slim image)
+RUN --mount=type=cache,id=openclaw-local-apt,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=openclaw-local-apt-lists,target=/var/lib/apt,sharing=locked \
+    sed -i 's|http://deb.debian.org|http://mirrors.aliyun.com|g' \
+      /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+    sed -i 's|http://deb.debian.org|http://mirrors.aliyun.com|g' \
+      /etc/apt/sources.list 2>/dev/null || true && \
+    apt-get update -qq && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      procps curl git openssl && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install clawhub CLI globally (use Taobao registry for faster resolution in CN)
+RUN --mount=type=cache,id=openclaw-local-npm,target=/root/.npm \
+    npm config set registry https://registry.npmmirror.com && \
+    npm install -g clawhub --prefer-offline && \
+    npm config set registry https://registry.npmjs.org
+
+# Copy application files
+COPY dist         ./dist
+COPY node_modules ./node_modules
+COPY package.json ./package.json
+COPY openclaw.mjs ./openclaw.mjs
+COPY extensions   ./extensions
+COPY skills       ./skills
+COPY docs         ./docs
+
+# Bundle default config: openclaw.json -> /root/.openclaw/
+COPY default_config/openclaw.json /root/.openclaw/openclaw.json
+
+# Bundle default .env -> /app/default.env (loaded at startup by CMD)
+COPY default_config/.env /app/default.env
+
+RUN ln -sf /app/openclaw.mjs /usr/local/bin/openclaw && \
+    chmod 755 /app/openclaw.mjs
+
+ENV NODE_ENV=production
+
+# Run as root
+USER root
+
+HEALTHCHECK --interval=3m --timeout=10s --start-period=15s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:18789/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+# Load default.env then start gateway.
+# Runtime env vars (docker run -e / --env-file) always win over default.env values.
+CMD ["sh", "-c", "set -a && . /app/default.env && set +a && node openclaw.mjs gateway"]
