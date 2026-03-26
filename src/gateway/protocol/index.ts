@@ -202,6 +202,14 @@ import {
   SessionsResolveParamsSchema,
   type SessionsUsageParams,
   SessionsUsageParamsSchema,
+  type SkillsRegistryInstallParams,
+  type SkillsRegistryInstallArchiveParams,
+  SkillsRegistryInstallArchiveParamsSchema,
+  SkillsRegistryInstallParamsSchema,
+  type SkillsRegistryListParams,
+  SkillsRegistryListParamsSchema,
+  type SkillsRegistryUninstallParams,
+  SkillsRegistryUninstallParamsSchema,
   type ShutdownEvent,
   ShutdownEventSchema,
   type SkillsBinsParams,
@@ -348,6 +356,17 @@ export const validateSessionsCompactParams = ajv.compile<SessionsCompactParams>(
 );
 export const validateSessionsUsageParams =
   ajv.compile<SessionsUsageParams>(SessionsUsageParamsSchema);
+export const validateSkillsRegistryListParams = ajv.compile<SkillsRegistryListParams>(
+  SkillsRegistryListParamsSchema,
+);
+export const validateSkillsRegistryInstallParams = ajv.compile<SkillsRegistryInstallParams>(
+  SkillsRegistryInstallParamsSchema,
+);
+export const validateSkillsRegistryInstallArchiveParams =
+  ajv.compile<SkillsRegistryInstallArchiveParams>(SkillsRegistryInstallArchiveParamsSchema);
+export const validateSkillsRegistryUninstallParams = ajv.compile<SkillsRegistryUninstallParams>(
+  SkillsRegistryUninstallParamsSchema,
+);
 export const validateConfigGetParams = ajv.compile<ConfigGetParams>(ConfigGetParamsSchema);
 export const validateConfigSetParams = ajv.compile<ConfigSetParams>(ConfigSetParamsSchema);
 export const validateConfigApplyParams = ajv.compile<ConfigApplyParams>(ConfigApplyParamsSchema);

@@ -16,7 +16,7 @@
 ### 最简启动（使用镜像内置默认配置）
 
 ```bash
-docker run --rm \
+docker run \
   -p 18789:18789 \
   openclaw:local
 ```
@@ -24,7 +24,7 @@ docker run --rm \
 ### 挂载外部配置文件（推荐生产/开发使用）
 
 ```bash
-docker run --rm \
+docker run \
   -p 18789:18789 \
   -v "$HOME/.openclaw/openclaw.json:/root/.openclaw/openclaw.json:ro" \
   -v "$(pwd)/default_config/.env:/app/default.env:ro" \
@@ -34,7 +34,7 @@ docker run --rm \
 ### 使用 `--env-file` 传入环境变量（优先级高于 default.env）
 
 ```bash
-docker run --rm \
+docker run \
   -p 18789:18789 \
   -v "$HOME/.openclaw/openclaw.json:/root/.openclaw/openclaw.json:ro" \
   --env-file ./my.env \
@@ -44,7 +44,7 @@ docker run --rm \
 ### 使用 `-e` 单独覆盖某个变量
 
 ```bash
-docker run --rm \
+docker run \
   -p 18789:18789 \
   -e OPENAI_API_KEY=sk-xxx \
   -e OPENCLAW_GATEWAY_TOKEN=your-token \
@@ -111,7 +111,7 @@ docker run -d \
 或通过命令行参数覆盖（无需修改配置文件）：
 
 ```bash
-docker run --rm -p 18789:18789 openclaw:local \
+docker run -p 18789:18789 openclaw:local \
   sh -c "set -a && . /app/default.env && set +a && node openclaw.mjs gateway --bind lan --allow-unconfigured"
 ```
 
@@ -160,7 +160,7 @@ cp default_config/openclaw.json my-openclaw.json
 ./scripts/build-docker-local.sh
 
 # 4. 启动容器
-docker run --rm \
+docker run \
   -p 18789:18789 \
   -v "$(pwd)/my-openclaw.json:/root/.openclaw/openclaw.json:ro" \
   --env-file ./my.env \

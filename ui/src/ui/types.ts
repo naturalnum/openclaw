@@ -607,6 +607,25 @@ export type SkillStatusReport = {
   skills: SkillStatusEntry[];
 };
 
+export type SkillsRegistryCategory =
+  import("../../../src/gateway/protocol/schema/types.js").SkillsRegistryCategory;
+export type SkillsRegistryCatalogItem =
+  import("../../../src/gateway/protocol/schema/types.js").SkillsRegistryCatalogItem;
+export type SkillsRegistryInstallState =
+  import("../../../src/gateway/protocol/schema/types.js").SkillsRegistryInstallState;
+export type SkillsRegistryPagination =
+  import("../../../src/gateway/protocol/schema/types.js").SkillsRegistryPagination;
+export type SkillsRegistryListResult =
+  import("../../../src/gateway/protocol/schema/types.js").SkillsRegistryListResult;
+export type SkillsRegistryInstallResult =
+  import("../../../src/gateway/protocol/schema/types.js").SkillsRegistryInstallResult;
+export type SkillsRegistryInstallArchiveResult =
+  import("../../../src/gateway/protocol/schema/types.js").SkillsRegistryInstallArchiveResult;
+export type SkillsRegistryUninstallResult =
+  import("../../../src/gateway/protocol/schema/types.js").SkillsRegistryUninstallResult;
+export type SkillsRegistryInstallFilter = "all" | "installed" | "not_installed";
+export type SkillsRegistrySortBy = "comprehensive" | "downloads" | "updated";
+
 export type StatusSummary = Record<string, unknown>;
 
 export type HealthSnapshot = Record<string, unknown>;

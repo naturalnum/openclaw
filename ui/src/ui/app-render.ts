@@ -71,11 +71,14 @@ import { loadNodes } from "./controllers/nodes.ts";
 import { loadPresence } from "./controllers/presence.ts";
 import { deleteSessionAndRefresh, loadSessions, patchSession } from "./controllers/sessions.ts";
 import {
-  installSkill,
+  importRegistrySkillArchive,
   loadSkills,
-  saveSkillApiKey,
-  updateSkillEdit,
-  updateSkillEnabled,
+  setSkillsCategory,
+  setSkillsFilter,
+  setSkillsInstallFilter,
+  setSkillsPage,
+  setSkillsSortBy,
+  toggleRegistrySkillInstall,
 } from "./controllers/skills.ts";
 import "./components/dashboard-header.ts";
 import {
@@ -183,6 +186,10 @@ function uniquePreserveOrder(values: string[]): string[] {
     output.push(normalized);
   }
   return output;
+}
+
+function skillsPageSubtitle(total: number): string {
+  return `浏览技能中心里的技能，按主题搜索，并直接安装到当前 OpenClaw 节点中。当前共有 ${new Intl.NumberFormat().format(total)} 个匹配技能。`;
 }
 
 type DismissedUpdateBanner = {
@@ -612,7 +619,19 @@ export function renderApp(state: AppViewState) {
                     ? renderChatSessionSelect(state)
                     : html`<div class="page-title">${titleForTab(state.tab)}</div>`
                 }
-                ${isChat ? nothing : html`<div class="page-sub">${subtitleForTab(state.tab)}</div>`}
+                ${
+                  isChat
+                    ? nothing
+                    : html`
+                        <div class="page-sub">
+                          ${
+                            state.tab === "skills"
+                              ? skillsPageSubtitle(state.skillsPagination.total)
+                              : subtitleForTab(state.tab)
+                          }
+                        </div>
+                      `
+                }
               </div>
               <div class="page-meta">
                 ${state.lastError ? html`<div class="pill danger">${state.lastError}</div>` : nothing}
@@ -1239,19 +1258,33 @@ export function renderApp(state: AppViewState) {
                 m.renderSkills({
                   connected: state.connected,
                   loading: state.skillsLoading,
-                  report: state.skillsReport,
+                  archiveBusy: state.skillsArchiveBusy,
+                  items: state.skillsCatalog,
+                  categories: state.skillsCategories,
+                  pagination: state.skillsPagination,
                   error: state.skillsError,
+                  notice: state.skillsNotice,
                   filter: state.skillsFilter,
-                  edits: state.skillEdits,
+                  selectedCategory: state.skillsCategory,
+                  sortBy: state.skillsSortBy,
+                  installFilter: state.skillsInstallFilter,
                   messages: state.skillMessages,
                   busyKey: state.skillsBusyKey,
-                  onFilterChange: (next) => (state.skillsFilter = next),
+                  registryBaseUrl: state.skillsRegistryBaseUrl,
+                  onSearchChange: (next) => setSkillsFilter(state, next),
+                  onCategoryChange: (next) => setSkillsCategory(state, next),
+                  onSortChange: (next) => setSkillsSortBy(state, next),
+                  onInstallFilterChange: (next) => setSkillsInstallFilter(state, next),
                   onRefresh: () => loadSkills(state, { clearMessages: true }),
-                  onToggle: (key, enabled) => updateSkillEnabled(state, key, enabled),
-                  onEdit: (key, value) => updateSkillEdit(state, key, value),
-                  onSaveKey: (key) => saveSkillApiKey(state, key),
-                  onInstall: (skillKey, name, installId) =>
-                    installSkill(state, skillKey, name, installId),
+                  onPageChange: (next) => setSkillsPage(state, next),
+                  onToggleInstall: (item) => toggleRegistrySkillInstall(state, item),
+                  onImportArchive: (file) => void importRegistrySkillArchive(state, file),
+                  onDismissNotice: () => {
+                    state.skillsNotice = null;
+                  },
+                  onDismissError: () => {
+                    state.skillsError = null;
+                  },
                 }),
               )
             : nothing
