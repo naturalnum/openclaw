@@ -59,15 +59,18 @@ export const skillsRegistryHandlers: GatewayRequestHandlers = {
       respond(false, undefined, buildRegistryUnavailableError());
       return;
     }
+    // Always use the configured baseUrl so the "Open Skills Center" button is shown
+    // regardless of whether the remote registry request succeeds.
+    const configBaseUrl = cfg.skills?.registry?.baseUrl?.trim() ?? "";
+    const p = params as {
+      q?: string;
+      category?: string;
+      sort?: "comprehensive" | "downloads" | "updated";
+      page?: number;
+      limit?: number;
+      installFilter?: SkillsRegistryInstallFilter;
+    };
     try {
-      const p = params as {
-        q?: string;
-        category?: string;
-        sort?: "comprehensive" | "downloads" | "updated";
-        page?: number;
-        limit?: number;
-        installFilter?: SkillsRegistryInstallFilter;
-      };
       const remote = await client.listCatalog({
         q: p.q,
         category: p.category,
@@ -85,7 +88,7 @@ export const skillsRegistryHandlers: GatewayRequestHandlers = {
       respond(
         true,
         paginateRegistryCatalogItems({
-          baseUrl: remote.baseUrl,
+          baseUrl: configBaseUrl || remote.baseUrl,
           categories: remote.categories,
           items: filtered,
           page: p.page,
@@ -94,7 +97,19 @@ export const skillsRegistryHandlers: GatewayRequestHandlers = {
         undefined,
       );
     } catch (err) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, getErrorMessage(err)));
+      // On fetch failure, still return success with the configured baseUrl and empty catalog
+      // so the "Open Skills Center" button remains visible in the UI.
+      respond(
+        true,
+        paginateRegistryCatalogItems({
+          baseUrl: configBaseUrl,
+          categories: [],
+          items: [],
+          page: p.page,
+          limit: p.limit,
+        }),
+        errorShape(ErrorCodes.UNAVAILABLE, getErrorMessage(err)),
+      );
     }
   },
   "skills.registry.install": async ({ params, respond }) => {

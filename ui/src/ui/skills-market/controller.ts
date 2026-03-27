@@ -120,7 +120,8 @@ async function loadSkillsCatalog(state: SkillsMarketState): Promise<void> {
   );
   state.skillsCatalog = res.items;
   state.skillsCategories = res.categories;
-  state.skillsRegistryBaseUrl = res.baseUrl || null;
+  // Prefer the configured baseUrl from the response; keep existing value as fallback.
+  state.skillsRegistryBaseUrl = res.baseUrl || state.skillsRegistryBaseUrl;
   state.skillsPagination = res.pagination;
 }
 
@@ -151,7 +152,7 @@ export async function loadSkillsMarket(state: SkillsMarketState, options?: LoadS
       if (results[1]?.status === "rejected") {
         state.skillsCatalog = [];
         state.skillsCategories = [];
-        state.skillsRegistryBaseUrl = null;
+        // Keep skillsRegistryBaseUrl so the "Open Skills Center" button stays visible on error.
         state.skillsPagination = { ...DEFAULT_SKILLS_REGISTRY_PAGINATION };
       }
     }
