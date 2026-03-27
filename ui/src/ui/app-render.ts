@@ -91,7 +91,6 @@ import {
   renameWorkspaceEntry,
   uploadWorkspaceFiles,
 } from "./controllers/workspace.ts";
-import { buildExternalLinkRel, EXTERNAL_LINK_TARGET } from "./external-link.ts";
 import { icons } from "./icons.ts";
 import { normalizeBasePath, TAB_GROUPS, subtitleForTab, titleForTab } from "./navigation.ts";
 import { agentLogoUrl } from "./views/agents-utils.ts";
@@ -499,38 +498,22 @@ export function renderApp(state: AppViewState) {
             </div>
             <div class="sidebar-shell__body">
               <nav class="sidebar-nav">
-                ${TAB_GROUPS.map((group) => {
-                  const isGroupCollapsed = state.settings.navGroupsCollapsed[group.label] ?? false;
-                  const hasActiveTab = group.tabs.some((tab) => tab === state.tab);
-                  const showItems = navCollapsed || hasActiveTab || !isGroupCollapsed;
-
+                ${TAB_GROUPS.filter((g) => g.label === "main").map((group) => {
                   return html`
-                    <section class="nav-section ${!showItems ? "nav-section--collapsed" : ""}">
-                      ${
-                        !navCollapsed
-                          ? html`
-                              <button
-                                class="nav-section__label"
-                                @click=${() => {
-                                  const next = { ...state.settings.navGroupsCollapsed };
-                                  next[group.label] = !isGroupCollapsed;
-                                  state.applySettings({
-                                    ...state.settings,
-                                    navGroupsCollapsed: next,
-                                  });
-                                }}
-                                aria-expanded=${showItems}
-                              >
-                                <span class="nav-section__label-text">${t(`nav.${group.label}`)}</span>
-                                <span class="nav-section__chevron">
-                                  ${showItems ? icons.chevronDown : icons.chevronRight}
-                                </span>
-                              </button>
-                            `
-                          : nothing
-                      }
+                    <section class="nav-section">
                       <div class="nav-section__items">
-                        ${group.tabs.map((tab) => renderTab(state, tab, { collapsed: navCollapsed }))}
+                        ${group.tabs.map(
+                          (tab) => html`
+                          ${
+                            tab === "cron"
+                              ? html`
+                                  <hr class="nav-divider" />
+                                `
+                              : nothing
+                          }
+                          ${renderTab(state, tab, { collapsed: navCollapsed })}
+                        `,
+                        )}
                       </div>
                     </section>
                   `;
@@ -539,23 +522,6 @@ export function renderApp(state: AppViewState) {
             </div>
             <div class="sidebar-shell__footer">
               <div class="sidebar-utility-group">
-                <a
-                  class="nav-item nav-item--external sidebar-utility-link"
-                  href="https://docs.openclaw.ai"
-                  target=${EXTERNAL_LINK_TARGET}
-                  rel=${buildExternalLinkRel()}
-                  title="${t("common.docs")} (opens in new tab)"
-                >
-                  <span class="nav-item__icon" aria-hidden="true">${icons.book}</span>
-                  ${
-                    !navCollapsed
-                      ? html`
-                          <span class="nav-item__text">${t("common.docs")}</span>
-                          <span class="nav-item__external-icon">${icons.externalLink}</span>
-                        `
-                      : nothing
-                  }
-                </a>
                 ${(() => {
                   const version = state.hello?.server?.version ?? "";
                   return version

@@ -497,6 +497,12 @@
   display: none;
 }
 
+.nav-divider {
+  border: none;
+  border-top: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  margin: 4px 8px;
+}
+
 .nav-section__label {
   display: flex;
   align-items: center;

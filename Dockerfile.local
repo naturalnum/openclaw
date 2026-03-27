@@ -29,14 +29,41 @@ RUN --mount=type=cache,id=openclaw-local-apt,target=/var/cache/apt,sharing=locke
     sed -i 's|http://deb.debian.org|http://mirrors.aliyun.com|g' \
       /etc/apt/sources.list 2>/dev/null || true && \
     apt-get update -qq && \
+    DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      procps curl git openssl && \
+      ant ant-optional bash build-essential ca-certificates curl \
+      ffmpeg fonts-noto-cjk fonts-wqy-zenhei gdal-bin ghostscript git \
+      imagemagick inkscape libreoffice libfribidi-dev libfreetype6-dev \
+      libgdal-dev libheif-examples libharfbuzz-dev libjpeg-dev libjxr-tools \
+      liblcms2-dev libopenjp2-7-dev libpq-dev libproj-dev libspatialindex-dev \
+      libtiff6 libwebp-dev libxcb1-dev libxml2-dev libxslt1-dev \
+      openssh-client openssl pandoc pkg-config poppler-utils procps \
+      proj-bin python3-dev python3-pip sshpass tesseract-ocr \
+      texlive-xetex zlib1g-dev && \
     rm -rf /var/lib/apt/lists/*
 
-# Install clawhub CLI globally (use Taobao registry for faster resolution in CN)
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
+ENV PIP_DEFAULT_TIMEOUT=300
+ENV PIP_RETRIES=10
+
+# Install Python runtime dependencies (using Aliyun PyPI mirror for CN speed)
+COPY default_config/requirements-openclaw-runtime.txt /tmp/requirements-openclaw-runtime.txt
+RUN python3 -m pip install -i https://mirrors.aliyun.com/pypi/simple/ --upgrade pip setuptools wheel && \
+    python3 -m pip install -i https://mirrors.aliyun.com/pypi/simple/ \
+      --default-timeout="$PIP_DEFAULT_TIMEOUT" --retries="$PIP_RETRIES" \
+      -r /tmp/requirements-openclaw-runtime.txt && \
+    python3 -m pip install -i https://mirrors.aliyun.com/pypi/simple/ \
+      --default-timeout="$PIP_DEFAULT_TIMEOUT" --retries="$PIP_RETRIES" \
+      --no-deps --only-binary=:all: vaex-core==4.19.0 && \
+    python3 -m pip install -i https://mirrors.aliyun.com/pypi/simple/ \
+      --default-timeout="$PIP_DEFAULT_TIMEOUT" --retries="$PIP_RETRIES" \
+      --upgrade "polars[rtcompat]" && \
+    rm -f /tmp/requirements-openclaw-runtime.txt
+
+# Install clawhub CLI and utility packages globally (use Taobao registry for faster resolution in CN)
 RUN --mount=type=cache,id=openclaw-local-npm,target=/root/.npm \
     npm config set registry https://registry.npmmirror.com && \
-    npm install -g clawhub --prefer-offline && \
+    npm install -g clawhub docx pptxgenjs --prefer-offline && \
     npm config set registry https://registry.npmjs.org
 
 # Copy application files

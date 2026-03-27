@@ -8,7 +8,7 @@
 # Examples:
 #   ./scripts/build-docker-local.sh
 #   ./scripts/build-docker-local.sh openclaw:local
-#   ./scripts/build-docker-local.sh openclaw:local docker.1ms.run/node:24-bookworm-slim
+#   ./scripts/build-docker-local.sh openclaw:local hub.rat.dev/node:24-bookworm-slim
 #
 # Requirements:
 #   - dist/ must exist (run pnpm build:docker && pnpm ui:build first if missing)
@@ -17,7 +17,7 @@
 set -euo pipefail
 
 IMAGE_TAG="${1:-openclaw:local}"
-NODE_IMAGE="${2:-docker.1ms.run/node:24-bookworm-slim}"
+NODE_IMAGE="${2:-hub.rat.dev/node:24-bookworm-slim}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CTX_DIR="$(mktemp -d /tmp/openclaw-docker-ctx.XXXXXX)"

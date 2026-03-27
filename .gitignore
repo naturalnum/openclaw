@@ -136,3 +136,5 @@ docs/superpowers
 .vscode
 .qoder
 default_config/
+openclaw-local*
+temp/
