@@ -23,8 +23,8 @@ import type { GatewayRequestHandlers } from "./types.js";
 
 const WORKSPACE_DOWNLOAD_MAX_BYTES = 32 * 1024 * 1024;
 const WORKSPACE_UPLOAD_FILE_MAX_BYTES = 16 * 1024 * 1024;
-const WORKSPACE_UPLOAD_TOTAL_MAX_BYTES = 32 * 1024 * 1024;
-const WORKSPACE_UPLOAD_HTTP_MAX_BYTES = 512 * 1024 * 1024;
+const WORKSPACE_UPLOAD_TOTAL_MAX_BYTES = 10 * 1024 * 1024 * 1024; // 10 GB
+const WORKSPACE_UPLOAD_HTTP_MAX_BYTES = 10 * 1024 * 1024 * 1024; // 10 GB
 export const WORKSPACE_UPLOAD_HTTP_PATH = "/api/workspace/upload";
 
 type WorkspaceEntry = {

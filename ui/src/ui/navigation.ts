@@ -2,7 +2,7 @@ import { t } from "../i18n/index.ts";
 import type { IconName } from "./icons.js";
 
 export const TAB_GROUPS = [
-  { label: "main", tabs: ["chat", "skills", "files", "cron", "usage"] },
+  { label: "main", tabs: ["chat", "skills", "files", "cron", "usage", "logs"] },
   { label: "chat", tabs: ["chat"] },
   {
     label: "control",
