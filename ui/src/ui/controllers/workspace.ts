@@ -51,16 +51,6 @@ function dataUrlFromBase64(base64: string, mimeType: string): string {
   return `data:${mimeType};base64,${base64}`;
 }
 
-function downloadBlob(filename: string, bytes: Uint8Array<ArrayBuffer>, mimeType: string) {
-  const blob = new Blob([bytes], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
-}
-
 async function requestWorkspaceFile(state: WorkspaceState, filePath: string) {
   if (!state.client || !state.connected) {
     throw new Error("workspace unavailable while disconnected");
@@ -186,8 +176,7 @@ export async function downloadWorkspaceFile(state: WorkspaceState, filePath: str
   state.workspaceBusy = true;
   state.workspaceError = null;
   try {
-    const res = await requestWorkspaceFile(state, filePath);
-    downloadBlob(res.file.name, bytesFromBase64(res.file.contentBase64), res.file.mimeType);
+    await state.client.downloadWorkspaceFile({ path: filePath });
   } catch (err) {
     state.workspaceError = getErrorMessage(err);
   } finally {

@@ -15,6 +15,7 @@ import { loadOrCreateDeviceIdentity, signDevicePayload } from "./device-identity
 import { generateUUID } from "./uuid.ts";
 
 const WORKSPACE_UPLOAD_HTTP_PATH = "/api/workspace/upload";
+const WORKSPACE_DOWNLOAD_HTTP_PATH = "/api/workspace/download";
 
 export type GatewayUploadProgress = {
   loaded: number;
@@ -521,6 +522,44 @@ export class GatewayBrowserClient {
     });
   }
 
+  async downloadWorkspaceFile(params: { path: string }): Promise<void> {
+    const url = this.buildWorkspaceDownloadUrl();
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = url;
+    form.style.display = "none";
+
+    const frame = document.createElement("iframe");
+    frame.name = `workspace-download-${generateUUID()}`;
+    frame.style.display = "none";
+    form.target = frame.name;
+
+    const appendField = (name: string, value: string | undefined) => {
+      if (!value) {
+        return;
+      }
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = name;
+      input.value = value;
+      form.appendChild(input);
+    };
+
+    appendField("path", params.path);
+    appendField("token", this.opts.token?.trim() || undefined);
+    appendField(
+      "password",
+      !this.opts.token?.trim() ? this.opts.password?.trim() || undefined : undefined,
+    );
+
+    document.body.append(frame, form);
+    form.submit();
+    window.setTimeout(() => {
+      form.remove();
+      frame.remove();
+    }, 60_000);
+  }
+
   private buildWorkspaceUploadUrl(targetPath: string, fileName: string): string {
     const gatewayUrl = new URL(this.opts.url);
     gatewayUrl.protocol = gatewayUrl.protocol === "wss:" ? "https:" : "http:";
@@ -535,6 +574,20 @@ export class GatewayBrowserClient {
       path: targetPath,
       name: fileName,
     }).toString();
+    return gatewayUrl.toString();
+  }
+
+  private buildWorkspaceDownloadUrl(): string {
+    const gatewayUrl = new URL(this.opts.url);
+    gatewayUrl.protocol = gatewayUrl.protocol === "wss:" ? "https:" : "http:";
+    const basePath =
+      gatewayUrl.pathname === "/"
+        ? ""
+        : gatewayUrl.pathname.endsWith("/")
+          ? gatewayUrl.pathname.slice(0, -1)
+          : gatewayUrl.pathname;
+    gatewayUrl.pathname = `${basePath}${WORKSPACE_DOWNLOAD_HTTP_PATH}`;
+    gatewayUrl.search = "";
     return gatewayUrl.toString();
   }
 

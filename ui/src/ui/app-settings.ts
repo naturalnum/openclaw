@@ -23,6 +23,7 @@ import { loadPresence } from "./controllers/presence.ts";
 import { loadSessions } from "./controllers/sessions.ts";
 import { loadSkills } from "./controllers/skills.ts";
 import { loadUsage } from "./controllers/usage.ts";
+import { loadWorkspaceList } from "./controllers/workspace.ts";
 import {
   inferBasePathFromPathname,
   normalizeBasePath,
@@ -262,6 +263,9 @@ export async function refreshActiveTab(host: SettingsHost) {
       host as unknown as Parameters<typeof scheduleChatScroll>[0],
       !host.chatHasAutoScrolled,
     );
+  }
+  if (host.tab === "files") {
+    await loadWorkspaceList(host as unknown as OpenClawApp, undefined);
   }
   if (
     host.tab === "config" ||

@@ -1,13 +1,24 @@
 import { randomUUID } from "node:crypto";
+import syncFs from "node:fs";
 import fs from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
+import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../../agents/agent-scope.js";
+import { loadConfig } from "../../config/config.js";
 import { writeFileWithinRoot } from "../../infra/fs-safe.js";
+import { readRequestBodyWithLimit } from "../../infra/http-body.js";
 import { detectMime, getFileExtension } from "../../media/mime.js";
 import type { AuthRateLimiter } from "../auth-rate-limit.js";
-import type { ResolvedGatewayAuth } from "../auth.js";
+import { authorizeHttpGatewayConnect, type ResolvedGatewayAuth } from "../auth.js";
 import { authorizeGatewayBearerRequestOrReply } from "../http-auth-helpers.js";
-import { sendInvalidRequest, sendJson, sendMethodNotAllowed } from "../http-common.js";
+import {
+  sendGatewayAuthFailure,
+  sendInvalidRequest,
+  sendJson,
+  sendMethodNotAllowed,
+} from "../http-common.js";
+import { isLoopbackAddress, resolveRequestClientIp } from "../net.js";
+import { checkBrowserOrigin } from "../origin-check.js";
 import {
   ErrorCodes,
   errorShape,
@@ -21,11 +32,16 @@ import {
 } from "../protocol/index.js";
 import type { GatewayRequestHandlers } from "./types.js";
 
-const WORKSPACE_DOWNLOAD_MAX_BYTES = 32 * 1024 * 1024;
+const WORKSPACE_DOWNLOAD_MAX_BYTES = 10 * 1024 * 1024 * 1024; // 10 GB
 const WORKSPACE_UPLOAD_FILE_MAX_BYTES = 16 * 1024 * 1024;
 const WORKSPACE_UPLOAD_TOTAL_MAX_BYTES = 10 * 1024 * 1024 * 1024; // 10 GB
 const WORKSPACE_UPLOAD_HTTP_MAX_BYTES = 10 * 1024 * 1024 * 1024; // 10 GB
 export const WORKSPACE_UPLOAD_HTTP_PATH = "/api/workspace/upload";
+export const WORKSPACE_DOWNLOAD_HTTP_PATH = "/api/workspace/download";
+const WORKSPACE_UPLOAD_ALLOW_METHODS = "POST, OPTIONS";
+const WORKSPACE_UPLOAD_ALLOW_HEADERS_DEFAULT = "Authorization, Content-Type";
+const WORKSPACE_DOWNLOAD_ALLOW_METHODS = "GET, POST";
+const WORKSPACE_DOWNLOAD_FORM_MAX_BYTES = 64 * 1024;
 
 type WorkspaceEntry = {
   name: string;
@@ -50,7 +66,57 @@ class WorkspaceUploadTooLargeError extends Error {
 
 function resolveWorkspaceRoot(): string {
   const configuredRoot = process.env.OPENCLAW_WORKSPACE_ROOT?.trim();
-  return path.resolve(configuredRoot || process.cwd());
+  if (configuredRoot) {
+    return path.resolve(configuredRoot);
+  }
+  const cfg = loadConfig();
+  return path.resolve(resolveAgentWorkspaceDir(cfg, resolveDefaultAgentId(cfg)));
+}
+
+function resolveAllowedWorkspaceUploadOrigin(params: {
+  req: IncomingMessage;
+  trustedProxies?: string[];
+  allowRealIpFallback?: boolean;
+}): string | null {
+  const origin = String(params.req.headers.origin ?? "").trim();
+  if (!origin || origin === "null") {
+    return null;
+  }
+  const check = checkBrowserOrigin({
+    requestHost: Array.isArray(params.req.headers.host)
+      ? params.req.headers.host[0]
+      : params.req.headers.host,
+    origin,
+    allowHostHeaderOriginFallback: true,
+    isLocalClient: isLoopbackAddress(
+      resolveRequestClientIp(params.req, params.trustedProxies, params.allowRealIpFallback),
+    ),
+  });
+  return check.ok ? origin : null;
+}
+
+function applyWorkspaceUploadCorsHeaders(params: {
+  req: IncomingMessage;
+  res: ServerResponse;
+  trustedProxies?: string[];
+  allowRealIpFallback?: boolean;
+}): string | null {
+  const allowedOrigin = resolveAllowedWorkspaceUploadOrigin(params);
+  if (!allowedOrigin) {
+    return null;
+  }
+  params.res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+  params.res.setHeader("Vary", "Origin");
+  params.res.setHeader("Access-Control-Allow-Methods", WORKSPACE_UPLOAD_ALLOW_METHODS);
+  params.res.setHeader(
+    "Access-Control-Allow-Headers",
+    String(
+      params.req.headers["access-control-request-headers"] ??
+        WORKSPACE_UPLOAD_ALLOW_HEADERS_DEFAULT,
+    ),
+  );
+  params.res.setHeader("Access-Control-Max-Age", "600");
+  return allowedOrigin;
 }
 
 function normalizeRelativePath(value: unknown): string {
@@ -99,6 +165,41 @@ function normalizeFileName(value: unknown): string {
     throw new Error("invalid file name");
   }
   return name;
+}
+
+function buildContentDisposition(fileName: string): string {
+  const asciiFallback =
+    fileName.replace(/[^\x20-\x7E]+/g, "_").replace(/["\\]/g, "_") || "download";
+  return `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+}
+
+function trimOptionalFormValue(value: string | null): string | undefined {
+  const trimmed = (value ?? "").trim();
+  return trimmed || undefined;
+}
+
+async function readWorkspaceDownloadRequest(req: IncomingMessage): Promise<{
+  path: string;
+  token?: string;
+  password?: string;
+}> {
+  if (req.method === "GET") {
+    const url = new URL(req.url ?? "/", `http://${req.headers.host || "localhost"}`);
+    return {
+      path: String(url.searchParams.get("path") ?? ""),
+    };
+  }
+
+  const raw = await readRequestBodyWithLimit(req, {
+    maxBytes: WORKSPACE_DOWNLOAD_FORM_MAX_BYTES,
+    encoding: "utf-8",
+  });
+  const params = new URLSearchParams(raw);
+  return {
+    path: String(params.get("path") ?? ""),
+    token: trimOptionalFormValue(params.get("token")),
+    password: trimOptionalFormValue(params.get("password")),
+  };
 }
 
 async function ensureNoSymlink(filePath: string): Promise<void> {
@@ -509,8 +610,22 @@ export async function handleWorkspaceUploadHttpRequest(
     return false;
   }
 
+  applyWorkspaceUploadCorsHeaders({
+    req,
+    res,
+    trustedProxies: opts.trustedProxies,
+    allowRealIpFallback: opts.allowRealIpFallback,
+  });
+
+  if (req.method === "OPTIONS") {
+    res.statusCode = 204;
+    res.setHeader("Allow", WORKSPACE_UPLOAD_ALLOW_METHODS);
+    res.end();
+    return true;
+  }
+
   if (req.method !== "POST") {
-    sendMethodNotAllowed(res);
+    sendMethodNotAllowed(res, WORKSPACE_UPLOAD_ALLOW_METHODS);
     return true;
   }
 
@@ -550,6 +665,100 @@ export async function handleWorkspaceUploadHttpRequest(
       return true;
     }
     sendInvalidRequest(res, String(err));
+  }
+  return true;
+}
+
+export async function handleWorkspaceDownloadHttpRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  opts: {
+    pathname: string;
+    auth: ResolvedGatewayAuth;
+    trustedProxies?: string[];
+    allowRealIpFallback?: boolean;
+    rateLimiter?: AuthRateLimiter;
+  },
+): Promise<boolean> {
+  const url = new URL(req.url ?? "/", `http://${req.headers.host || "localhost"}`);
+  if (url.pathname !== opts.pathname) {
+    return false;
+  }
+
+  if (req.method !== "GET" && req.method !== "POST") {
+    sendMethodNotAllowed(res, WORKSPACE_DOWNLOAD_ALLOW_METHODS);
+    return true;
+  }
+
+  let formAuth: { token?: string; password?: string } | null = null;
+  let requestedPath = "";
+  try {
+    const payload = await readWorkspaceDownloadRequest(req);
+    requestedPath = payload.path;
+    if (payload.token || payload.password) {
+      formAuth = { token: payload.token, password: payload.password };
+    }
+  } catch (err) {
+    sendInvalidRequest(res, String(err));
+    return true;
+  }
+
+  const authResult = formAuth
+    ? await authorizeHttpGatewayConnect({
+        auth: opts.auth,
+        connectAuth: formAuth,
+        req,
+        trustedProxies: opts.trustedProxies,
+        allowRealIpFallback: opts.allowRealIpFallback,
+        rateLimiter: opts.rateLimiter,
+      })
+    : await (async () => {
+        const ok = await authorizeGatewayBearerRequestOrReply({
+          req,
+          res,
+          auth: opts.auth,
+          trustedProxies: opts.trustedProxies,
+          allowRealIpFallback: opts.allowRealIpFallback,
+          rateLimiter: opts.rateLimiter,
+        });
+        return ok ? { ok: true } : { ok: false };
+      })();
+
+  if (!authResult.ok) {
+    if ("reason" in authResult || "rateLimited" in authResult) {
+      sendGatewayAuthFailure(res, authResult);
+    }
+    return true;
+  }
+
+  try {
+    const rootDir = resolveWorkspaceRoot();
+    const relPath = normalizeRelativePath(requestedPath);
+    const resolved = await resolveExistingWorkspacePath(rootDir, relPath);
+    if (!resolved.stat.isFile()) {
+      sendInvalidRequest(res, "workspace.download path must be a file");
+      return true;
+    }
+    const mimeType =
+      (await detectMime({ filePath: resolved.realPath })) ?? "application/octet-stream";
+    res.statusCode = 200;
+    res.setHeader("Content-Type", mimeType);
+    res.setHeader("Content-Length", String(resolved.stat.size));
+    res.setHeader("Content-Disposition", buildContentDisposition(path.basename(resolved.realPath)));
+    res.setHeader("Cache-Control", "no-store");
+    await new Promise<void>((resolve, reject) => {
+      const stream = syncFs.createReadStream(resolved.realPath);
+      stream.on("error", reject);
+      res.on("close", resolve);
+      res.on("finish", resolve);
+      stream.pipe(res);
+    });
+  } catch (err) {
+    if (!res.headersSent) {
+      sendInvalidRequest(res, String(err));
+    } else {
+      res.destroy(err instanceof Error ? err : undefined);
+    }
   }
   return true;
 }

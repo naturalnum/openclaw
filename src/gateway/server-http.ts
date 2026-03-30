@@ -60,6 +60,8 @@ import { handleOpenAiHttpRequest } from "./openai-http.js";
 import { handleOpenResponsesHttpRequest } from "./openresponses-http.js";
 import { DEDUPE_MAX, DEDUPE_TTL_MS } from "./server-constants.js";
 import {
+  handleWorkspaceDownloadHttpRequest,
+  WORKSPACE_DOWNLOAD_HTTP_PATH,
   handleWorkspaceUploadHttpRequest,
   WORKSPACE_UPLOAD_HTTP_PATH,
 } from "./server-methods/workspace.js";
@@ -896,6 +898,19 @@ export function createGatewayHttpServer(opts: {
             handleControlUiAvatarRequest(req, res, {
               basePath: controlUiBasePath,
               resolveAvatar: (agentId) => resolveAgentAvatar(configSnapshot, agentId),
+            }),
+        });
+        requestStages.push({
+          name: "control-ui-workspace-download",
+          run: () =>
+            handleWorkspaceDownloadHttpRequest(req, res, {
+              pathname: controlUiBase
+                ? `${controlUiBase}${WORKSPACE_DOWNLOAD_HTTP_PATH}`
+                : WORKSPACE_DOWNLOAD_HTTP_PATH,
+              auth: resolvedAuth,
+              trustedProxies,
+              allowRealIpFallback,
+              rateLimiter,
             }),
         });
         requestStages.push({
