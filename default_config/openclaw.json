@@ -1,0 +1,146 @@
+{
+  "meta": {
+    "lastTouchedVersion": "2026.3.14",
+    "lastTouchedAt": "2026-03-24T08:58:17.031Z"
+  },
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "minmax": {
+        "baseUrl": "http://10.68.27.202:30288/llm-gateway/v1",
+        "apiKey": "sk-eoxtMP0lVkzpOYYOxQnxbw2p2uTEGSJ3",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "MinMax-2.5",
+            "name": "MinMax-2.5"
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "minmax/MinMax-2.5"
+      },
+      "models": {
+        "openai/gpt-4o": {},
+        "deepseek/deepseek-chat": {}
+      },
+      "workspace": "/root/.openclaw/workspace",
+      "compaction": {
+        "mode": "safeguard"
+      },
+      "maxConcurrent": 4,
+      "subagents": {
+        "maxConcurrent": 8
+      }
+    }
+  },
+  "tools": {
+    "profile": "coding"
+  },
+  "commands": {
+    "native": "auto",
+    "nativeSkills": "auto",
+    "restart": true,
+    "ownerDisplay": "raw"
+  },
+  "messages": {
+    "ackReactionScope": "group-mentions"
+  },
+  "session": {
+    "dmScope": "per-channel-peer"
+  },
+  "gateway": {
+    "port": 18789,
+    "mode": "local",
+    "bind": "lan",
+    "auth": {
+      "mode": "token",
+      "token": "7204800d88cb784296381a1f358878e44c893e195e570041"
+    },
+    "controlUi": {
+      "allowedOrigins": ["*"],
+      "dangerouslyAllowHostHeaderOriginFallback": true,
+      "allowInsecureAuth": true,
+      "dangerouslyDisableDeviceAuth": true
+    },
+    "tailscale": {
+      "mode": "off",
+      "resetOnExit": false
+    },
+    "nodes": {
+      "denyCommands": [
+        "camera.snap",
+        "camera.clip",
+        "screen.record",
+        "contacts.add",
+        "calendar.add",
+        "reminders.add",
+        "sms.send"
+      ]
+    }
+  },
+  "plugins": {
+    "allow": ["network-guard-plugin", "workspace-guard-plugin", "high-risk-command-guard-plugin"],
+    "entries": {
+      "workspace-guard-plugin": {
+        "enabled": true,
+        "config": {
+          "readonlyPaths": ["star"]
+        }
+      },
+      "network-guard-plugin": {
+        "enabled": true,
+        "config": {
+          "blockedHosts": ["10.0.0.8"],
+          "blockedUrlPrefixes": ["https://www.baidu.com/"],
+          "blockedCommands": ["curl", "wget", "ssh", "scp", "sftp", "nc", "ncat", "telnet"]
+        }
+      },
+      "high-risk-command-guard-plugin": {
+        "enabled": true,
+        "config": {
+          "blockedCommands": [
+            "brew",
+            "chmod",
+            "chown",
+            "chattr",
+            "setfacl",
+            "passwd",
+            "iptables",
+            "nft",
+            "ip",
+            "ifconfig",
+            "route",
+            "systemctl",
+            "service",
+            "init",
+            "shutdown",
+            "reboot",
+            "poweroff",
+            "halt",
+            "kill",
+            "killall",
+            "pkill"
+          ],
+          "blockedSubstrings": ["rm -rf *"]
+        }
+      }
+    }
+  },
+  "skills": {
+    "registry": {
+      "enabled": true,
+      "baseUrl": "http://10.85.156.114:3000",
+      "timeoutMs": 10000
+    },
+    "entries": {
+      "blogwatcher": {
+        "enabled": true
+      }
+    }
+  }
+}
