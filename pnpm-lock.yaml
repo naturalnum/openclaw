@@ -605,6 +605,12 @@ importers:
         specifier: workspace:*
         version: link:../..
 
+  power-backend:
+    dependencies:
+      openclaw:
+        specifier: workspace:*
+        version: link:..
+
   power-ui:
     dependencies:
       lit:

@@ -437,12 +437,15 @@ export class OpenClawPowerApp extends LitElement {
   @state() workbenchSelectedProjectId: string | null = null;
   @state() workbenchSelectedSessionKey: string | null = null;
   @state() workbenchToolsOpen = false;
+  @state() workbenchToolsClosing = false;
   @state() workbenchToolQuery = "";
   @state() workbenchToolsCategory: WorkbenchToolsCategory = "builtIn";
   @state() workbenchSettingsOpen = false;
+  @state() workbenchSettingsClosing = false;
   @state() workbenchSettingsTab: WorkbenchSettingsTab = "general";
   @state() modelConfigs: WorkbenchModelConfig[] = loadModelConfigs();
   @state() projectDirectoryDialogOpen = false;
+  @state() projectDirectoryDialogClosing = false;
   @state() projectDirectoryLoading = false;
   @state() projectDirectoryError: string | null = null;
   @state() projectDirectoryRoots: WorkbenchDirectoryEntry[] = [];
@@ -490,6 +493,7 @@ export class OpenClawPowerApp extends LitElement {
   private readonly initialSessionKeyFromUrl = INITIAL_SETTINGS.urlSessionKey;
   private pendingProjectFileUploadAgentId: string | null = null;
   private pendingProjectFileUploadPath: string | null = null;
+  private modalCloseTimers = new Map<"tools" | "settings" | "projectDirectory", number>();
 
   connectedCallback() {
     super.connectedCallback();
@@ -505,7 +509,62 @@ export class OpenClawPowerApp extends LitElement {
     this.adapterUnsubscribe = null;
     this.adapter.dispose?.();
     document.removeEventListener("pointerdown", this.handleDocumentPointerDown, true);
+    for (const timer of this.modalCloseTimers.values()) {
+      window.clearTimeout(timer);
+    }
+    this.modalCloseTimers.clear();
     super.disconnectedCallback();
+  }
+
+  private setModalClosingState(key: "tools" | "settings" | "projectDirectory", value: boolean) {
+    if (key === "tools") {
+      this.workbenchToolsClosing = value;
+      return;
+    }
+    if (key === "settings") {
+      this.workbenchSettingsClosing = value;
+      return;
+    }
+    this.projectDirectoryDialogClosing = value;
+  }
+
+  private openModal(key: "tools" | "settings" | "projectDirectory") {
+    const existing = this.modalCloseTimers.get(key);
+    if (typeof existing === "number") {
+      window.clearTimeout(existing);
+      this.modalCloseTimers.delete(key);
+    }
+    this.setModalClosingState(key, false);
+    if (key === "tools") {
+      this.workbenchToolsOpen = true;
+      return;
+    }
+    if (key === "settings") {
+      this.workbenchSettingsOpen = true;
+      return;
+    }
+    this.projectDirectoryDialogOpen = true;
+  }
+
+  private closeModal(key: "tools" | "settings" | "projectDirectory", onClosed?: () => void) {
+    const existing = this.modalCloseTimers.get(key);
+    if (typeof existing === "number") {
+      window.clearTimeout(existing);
+    }
+    if (key === "tools") {
+      this.workbenchToolsOpen = false;
+    } else if (key === "settings") {
+      this.workbenchSettingsOpen = false;
+    } else {
+      this.projectDirectoryDialogOpen = false;
+    }
+    this.setModalClosingState(key, true);
+    const timer = window.setTimeout(() => {
+      this.modalCloseTimers.delete(key);
+      this.setModalClosingState(key, false);
+      onClosed?.();
+    }, 180);
+    this.modalCloseTimers.set(key, timer);
   }
 
   private get sessionKey() {
@@ -1248,7 +1307,7 @@ export class OpenClawPowerApp extends LitElement {
 
   private async openProjectDirectoryDialog() {
     try {
-      this.projectDirectoryDialogOpen = true;
+      this.openModal("projectDirectory");
       this.projectDirectoryLoading = true;
       this.projectDirectoryError = null;
       await this.loadProjectDirectoryRoots();
@@ -1263,13 +1322,14 @@ export class OpenClawPowerApp extends LitElement {
   }
 
   private closeProjectDirectoryDialog() {
-    this.projectDirectoryDialogOpen = false;
-    this.projectDirectoryLoading = false;
-    this.projectDirectoryError = null;
-    this.projectDirectoryCurrentPath = null;
-    this.projectDirectoryCurrentName = null;
-    this.projectDirectoryParentPath = null;
-    this.projectDirectoryEntries = [];
+    this.closeModal("projectDirectory", () => {
+      this.projectDirectoryLoading = false;
+      this.projectDirectoryError = null;
+      this.projectDirectoryCurrentPath = null;
+      this.projectDirectoryCurrentName = null;
+      this.projectDirectoryParentPath = null;
+      this.projectDirectoryEntries = [];
+    });
   }
 
   private async handleProjectDirectoryNavigate(path: string | null) {
@@ -1780,9 +1840,11 @@ export class OpenClawPowerApp extends LitElement {
       },
       section: this.workbenchSection,
       toolsOpen: this.workbenchToolsOpen,
+      toolsClosing: this.workbenchToolsClosing,
       toolQuery: this.workbenchToolQuery,
       toolsCategory: this.workbenchToolsCategory,
       settingsOpen: this.workbenchSettingsOpen,
+      settingsClosing: this.workbenchSettingsClosing,
       settingsTab: this.workbenchSettingsTab,
       onNavigateLegacy: () => {
         const base = this.basePath || "";
@@ -1839,10 +1901,10 @@ export class OpenClawPowerApp extends LitElement {
         void this.abortCurrentRun();
       },
       onOpenTools: () => {
-        this.workbenchToolsOpen = true;
+        this.openModal("tools");
       },
       onCloseTools: () => {
-        this.workbenchToolsOpen = false;
+        this.closeModal("tools");
       },
       onToolQueryChange: (value) => {
         this.workbenchToolQuery = value;
@@ -1851,10 +1913,10 @@ export class OpenClawPowerApp extends LitElement {
         this.workbenchToolsCategory = value;
       },
       onOpenSettings: () => {
-        this.workbenchSettingsOpen = true;
+        this.openModal("settings");
       },
       onCloseSettings: () => {
-        this.workbenchSettingsOpen = false;
+        this.closeModal("settings");
       },
       onSettingsTabChange: (value) => {
         this.workbenchSettingsTab = value;
@@ -1867,6 +1929,7 @@ export class OpenClawPowerApp extends LitElement {
         void this.openProjectDirectoryDialog();
       },
       projectDirectoryOpen: this.projectDirectoryDialogOpen,
+      projectDirectoryClosing: this.projectDirectoryDialogClosing,
       projectDirectoryLoading: this.projectDirectoryLoading,
       projectDirectoryError: this.projectDirectoryError,
       projectDirectoryRoots: this.projectDirectoryRoots,

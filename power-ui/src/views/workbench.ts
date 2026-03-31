@@ -117,11 +117,14 @@ export type WorkbenchProps = {
   };
   section: WorkbenchSection;
   toolsOpen: boolean;
+  toolsClosing: boolean;
   toolQuery: string;
   toolsCategory: WorkbenchToolsCategory;
   settingsOpen: boolean;
+  settingsClosing: boolean;
   settingsTab: WorkbenchSettingsTab;
   projectDirectoryOpen: boolean;
+  projectDirectoryClosing: boolean;
   projectDirectoryLoading: boolean;
   projectDirectoryError: string | null;
   projectDirectoryRoots: WorkbenchDirectoryEntry[];
@@ -188,7 +191,20 @@ export type WorkbenchProps = {
   onRefreshContext: () => void;
 };
 
+function isZhLocale(locale?: string): boolean {
+  return typeof locale === "string" && locale.toLowerCase().startsWith("zh");
+}
+
+function tLocale(locale: string | undefined, en: string, zh: string): string {
+  return isZhLocale(locale) ? zh : en;
+}
+
+function dialogStateClass(isOpen: boolean, isClosing: boolean): string {
+  return isClosing && !isOpen ? "is-closing" : isOpen ? "is-open" : "";
+}
+
 export function renderWorkbench(props: WorkbenchProps) {
+  const locale = props.settings.locale;
   const projects = resolveProjects(props);
   const currentProject =
     projects.find((project) => project.id === (props.newTaskProjectId ?? props.currentProjectId)) ??
@@ -216,50 +232,46 @@ export function renderWorkbench(props: WorkbenchProps) {
     >
       <aside class="workbench-sidebar">
         <div class="workbench-brand">
-          ${
-            props.sidebarCollapsed
-              ? html`
-                <button
-                  type="button"
-                  class="workbench-icon-button workbench-brand__collapsed-toggle"
-                  title="展开侧栏"
-                  aria-label="展开侧栏"
-                  @click=${props.onToggleSidebar}
-                >
-                  <span
-                    class="workbench-brand__collapsed-state workbench-brand__collapsed-state--logo"
-                  >
-                    ${icons.lobster}
-                  </span>
-                  <span
-                    class="workbench-brand__collapsed-state workbench-brand__collapsed-state--toggle"
-                  >
-                    ${icons.panelLeftOpen}
-                  </span>
-                </button>
-              `
-              : html`
-                <div class="workbench-brand__left">
-                  <div class="workbench-brand__mark">${icons.lobster}</div>
-                  <div class="workbench-brand__title workbench-brand__title--compact">OpenClaw</div>
-                </div>
-                <button
-                  type="button"
-                  class="workbench-icon-button"
-                  title="收起侧栏"
-                  aria-label="收起侧栏"
-                  @click=${props.onToggleSidebar}
-                >
-                  ${icons.panelLeftClose}
-                </button>
-              `
-          }
+          <div class="workbench-brand__expanded" aria-hidden=${props.sidebarCollapsed}>
+            <div class="workbench-brand__left">
+              <div class="workbench-brand__mark">${icons.lobster}</div>
+              <div class="workbench-brand__title workbench-brand__title--compact">OpenClaw</div>
+            </div>
+            <button
+              type="button"
+              class="workbench-icon-button"
+              title="收起侧栏"
+              aria-label="收起侧栏"
+              @click=${props.onToggleSidebar}
+            >
+              ${icons.panelLeftClose}
+            </button>
+          </div>
+
+          <div class="workbench-brand__collapsed" aria-hidden=${!props.sidebarCollapsed}>
+            <button
+              type="button"
+              class="workbench-icon-button workbench-brand__collapsed-toggle"
+              title="展开侧栏"
+              aria-label="展开侧栏"
+              @click=${props.onToggleSidebar}
+            >
+              <span class="workbench-brand__collapsed-state workbench-brand__collapsed-state--logo">
+                ${icons.lobster}
+              </span>
+              <span
+                class="workbench-brand__collapsed-state workbench-brand__collapsed-state--toggle"
+              >
+                ${icons.panelLeftOpen}
+              </span>
+            </button>
+          </div>
         </div>
 
         <nav class="workbench-nav">
           ${renderNavButton(
             "newTask",
-            "New task",
+            tLocale(locale, "New task", "新任务"),
             icons.edit,
             props.section === "newTask",
             props.sidebarCollapsed,
@@ -267,7 +279,7 @@ export function renderWorkbench(props: WorkbenchProps) {
           )}
           ${renderNavButton(
             "automations",
-            "Automations",
+            tLocale(locale, "Automations", "自动化"),
             icons.loader,
             props.section === "automations",
             props.sidebarCollapsed,
@@ -275,7 +287,7 @@ export function renderWorkbench(props: WorkbenchProps) {
           )}
           ${renderNavButton(
             "skills",
-            "Skills",
+            tLocale(locale, "Skills", "技能"),
             icons.puzzle,
             props.section === "skills",
             props.sidebarCollapsed,
@@ -294,13 +306,13 @@ export function renderWorkbench(props: WorkbenchProps) {
                     class="workbench-tree-header__toggle"
                     @click=${props.onToggleProjects}
                   >
-                    <span>Projects</span>
+                    <span>${tLocale(locale, "Projects", "项目")}</span>
                     ${props.projectsCollapsed ? icons.chevronRight : icons.chevronDown}
                   </button>
                   <button
                     type="button"
                     class="workbench-icon-button"
-                    title="Choose project folder"
+                    title=${tLocale(locale, "Choose project folder", "选择项目目录")}
                     @click=${props.onCreateProject}
                   >
                     ${icons.plus}
@@ -330,18 +342,14 @@ export function renderWorkbench(props: WorkbenchProps) {
           <button
             type="button"
             class="workbench-settings-entry"
-            title="Settings"
-            aria-label="Settings"
+            title=${tLocale(locale, "Settings", "设置")}
+            aria-label=${tLocale(locale, "Settings", "设置")}
             @click=${props.onOpenSettings}
           >
             <span class="workbench-settings-entry__icon">${icons.settings}</span>
-            ${
-              props.sidebarCollapsed
-                ? nothing
-                : html`
-                    <span>Settings</span>
-                  `
-            }
+            <span class="workbench-settings-entry__label">
+              ${tLocale(locale, "Settings", "设置")}
+            </span>
           </button>
         </div>
       </aside>
@@ -378,9 +386,13 @@ export function renderWorkbench(props: WorkbenchProps) {
           }
         </div>
       </div>
-      ${props.toolsOpen ? renderToolsDialog(props) : nothing}
-      ${props.settingsOpen ? renderSettingsDialog(props) : nothing}
-      ${props.projectDirectoryOpen ? renderProjectDirectoryDialog(props) : nothing}
+      ${props.toolsOpen || props.toolsClosing ? renderToolsDialog(props) : nothing}
+      ${props.settingsOpen || props.settingsClosing ? renderSettingsDialog(props) : nothing}
+      ${
+        props.projectDirectoryOpen || props.projectDirectoryClosing
+          ? renderProjectDirectoryDialog(props)
+          : nothing
+      }
       ${props.fileManagerOpen ? renderFileManagerDialog(props) : nothing}
     </div>
   `;
@@ -417,20 +429,21 @@ function renderNewTaskView(
   currentProject: WorkbenchProject | null,
   projects: WorkbenchProject[],
 ) {
+  const locale = props.settings.locale;
   return html`
     <section class="workbench-session-shell workbench-session-shell--centered">
       <section class="workbench-chat-surface">
         <div class="workbench-new-thread">
           <div class="workbench-new-thread__hero">
             <div class="workbench-new-thread__icon">${icons.spark}</div>
-            <h2>Start building</h2>
+            <h2>${tLocale(locale, "Start building", "开始创建")}</h2>
             <div class="workbench-new-thread__project-picker">
               <button
                 type="button"
                 class="workbench-new-thread__project-button"
                 @click=${props.onToggleNewTaskProjectMenu}
               >
-                <span>${currentProject?.label ?? "Select project"}</span>
+                <span>${currentProject?.label ?? tLocale(locale, "Select project", "选择项目")}</span>
                 <span class="workbench-new-thread__project-chevron">
                   ${props.newTaskProjectMenuOpen ? icons.chevronUp : icons.chevronDown}
                 </span>
@@ -440,7 +453,9 @@ function renderNewTaskView(
                 props.newTaskProjectMenuOpen
                   ? html`
                     <div class="workbench-new-thread__project-menu">
-                      <div class="workbench-new-thread__project-menu-title">Choose project</div>
+                      <div class="workbench-new-thread__project-menu-title">
+                        ${tLocale(locale, "Choose project", "选择项目")}
+                      </div>
                         ${repeat(
                           projects,
                           (project) => project.id,
@@ -469,7 +484,7 @@ function renderNewTaskView(
                         @click=${props.onCreateProject}
                       >
                         <span class="workbench-new-thread__project-item-icon">${icons.plus}</span>
-                        <span>New project</span>
+                        <span>${tLocale(locale, "New project", "新建项目")}</span>
                       </button>
                     </div>
                   `
@@ -483,7 +498,11 @@ function renderNewTaskView(
           <textarea
             class="workbench-composer workbench-composer--session"
             .value=${props.chatMessage}
-            placeholder="Ask anything about the selected project..."
+            placeholder=${tLocale(
+              locale,
+              "Ask anything about the selected project...",
+              "围绕当前项目输入你的问题...",
+            )}
             @input=${(event: Event) =>
               props.onComposerChange((event.target as HTMLTextAreaElement).value)}
           ></textarea>
@@ -492,13 +511,16 @@ function renderNewTaskView(
               <button
                 type="button"
                 class="workbench-circle-button"
-                title="Upload files"
-                aria-label="Upload files"
+                title=${tLocale(locale, "Upload files", "上传文件")}
+                aria-label=${tLocale(locale, "Upload files", "上传文件")}
                 @click=${props.onOpenAttachment}
               >
                 ${icons.plus}
               </button>
-              <label class="workbench-model-select" aria-label="Choose model">
+              <label
+                class="workbench-model-select"
+                aria-label=${tLocale(locale, "Choose model", "选择模型")}
+              >
                 <select
                   .value=${props.currentModelId}
                   @change=${(event: Event) =>
@@ -543,14 +565,22 @@ function renderProjectDirectoryDialog(props: WorkbenchProps) {
   const showingRoots = !props.projectDirectoryCurrentPath;
   const entries = showingRoots ? props.projectDirectoryRoots : props.projectDirectoryEntries;
   const selectedPath = props.projectDirectoryCurrentPath;
+  const locale = props.settings.locale;
+  const stateClass = dialogStateClass(props.projectDirectoryOpen, props.projectDirectoryClosing);
   return html`
-    <div class="workbench-overlay">
+    <div class="workbench-overlay ${stateClass}">
       <div class="workbench-overlay__backdrop" @click=${props.onCloseProjectDirectory}></div>
-      <div class="workbench-dialog workbench-dialog--directory">
+      <div class="workbench-dialog workbench-dialog--directory ${stateClass}">
         <div class="workbench-dialog__topbar">
           <div>
-            <h3>Select Project Directory</h3>
-            <p>Choose a server-side directory. The project name will match the selected folder.</p>
+            <h3>${tLocale(locale, "Select Project Directory", "选择项目目录")}</h3>
+            <p>
+              ${tLocale(
+                locale,
+                "Choose a server-side directory. The project name will match the selected folder.",
+                "选择服务端目录。项目名称会默认采用当前选中的文件夹名称。",
+              )}
+            </p>
           </div>
           <button
             type="button"
@@ -572,10 +602,14 @@ function renderProjectDirectoryDialog(props: WorkbenchProps) {
                   showingRoots ? null : (props.projectDirectoryParentPath ?? null),
                 )}
             >
-              ${showingRoots ? "Roots" : "Up"}
+              ${showingRoots ? tLocale(locale, "Roots", "根目录") : tLocale(locale, "Up", "向上")}
             </button>
             <div class="workbench-directory-path">
-              ${showingRoots ? "Allowed roots" : props.projectDirectoryCurrentPath}
+              ${
+                showingRoots
+                  ? tLocale(locale, "Allowed roots", "允许访问的根目录")
+                  : props.projectDirectoryCurrentPath
+              }
             </div>
             <button
               type="button"
@@ -583,7 +617,7 @@ function renderProjectDirectoryDialog(props: WorkbenchProps) {
               ?disabled=${props.projectDirectoryLoading || !selectedPath}
               @click=${() => props.onCreateProjectFromDirectory(selectedPath)}
             >
-              Create Project Here
+              ${tLocale(locale, "Create Project Here", "在这里创建项目")}
             </button>
           </div>
 
@@ -596,11 +630,15 @@ function renderProjectDirectoryDialog(props: WorkbenchProps) {
           ${
             props.projectDirectoryLoading
               ? html`
-                  <div class="workbench-empty workbench-empty--small">Loading directories…</div>
+                  <div class="workbench-empty workbench-empty--small">
+                    ${tLocale(locale, "Loading directories…", "正在加载目录…")}
+                  </div>
                 `
               : entries.length === 0
                 ? html`
-                    <div class="workbench-empty workbench-empty--small">No directories available.</div>
+                    <div class="workbench-empty workbench-empty--small">
+                      ${tLocale(locale, "No directories available.", "没有可用目录。")}
+                    </div>
                   `
                 : html`
                     <div class="workbench-directory-list">
@@ -627,7 +665,9 @@ function renderProjectDirectoryDialog(props: WorkbenchProps) {
             selectedPath
               ? html`
                   <div class="workbench-directory-selection">
-                    <div class="workbench-directory-selection__label">Selected directory</div>
+                    <div class="workbench-directory-selection__label">
+                      ${tLocale(locale, "Selected directory", "已选目录")}
+                    </div>
                     <div class="workbench-directory-selection__name">
                       ${props.projectDirectoryCurrentName}
                     </div>
@@ -903,7 +943,7 @@ function renderNavButton(
       @click=${onClick}
     >
       <span class="workbench-nav__icon">${icon}</span>
-      ${collapsed ? nothing : html`<span>${label}</span>`}
+      <span class="workbench-nav__label">${label}</span>
     </button>
   `;
 }
@@ -940,36 +980,36 @@ function renderProjectTreeRow(project: WorkbenchProject, props: WorkbenchProps) 
         <button type="button" class="workbench-tree-node__more">${icons.moreHorizontal}</button>
       </div>
 
-      ${
-        expanded
-          ? html`
-            <div class="workbench-tree-node__children">
+      ${html`
+          <div class="workbench-tree-node__children ${expanded ? "is-expanded" : ""}">
+            <div class="workbench-tree-node__children-inner">
               ${
-                project.sessions.length === 0
-                  ? html`
-                      <div class="workbench-empty workbench-empty--tiny">No sessions yet.</div>
-                    `
-                  : repeat(
-                      project.sessions.slice(0, 6),
-                      (session) => session.key,
-                      (session) => html`
-                      <button
-                        type="button"
-                        class="workbench-tree-session ${
-                          props.currentSessionKey === session.key ? "is-active" : ""
-                        }"
-                        @click=${() => props.onSelectSession(session.key)}
-                      >
-                        <span class="workbench-tree-session__icon">${icons.messageSquare}</span>
-                        <span class="workbench-tree-session__label">${session.label}</span>
-                      </button>
-                    `,
-                    )
+                !expanded
+                  ? nothing
+                  : project.sessions.length === 0
+                    ? html`
+                        <div class="workbench-empty workbench-empty--tiny">No sessions yet.</div>
+                      `
+                    : repeat(
+                        project.sessions.slice(0, 6),
+                        (session) => session.key,
+                        (session) => html`
+                          <button
+                            type="button"
+                            class="workbench-tree-session ${
+                              props.currentSessionKey === session.key ? "is-active" : ""
+                            }"
+                            @click=${() => props.onSelectSession(session.key)}
+                          >
+                            <span class="workbench-tree-session__icon">${icons.messageSquare}</span>
+                            <span class="workbench-tree-session__label">${session.label}</span>
+                          </button>
+                        `,
+                      )
               }
             </div>
-          `
-          : nothing
-      }
+          </div>
+        `}
     </div>
   `;
 }
@@ -1229,14 +1269,22 @@ function renderToolsDialog(props: WorkbenchProps) {
   const filteredTools = filterToolEntries(sections, props.toolQuery, props.toolsCategory);
   const featuredTools = filteredTools.slice(0, 4);
   const catalogTools = filteredTools.slice(4);
+  const locale = props.settings.locale;
+  const stateClass = dialogStateClass(props.toolsOpen, props.toolsClosing);
   return html`
-    <div class="workbench-overlay">
+    <div class="workbench-overlay ${stateClass}">
       <div class="workbench-overlay__backdrop" @click=${props.onCloseTools}></div>
-      <div class="workbench-dialog workbench-dialog--tools">
+      <div class="workbench-dialog workbench-dialog--tools ${stateClass}">
         <div class="workbench-dialog__topbar">
           <div>
-            <h3>Tools</h3>
-            <p>Configure the runtime catalog your current project can access.</p>
+            <h3>${tLocale(locale, "Tools", "工具")}</h3>
+            <p>
+              ${tLocale(
+                locale,
+                "Configure the runtime catalog your current project can access.",
+                "配置当前项目可访问的运行时工具目录。",
+              )}
+            </p>
           </div>
           <button type="button" class="workbench-icon-button" @click=${props.onCloseTools}>
             ${icons.x}
@@ -1244,11 +1292,16 @@ function renderToolsDialog(props: WorkbenchProps) {
         </div>
 
         <div class="workbench-dialog__tabs">
-          ${renderTabChip("builtIn", "Built-in", props.toolsCategory, props.onToolsCategoryChange)}
+          ${renderTabChip(
+            "builtIn",
+            tLocale(locale, "Built-in", "内置"),
+            props.toolsCategory,
+            props.onToolsCategoryChange,
+          )}
           ${renderTabChip("mcp", "MCP", props.toolsCategory, props.onToolsCategoryChange)}
           ${renderTabChip(
             "connectors",
-            "Connectors",
+            tLocale(locale, "Connectors", "连接器"),
             props.toolsCategory,
             props.onToolsCategoryChange,
           )}
@@ -1256,7 +1309,7 @@ function renderToolsDialog(props: WorkbenchProps) {
             ${icons.search}
             <input
               .value=${props.toolQuery}
-              placeholder="Search tools"
+              placeholder=${tLocale(locale, "Search tools", "搜索工具")}
               @input=${(event: Event) =>
                 props.onToolQueryChange((event.target as HTMLInputElement).value)}
             />
@@ -1272,14 +1325,22 @@ function renderToolsDialog(props: WorkbenchProps) {
           ${
             filteredTools.length === 0
               ? html`
-                  <div class="workbench-empty workbench-empty--small">No tools in this category.</div>
+                  <div class="workbench-empty workbench-empty--small">
+                    ${tLocale(locale, "No tools in this category.", "这个分类下没有工具。")}
+                  </div>
                 `
               : html`
                 <section class="workbench-tool-section">
                   <div class="workbench-tool-section__header">
                     <div>
-                      <h4>Recommended</h4>
-                      <p>High-signal tools surfaced first for project setup.</p>
+                      <h4>${tLocale(locale, "Recommended", "推荐")}</h4>
+                      <p>
+                        ${tLocale(
+                          locale,
+                          "High-signal tools surfaced first for project setup.",
+                          "优先展示更适合当前项目初始化的高价值工具。",
+                        )}
+                      </p>
                     </div>
                   </div>
                   <div class="workbench-grid workbench-grid--tools">
@@ -1298,8 +1359,14 @@ function renderToolsDialog(props: WorkbenchProps) {
                       <section class="workbench-tool-section">
                         <div class="workbench-tool-section__header">
                           <div>
-                            <h4>Catalog</h4>
-                            <p>The rest of the runtime-accessible tools for this category.</p>
+                            <h4>${tLocale(locale, "Catalog", "目录")}</h4>
+                            <p>
+                              ${tLocale(
+                                locale,
+                                "The rest of the runtime-accessible tools for this category.",
+                                "当前分类下其余可用的运行时工具。",
+                              )}
+                            </p>
                           </div>
                         </div>
                         <div class="workbench-grid workbench-grid--tools">
@@ -1323,14 +1390,16 @@ function renderToolsDialog(props: WorkbenchProps) {
 }
 
 function renderSettingsDialog(props: WorkbenchProps) {
+  const locale = props.settings.locale;
+  const stateClass = dialogStateClass(props.settingsOpen, props.settingsClosing);
   return html`
-    <div class="workbench-overlay">
+    <div class="workbench-overlay ${stateClass}">
       <div class="workbench-overlay__backdrop" @click=${props.onCloseSettings}></div>
-      <div class="workbench-dialog workbench-dialog--settings">
+      <div class="workbench-dialog workbench-dialog--settings ${stateClass}">
         <div class="workbench-settings-layout">
           <aside class="workbench-settings-nav">
             <div class="workbench-settings-nav__header">
-              <h3>Settings</h3>
+              <h3>${tLocale(locale, "Settings", "设置")}</h3>
             </div>
             <button
               type="button"
@@ -1338,7 +1407,7 @@ function renderSettingsDialog(props: WorkbenchProps) {
               @click=${() => props.onSettingsTabChange("general")}
             >
               <span class="workbench-settings-nav__icon">${icons.wrench}</span>
-              General
+              ${tLocale(locale, "General", "通用")}
             </button>
             <button
               type="button"
@@ -1346,19 +1415,33 @@ function renderSettingsDialog(props: WorkbenchProps) {
               @click=${() => props.onSettingsTabChange("models")}
             >
               <span class="workbench-settings-nav__icon">${icons.spark}</span>
-              Models
+              ${tLocale(locale, "Models", "模型")}
             </button>
           </aside>
 
           <section class="workbench-settings-panel">
             <div class="workbench-settings-panel__header">
               <div>
-                <h4>${props.settingsTab === "general" ? "General" : "Model Settings"}</h4>
+                <h4>
+                  ${
+                    props.settingsTab === "general"
+                      ? tLocale(locale, "General", "通用")
+                      : tLocale(locale, "Model Settings", "模型设置")
+                  }
+                </h4>
                 <p>
                   ${
                     props.settingsTab === "general"
-                      ? "Control language and interface appearance."
-                      : "Manage provider endpoints and model presets."
+                      ? tLocale(
+                          locale,
+                          "Control language and interface appearance.",
+                          "控制语言和界面外观。",
+                        )
+                      : tLocale(
+                          locale,
+                          "Manage provider endpoints and model presets.",
+                          "管理 provider 端点和模型预设。",
+                        )
                   }
                 </p>
               </div>
