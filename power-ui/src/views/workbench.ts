@@ -38,6 +38,14 @@ type WorkbenchDirectoryEntry = {
   path: string;
 };
 
+type WorkbenchDirectoryTreeNode = WorkbenchDirectoryEntry & {
+  depth: number;
+  expanded: boolean;
+  loading: boolean;
+  hasToggle: boolean;
+  selected: boolean;
+};
+
 type WorkbenchSession = {
   key: string;
   label: string;
@@ -128,10 +136,18 @@ export type WorkbenchProps = {
   projectDirectoryLoading: boolean;
   projectDirectoryError: string | null;
   projectDirectoryRoots: WorkbenchDirectoryEntry[];
+  projectDirectoryTreeChildrenByPath: Record<string, WorkbenchDirectoryEntry[]>;
+  projectDirectoryExpandedPaths: string[];
+  projectDirectoryLoadingPaths: string[];
   projectDirectoryCurrentPath: string | null;
   projectDirectoryCurrentName: string | null;
   projectDirectoryParentPath: string | null;
   projectDirectoryEntries: WorkbenchDirectoryEntry[];
+  projectDirectorySelectedPath: string | null;
+  projectDirectorySelectedName: string | null;
+  projectDirectoryCreateFolderOpen: boolean;
+  projectDirectoryCreateFolderName: string;
+  projectDirectoryCreateFolderBusy: boolean;
   fileManagerOpen: boolean;
   fileManagerLoading: boolean;
   fileManagerError: string | null;
@@ -169,7 +185,12 @@ export type WorkbenchProps = {
   onModelChange: (value: string) => void;
   onCreateProject: () => void;
   onCloseProjectDirectory: () => void;
+  onSelectProjectDirectory: (path: string | null, name: string | null) => void;
   onBrowseProjectDirectory: (path: string | null) => void;
+  onToggleProjectDirectoryCreateFolder: () => void;
+  onProjectDirectoryFolderNameChange: (value: string) => void;
+  onCancelProjectDirectoryCreateFolder: () => void;
+  onCreateProjectDirectoryFolder: () => void;
   onCreateProjectFromDirectory: (path: string | null) => void;
   onOpenFileManager: (agentId: string, path: string | null) => void;
   onOpenFileManagerForCreateFolder: (agentId: string, path: string | null) => void;
@@ -562,25 +583,47 @@ function renderNewTaskView(
 }
 
 function renderProjectDirectoryDialog(props: WorkbenchProps) {
-  const showingRoots = !props.projectDirectoryCurrentPath;
-  const entries = showingRoots ? props.projectDirectoryRoots : props.projectDirectoryEntries;
-  const selectedPath = props.projectDirectoryCurrentPath;
+  const selectedPath = props.projectDirectorySelectedPath;
   const locale = props.settings.locale;
   const stateClass = dialogStateClass(props.projectDirectoryOpen, props.projectDirectoryClosing);
+  const expanded = new Set(props.projectDirectoryExpandedPaths);
+  const loading = new Set(props.projectDirectoryLoadingPaths);
+  const childrenByPath = props.projectDirectoryTreeChildrenByPath;
+  const buildTree = (
+    entries: WorkbenchDirectoryEntry[],
+    depth: number,
+  ): WorkbenchDirectoryTreeNode[] => {
+    const rows: WorkbenchDirectoryTreeNode[] = [];
+    for (const entry of entries) {
+      const childEntries = childrenByPath[entry.path];
+      const isExpanded = expanded.has(entry.path);
+      const isLoading = loading.has(entry.path);
+      const hasToggle = childEntries === undefined || childEntries.length > 0;
+      rows.push({
+        ...entry,
+        depth,
+        expanded: isExpanded,
+        loading: isLoading,
+        hasToggle,
+        selected: entry.path === selectedPath,
+      });
+      if (isExpanded && childEntries?.length) {
+        rows.push(...buildTree(childEntries, depth + 1));
+      }
+    }
+    return rows;
+  };
+  const treeRows = buildTree(props.projectDirectoryRoots, 0);
   return html`
     <div class="workbench-overlay ${stateClass}">
       <div class="workbench-overlay__backdrop" @click=${props.onCloseProjectDirectory}></div>
       <div class="workbench-dialog workbench-dialog--directory ${stateClass}">
         <div class="workbench-dialog__topbar">
-          <div>
-            <h3>${tLocale(locale, "Select Project Directory", "选择项目目录")}</h3>
-            <p>
-              ${tLocale(
-                locale,
-                "Choose a server-side directory. The project name will match the selected folder.",
-                "选择服务端目录。项目名称会默认采用当前选中的文件夹名称。",
-              )}
-            </p>
+          <div class="workbench-directory-dialog__header">
+            <div class="workbench-directory-dialog__title-row">
+              <span class="workbench-directory-dialog__title-icon">${icons.folder}</span>
+              <h3>${tLocale(locale, "Choose Workspace Directory", "选择工作目录")}</h3>
+            </div>
           </div>
           <button
             type="button"
@@ -592,90 +635,173 @@ function renderProjectDirectoryDialog(props: WorkbenchProps) {
         </div>
 
         <div class="workbench-dialog__body">
-          <div class="workbench-directory-toolbar">
-            <button
-              type="button"
-              class="workbench-secondary-button"
-              ?disabled=${props.projectDirectoryLoading}
-              @click=${() =>
-                props.onBrowseProjectDirectory(
-                  showingRoots ? null : (props.projectDirectoryParentPath ?? null),
-                )}
-            >
-              ${showingRoots ? tLocale(locale, "Roots", "根目录") : tLocale(locale, "Up", "向上")}
-            </button>
-            <div class="workbench-directory-path">
-              ${
-                showingRoots
-                  ? tLocale(locale, "Allowed roots", "允许访问的根目录")
-                  : props.projectDirectoryCurrentPath
-              }
+          <div class="workbench-directory-section workbench-directory-section--path">
+            <div class="workbench-directory-pathbar">
+              <span class="workbench-directory-pathbar__label"
+                >${tLocale(locale, "Path:", "路径:")}</span
+              >
+              <span class="workbench-directory-pathbar__value">
+                ${
+                  selectedPath ??
+                  props.projectDirectoryRoots[0]?.path ??
+                  tLocale(locale, "Allowed roots", "允许访问的根目录")
+                }
+              </span>
             </div>
-            <button
-              type="button"
-              class="workbench-primary-button"
-              ?disabled=${props.projectDirectoryLoading || !selectedPath}
-              @click=${() => props.onCreateProjectFromDirectory(selectedPath)}
-            >
-              ${tLocale(locale, "Create Project Here", "在这里创建项目")}
-            </button>
           </div>
 
           ${
             props.projectDirectoryError
-              ? html`<div class="workbench-callout workbench-callout--danger">${props.projectDirectoryError}</div>`
+              ? html`
+                  <div class="workbench-directory-section workbench-directory-section--error">
+                    <div class="workbench-callout workbench-callout--danger">
+                      ${props.projectDirectoryError}
+                    </div>
+                  </div>
+                `
               : nothing
           }
 
-          ${
-            props.projectDirectoryLoading
-              ? html`
-                  <div class="workbench-empty workbench-empty--small">
-                    ${tLocale(locale, "Loading directories…", "正在加载目录…")}
-                  </div>
-                `
-              : entries.length === 0
+          <div class="workbench-directory-section workbench-directory-section--tree">
+            <div class="workbench-directory-browser">
+            ${
+              props.projectDirectoryLoading
                 ? html`
                     <div class="workbench-empty workbench-empty--small">
-                      ${tLocale(locale, "No directories available.", "没有可用目录。")}
+                      ${tLocale(locale, "Loading directories…", "正在加载目录…")}
                     </div>
                   `
-                : html`
-                    <div class="workbench-directory-list">
-                      ${repeat(
-                        entries,
-                        (entry) => entry.path,
-                        (entry) => html`
-                          <button
-                            type="button"
-                            class="workbench-directory-entry"
-                            @click=${() => props.onBrowseProjectDirectory(entry.path)}
-                          >
-                            <span class="workbench-directory-entry__icon">${icons.folder}</span>
-                            <span class="workbench-directory-entry__name">${entry.name}</span>
-                            <span class="workbench-directory-entry__path">${entry.path}</span>
-                          </button>
-                        `,
-                      )}
-                    </div>
-                  `
-          }
+                : treeRows.length === 0
+                  ? html`
+                      <div class="workbench-empty workbench-empty--small">
+                        ${tLocale(locale, "No directories available.", "没有可用目录。")}
+                      </div>
+                    `
+                  : html`
+                      <div class="workbench-directory-list workbench-directory-list--modal">
+                        ${repeat(
+                          treeRows,
+                          (entry) => entry.path,
+                          (entry) => html`
+                            <div
+                              class="workbench-directory-entry ${entry.selected ? "is-selected" : ""}"
+                              style=${`--tree-depth: ${entry.depth};`}
+                            >
+                              <button
+                                type="button"
+                                class="workbench-directory-entry__main"
+                                @click=${() => props.onBrowseProjectDirectory(entry.path)}
+                              >
+                                ${
+                                  entry.hasToggle
+                                    ? html`
+                                        <span class="workbench-directory-entry__toggle-icon">
+                                          ${entry.expanded ? icons.chevronDown : icons.chevronRight}
+                                        </span>
+                                      `
+                                    : html`
+                                        <span class="workbench-directory-entry__toggle-spacer"></span>
+                                      `
+                                }
+                                <span class="workbench-directory-entry__icon">
+                                  ${entry.expanded ? icons.folderOpen : icons.folder}
+                                </span>
+                                <span class="workbench-directory-entry__name">${entry.name}</span>
+                                ${
+                                  entry.loading
+                                    ? html`
+                                        <span class="workbench-directory-entry__loading"
+                                          >${tLocale(locale, "Loading…", "加载中…")}</span
+                                        >
+                                      `
+                                    : nothing
+                                }
+                              </button>
+                            </div>
+                          `,
+                        )}
+                      </div>
+                    `
+            }
+          </div>
+          </div>
 
           ${
-            selectedPath
+            props.projectDirectoryCreateFolderOpen
               ? html`
-                  <div class="workbench-directory-selection">
-                    <div class="workbench-directory-selection__label">
-                      ${tLocale(locale, "Selected directory", "已选目录")}
+                  <div class="workbench-directory-section workbench-directory-section--create">
+                    <div class="workbench-directory-create">
+                      <span class="workbench-directory-create__icon">${icons.folderPlus}</span>
+                      <input
+                        class="workbench-directory-create__input"
+                        .value=${props.projectDirectoryCreateFolderName}
+                        placeholder=${tLocale(locale, "Enter folder name...", "输入文件夹名称...")}
+                        @input=${(event: Event) =>
+                          props.onProjectDirectoryFolderNameChange(
+                            (event.currentTarget as HTMLInputElement).value,
+                          )}
+                        @keydown=${(event: KeyboardEvent) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            props.onCreateProjectDirectoryFolder();
+                          }
+                          if (event.key === "Escape") {
+                            event.preventDefault();
+                            props.onCancelProjectDirectoryCreateFolder();
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        class="workbench-directory-create__confirm"
+                        ?disabled=${props.projectDirectoryCreateFolderBusy}
+                        @click=${props.onCreateProjectDirectoryFolder}
+                      >
+                        ${icons.check}
+                      </button>
+                      <button
+                        type="button"
+                        class="workbench-directory-create__cancel"
+                        ?disabled=${props.projectDirectoryCreateFolderBusy}
+                        @click=${props.onCancelProjectDirectoryCreateFolder}
+                      >
+                        ${icons.x}
+                      </button>
                     </div>
-                    <div class="workbench-directory-selection__name">
-                      ${props.projectDirectoryCurrentName}
-                    </div>
-                    <div class="workbench-directory-selection__path">${selectedPath}</div>
                   </div>
                 `
               : nothing
           }
+
+          <div class="workbench-directory-actions">
+            <button
+              type="button"
+              class="workbench-directory-new-folder"
+              ?disabled=${!selectedPath || props.projectDirectoryCreateFolderBusy}
+              @click=${props.onToggleProjectDirectoryCreateFolder}
+            >
+              ${icons.folderPlus}
+              <span>${tLocale(locale, "New Folder", "新建文件夹")}</span>
+            </button>
+            <div class="workbench-directory-actions__right">
+              <button
+                type="button"
+                class="workbench-secondary-button"
+                ?disabled=${props.projectDirectoryLoading}
+                @click=${props.onCloseProjectDirectory}
+              >
+                ${tLocale(locale, "Cancel", "取消")}
+              </button>
+              <button
+                type="button"
+                class="workbench-primary-button"
+                ?disabled=${props.projectDirectoryLoading || !selectedPath}
+                @click=${() => props.onCreateProjectFromDirectory(selectedPath)}
+              >
+                ${tLocale(locale, "Confirm Selection", "确认选择")}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>

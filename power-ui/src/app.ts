@@ -449,10 +449,18 @@ export class OpenClawPowerApp extends LitElement {
   @state() projectDirectoryLoading = false;
   @state() projectDirectoryError: string | null = null;
   @state() projectDirectoryRoots: WorkbenchDirectoryEntry[] = [];
+  @state() projectDirectoryTreeChildrenByPath: Record<string, WorkbenchDirectoryEntry[]> = {};
+  @state() projectDirectoryExpandedPaths: string[] = [];
+  @state() projectDirectoryLoadingPaths: string[] = [];
   @state() projectDirectoryCurrentPath: string | null = null;
   @state() projectDirectoryCurrentName: string | null = null;
   @state() projectDirectoryParentPath: string | null = null;
   @state() projectDirectoryEntries: WorkbenchDirectoryEntry[] = [];
+  @state() projectDirectorySelectedPath: string | null = null;
+  @state() projectDirectorySelectedName: string | null = null;
+  @state() projectDirectoryCreateFolderOpen = false;
+  @state() projectDirectoryCreateFolderName = "";
+  @state() projectDirectoryCreateFolderBusy = false;
   @state() fileManagerDialogOpen = false;
   @state() fileManagerLoading = false;
   @state() fileManagerError: string | null = null;
@@ -1287,22 +1295,62 @@ export class OpenClawPowerApp extends LitElement {
   private async loadProjectDirectoryRoots() {
     const { roots } = await this.adapter.listProjectRoots();
     this.projectDirectoryRoots = roots;
+    this.projectDirectoryTreeChildrenByPath = {};
+    this.projectDirectoryExpandedPaths = [];
+    this.projectDirectoryLoadingPaths = [];
     this.projectDirectoryCurrentPath = null;
     this.projectDirectoryCurrentName = null;
     this.projectDirectoryParentPath = null;
     this.projectDirectoryEntries = [];
+    this.projectDirectorySelectedPath = null;
+    this.projectDirectorySelectedName = null;
+    this.projectDirectoryCreateFolderOpen = false;
+    this.projectDirectoryCreateFolderName = "";
+    this.projectDirectoryCreateFolderBusy = false;
   }
 
-  private async browseProjectDirectory(path: string | null) {
-    if (!path) {
-      await this.loadProjectDirectoryRoots();
-      return;
+  private projectDirectoryHasLoaded(path: string) {
+    return Object.prototype.hasOwnProperty.call(this.projectDirectoryTreeChildrenByPath, path);
+  }
+
+  private setProjectDirectoryPathLoading(path: string, loading: boolean) {
+    const next = new Set(this.projectDirectoryLoadingPaths);
+    if (loading) {
+      next.add(path);
+    } else {
+      next.delete(path);
     }
-    const listing = await this.adapter.listProjectDirectories(path);
-    this.projectDirectoryCurrentPath = listing.path;
-    this.projectDirectoryCurrentName = listing.name;
-    this.projectDirectoryParentPath = listing.parentPath;
-    this.projectDirectoryEntries = listing.entries;
+    this.projectDirectoryLoadingPaths = [...next];
+  }
+
+  private async loadProjectDirectoryChildren(path: string, force = false) {
+    const normalizedPath = path.trim();
+    if (!normalizedPath) {
+      return [];
+    }
+    if (!force && this.projectDirectoryHasLoaded(normalizedPath)) {
+      return this.projectDirectoryTreeChildrenByPath[normalizedPath] ?? [];
+    }
+    this.setProjectDirectoryPathLoading(normalizedPath, true);
+    try {
+      const listing = await this.adapter.listProjectDirectories(normalizedPath);
+      this.projectDirectoryTreeChildrenByPath = {
+        ...this.projectDirectoryTreeChildrenByPath,
+        [listing.path]: listing.entries,
+      };
+      this.projectDirectoryCurrentPath = listing.path;
+      this.projectDirectoryCurrentName = listing.name;
+      this.projectDirectoryParentPath = listing.parentPath;
+      this.projectDirectoryEntries = listing.entries;
+      return listing.entries;
+    } finally {
+      this.setProjectDirectoryPathLoading(normalizedPath, false);
+    }
+  }
+
+  private selectProjectDirectory(path: string | null, name: string | null) {
+    this.projectDirectorySelectedPath = path?.trim() || null;
+    this.projectDirectorySelectedName = name?.trim() || null;
   }
 
   private async openProjectDirectoryDialog() {
@@ -1311,6 +1359,13 @@ export class OpenClawPowerApp extends LitElement {
       this.projectDirectoryLoading = true;
       this.projectDirectoryError = null;
       await this.loadProjectDirectoryRoots();
+      const initialRoot = this.projectDirectoryRoots[0] ?? null;
+      if (initialRoot) {
+        this.projectDirectorySelectedPath = initialRoot.path;
+        this.projectDirectorySelectedName = initialRoot.name;
+        await this.loadProjectDirectoryChildren(initialRoot.path);
+        this.projectDirectoryExpandedPaths = [initialRoot.path];
+      }
       this.lastError = null;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1329,20 +1384,88 @@ export class OpenClawPowerApp extends LitElement {
       this.projectDirectoryCurrentName = null;
       this.projectDirectoryParentPath = null;
       this.projectDirectoryEntries = [];
+      this.projectDirectoryTreeChildrenByPath = {};
+      this.projectDirectoryExpandedPaths = [];
+      this.projectDirectoryLoadingPaths = [];
+      this.projectDirectorySelectedPath = null;
+      this.projectDirectorySelectedName = null;
+      this.projectDirectoryCreateFolderOpen = false;
+      this.projectDirectoryCreateFolderName = "";
+      this.projectDirectoryCreateFolderBusy = false;
     });
   }
 
+  private toggleProjectDirectoryExpanded(path: string, expanded: boolean) {
+    const normalizedPath = path.trim();
+    const next = new Set(this.projectDirectoryExpandedPaths);
+    if (expanded) {
+      next.add(normalizedPath);
+    } else {
+      for (const entry of Array.from(next)) {
+        if (entry === normalizedPath || entry.startsWith(`${normalizedPath}/`)) {
+          next.delete(entry);
+        }
+      }
+    }
+    this.projectDirectoryExpandedPaths = [...next];
+  }
+
   private async handleProjectDirectoryNavigate(path: string | null) {
+    const normalizedPath = path?.trim() || "";
+    if (!normalizedPath) {
+      return;
+    }
     try {
-      this.projectDirectoryLoading = true;
       this.projectDirectoryError = null;
-      await this.browseProjectDirectory(path);
+      this.projectDirectorySelectedPath = normalizedPath;
+      this.projectDirectorySelectedName =
+        normalizedPath.split("/").filter(Boolean).pop() ?? normalizedPath;
+      const isExpanded = this.projectDirectoryExpandedPaths.includes(normalizedPath);
+      if (isExpanded) {
+        this.toggleProjectDirectoryExpanded(normalizedPath, false);
+        return;
+      }
+      const entries = await this.loadProjectDirectoryChildren(normalizedPath);
+      if (entries.length > 0) {
+        this.toggleProjectDirectoryExpanded(normalizedPath, true);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.projectDirectoryError = message;
+      this.lastError = message;
+    }
+  }
+
+  private toggleProjectDirectoryCreateFolder(open: boolean) {
+    this.projectDirectoryCreateFolderOpen = open;
+    if (!open) {
+      this.projectDirectoryCreateFolderName = "";
+      this.projectDirectoryCreateFolderBusy = false;
+    }
+  }
+
+  private async createProjectDirectoryFolder() {
+    const basePath = this.projectDirectorySelectedPath?.trim() || "";
+    const folderName = this.projectDirectoryCreateFolderName.trim();
+    if (!basePath || !folderName) {
+      return;
+    }
+    try {
+      this.projectDirectoryCreateFolderBusy = true;
+      this.projectDirectoryError = null;
+      const result = await this.adapter.createProjectDirectory(basePath, folderName);
+      await this.loadProjectDirectoryChildren(basePath, true);
+      this.toggleProjectDirectoryExpanded(basePath, true);
+      this.projectDirectorySelectedPath = result.entry.path;
+      this.projectDirectorySelectedName = result.entry.name;
+      this.projectDirectoryCreateFolderOpen = false;
+      this.projectDirectoryCreateFolderName = "";
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.projectDirectoryError = message;
       this.lastError = message;
     } finally {
-      this.projectDirectoryLoading = false;
+      this.projectDirectoryCreateFolderBusy = false;
     }
   }
 
@@ -1933,10 +2056,18 @@ export class OpenClawPowerApp extends LitElement {
       projectDirectoryLoading: this.projectDirectoryLoading,
       projectDirectoryError: this.projectDirectoryError,
       projectDirectoryRoots: this.projectDirectoryRoots,
+      projectDirectoryTreeChildrenByPath: this.projectDirectoryTreeChildrenByPath,
+      projectDirectoryExpandedPaths: this.projectDirectoryExpandedPaths,
+      projectDirectoryLoadingPaths: this.projectDirectoryLoadingPaths,
       projectDirectoryCurrentPath: this.projectDirectoryCurrentPath,
       projectDirectoryCurrentName: this.projectDirectoryCurrentName,
       projectDirectoryParentPath: this.projectDirectoryParentPath,
       projectDirectoryEntries: this.projectDirectoryEntries,
+      projectDirectorySelectedPath: this.projectDirectorySelectedPath,
+      projectDirectorySelectedName: this.projectDirectorySelectedName,
+      projectDirectoryCreateFolderOpen: this.projectDirectoryCreateFolderOpen,
+      projectDirectoryCreateFolderName: this.projectDirectoryCreateFolderName,
+      projectDirectoryCreateFolderBusy: this.projectDirectoryCreateFolderBusy,
       fileManagerOpen: this.fileManagerDialogOpen,
       fileManagerLoading: this.fileManagerLoading,
       fileManagerError: this.fileManagerError,
@@ -1954,8 +2085,23 @@ export class OpenClawPowerApp extends LitElement {
       onCloseProjectDirectory: () => {
         this.closeProjectDirectoryDialog();
       },
+      onSelectProjectDirectory: (path, name) => {
+        this.selectProjectDirectory(path, name);
+      },
       onBrowseProjectDirectory: (path) => {
         void this.handleProjectDirectoryNavigate(path);
+      },
+      onToggleProjectDirectoryCreateFolder: () => {
+        this.toggleProjectDirectoryCreateFolder(!this.projectDirectoryCreateFolderOpen);
+      },
+      onProjectDirectoryFolderNameChange: (value) => {
+        this.projectDirectoryCreateFolderName = value;
+      },
+      onCancelProjectDirectoryCreateFolder: () => {
+        this.toggleProjectDirectoryCreateFolder(false);
+      },
+      onCreateProjectDirectoryFolder: () => {
+        void this.createProjectDirectoryFolder();
       },
       onCreateProjectFromDirectory: (path) => {
         void this.handleCreateProjectFromDirectory(path);

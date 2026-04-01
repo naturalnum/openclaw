@@ -162,6 +162,18 @@ export class PowerFsService {
     };
   }
 
+  createDirectory(currentPath: string, name: string): PowerFsDirectoryEntry {
+    const baseDir = this.resolveAllowedDirectory(currentPath);
+    const folderName = assertValidLeafName(name);
+    const nextPath = path.resolve(baseDir, folderName);
+    const root = this.findOwningRoot(baseDir);
+    if (!isInsideRoot(nextPath, root)) {
+      throw new Error(`Path is outside allowed roots: ${nextPath}`);
+    }
+    fs.mkdirSync(nextPath, { recursive: false });
+    return toDirectoryEntry(nextPath);
+  }
+
   listWorkspaceEntries(
     workspaceDir: string,
     inputPath?: string | null,

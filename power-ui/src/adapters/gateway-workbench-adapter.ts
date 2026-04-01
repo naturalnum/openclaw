@@ -15,6 +15,7 @@ import {
 } from "../integrations/openclaw/session-keys.ts";
 import type { WorkbenchSnapshot } from "./mock-workbench-adapter.ts";
 import type {
+  WorkbenchDirectoryCreateResult,
   WorkbenchAdapter,
   WorkbenchAdapterEvent,
   WorkbenchDirectoryListResult,
@@ -252,6 +253,19 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
         path: path?.trim() || null,
       }),
       "power.fs.listDirs",
+    );
+  }
+
+  async createProjectDirectory(
+    path: string,
+    name: string,
+  ): Promise<WorkbenchDirectoryCreateResult> {
+    return await requiredRequest(
+      this.gateway.request<WorkbenchDirectoryCreateResult>("power.fs.createDir", {
+        path: path.trim(),
+        name: name.trim(),
+      }),
+      "power.fs.createDir",
     );
   }
 

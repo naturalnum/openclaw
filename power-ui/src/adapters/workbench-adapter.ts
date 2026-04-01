@@ -69,6 +69,11 @@ export type WorkbenchWorkspaceValidationResult = {
   name: string;
 };
 
+export type WorkbenchDirectoryCreateResult = {
+  ok: boolean;
+  entry: WorkbenchDirectoryEntry;
+};
+
 export type WorkbenchSkillMessage = {
   ok: boolean;
   message: string;
@@ -103,6 +108,7 @@ export interface WorkbenchAdapter {
   snapshot(args: WorkbenchSelection): Promise<WorkbenchSnapshot>;
   listProjectRoots(): Promise<WorkbenchDirectoryRootsResult>;
   listProjectDirectories(path?: string | null): Promise<WorkbenchDirectoryListResult>;
+  createProjectDirectory(path: string, name: string): Promise<WorkbenchDirectoryCreateResult>;
   validateProjectWorkspace(path: string): Promise<WorkbenchWorkspaceValidationResult>;
   listProjectFiles(agentId: string, path?: string | null): Promise<WorkbenchFileListResult>;
   createProjectFolder(

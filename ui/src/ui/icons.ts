@@ -106,6 +106,21 @@ export const icons = {
       />
     </svg>
   `,
+  folderOpen: html`
+    <svg viewBox="0 0 24 24">
+      <path d="M6 14h12l1.55-5.17A2 2 0 0 0 17.63 6H10l-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12" />
+      <path d="M2 14h16a2 2 0 0 1 1.92 2.55l-.67 2A2 2 0 0 1 17.34 20H4a2 2 0 0 1-2-2v-4Z" />
+    </svg>
+  `,
+  folderPlus: html`
+    <svg viewBox="0 0 24 24">
+      <path
+        d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"
+      />
+      <path d="M12 11v6" />
+      <path d="M9 14h6" />
+    </svg>
+  `,
 
   // UI icons
   menu: html`

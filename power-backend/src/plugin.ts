@@ -84,6 +84,30 @@ export default function register(api: OpenClawPluginApi) {
   );
 
   api.registerGatewayMethod(
+    "power.fs.createDir",
+    async ({ params, respond }: GatewayRequestHandlerOptions) => {
+      try {
+        const requestedPath = typeof params?.path === "string" ? params.path.trim() : "";
+        const name = typeof params?.name === "string" ? params.name.trim() : "";
+        if (!requestedPath) {
+          respond(false, { error: "path required" });
+          return;
+        }
+        if (!name) {
+          respond(false, { error: "name required" });
+          return;
+        }
+        respond(true, {
+          ok: true,
+          entry: fsService.createDirectory(requestedPath, name),
+        });
+      } catch (error) {
+        sendError(respond, error);
+      }
+    },
+  );
+
+  api.registerGatewayMethod(
     "power.fs.listWorkspace",
     async ({ params, respond }: GatewayRequestHandlerOptions) => {
       try {

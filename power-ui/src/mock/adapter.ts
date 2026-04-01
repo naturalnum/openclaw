@@ -17,6 +17,7 @@ import type {
 import type {
   WorkbenchAdapter,
   WorkbenchAdapterEvent,
+  WorkbenchDirectoryCreateResult,
   WorkbenchDirectoryListResult,
   WorkbenchDirectoryRootsResult,
   WorkbenchFileDownloadResult,
@@ -587,6 +588,19 @@ export class MockWorkbenchAdapter implements WorkbenchAdapter {
           ? null
           : currentPath.split("/").slice(0, -1).join("/") || "/workspace",
       entries,
+    };
+  }
+
+  async createProjectDirectory(
+    path: string,
+    name: string,
+  ): Promise<WorkbenchDirectoryCreateResult> {
+    return {
+      ok: true,
+      entry: {
+        name: name.trim(),
+        path: `${path.trim()}/${name.trim()}`.replace(/\/+/g, "/"),
+      },
     };
   }
 
