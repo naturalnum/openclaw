@@ -66,6 +66,9 @@ RUN --mount=type=cache,id=openclaw-local-npm,target=/root/.npm \
     npm install -g clawhub docx pptxgenjs --prefer-offline && \
     npm config set registry https://registry.npmjs.org
 
+# Install libreoffice and poppler-utils for pdf conversion
+RUN apt-get install -y python3 python3-pip libreoffice poppler-utils
+RUN pip3 install python-docx pypdf
 # Copy application files
 COPY dist         ./dist
 COPY node_modules ./node_modules

@@ -25,7 +25,6 @@
         "primary": "minmax/MinMax-2.5"
       },
       "models": {
-        "openai/gpt-4o": {},
         "deepseek/deepseek-chat": {}
       },
       "workspace": "/root/.openclaw/workspace",
