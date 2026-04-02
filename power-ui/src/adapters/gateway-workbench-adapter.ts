@@ -340,6 +340,26 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
     );
   }
 
+  async renameProject(projectId: string, name: string): Promise<void> {
+    await requiredRequest(
+      this.gateway.request("agents.update", {
+        agentId: projectId,
+        name,
+      }),
+      "agents.update",
+    );
+  }
+
+  async deleteProject(projectId: string): Promise<void> {
+    await requiredRequest(
+      this.gateway.request("agents.delete", {
+        agentId: projectId,
+        deleteFiles: true,
+      }),
+      "agents.delete",
+    );
+  }
+
   async createProject(name: string, workspace: string) {
     const projectName = name.trim();
     const projectWorkspace = workspace.trim();
@@ -356,10 +376,10 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
   async startTask(projectId: string, text: string, modelId: string): Promise<WorkbenchSendResult> {
     const sessionKey = buildPowerSessionKey(projectId);
     const label = buildSessionLabelFromPrompt(text);
+    void modelId;
     await this.gateway.request("sessions.patch", {
       key: sessionKey,
       label,
-      model: modelId || null,
     });
     return { sessionKey, runId: null };
   }
@@ -369,12 +389,28 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
     text: string,
     modelId: string,
   ): Promise<WorkbenchSendResult> {
-    await this.gateway.request("sessions.patch", {
-      key: sessionKey,
-      model: modelId || null,
-    });
     void text;
+    void modelId;
     return { sessionKey, runId: null };
+  }
+
+  async renameSession(sessionKey: string, label: string): Promise<void> {
+    await requiredRequest(
+      this.gateway.request("sessions.patch", {
+        key: sessionKey,
+        label,
+      }),
+      "sessions.patch",
+    );
+  }
+
+  async deleteSession(sessionKey: string): Promise<void> {
+    await requiredRequest(
+      this.gateway.request("sessions.delete", {
+        key: sessionKey,
+      }),
+      "sessions.delete",
+    );
   }
 
   async abortRun(sessionKey: string, runId: string | null): Promise<void> {

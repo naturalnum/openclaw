@@ -8,13 +8,10 @@ import type {
   AgentsListResult,
   ModelCatalogEntry,
   SessionsListResult,
-  ToolsCatalogResult,
 } from "../../../ui/src/ui/types.ts";
 import {
   normalizeAgentLabel,
   resolveAgentAvatarUrl,
-  resolveToolSections,
-  type AgentToolEntry,
 } from "../../../ui/src/ui/views/agents-utils.ts";
 import { renderCron, type CronProps } from "../../../ui/src/ui/views/cron.ts";
 import { renderSkills, type SkillsProps } from "../../../ui/src/ui/views/skills.ts";
@@ -22,11 +19,12 @@ import type { WorkbenchFileEntry } from "../adapters/workbench-adapter.ts";
 import { renderPowerChatThread } from "../integrations/openclaw/chat/thread.ts";
 
 export type WorkbenchSection = "newTask" | "automations" | "skills";
-export type WorkbenchToolsCategory = "builtIn" | "mcp" | "connectors";
 export type WorkbenchSettingsTab = "general" | "models";
 
 export type WorkbenchModelConfig = {
   id: string;
+  provider: string;
+  enabled: boolean;
   name: string;
   baseUrl: string;
   apiKey: string;
@@ -64,11 +62,18 @@ type WorkbenchProject = {
   sessions: WorkbenchSession[];
 };
 
+type PendingChatFileView = {
+  id: string;
+  name: string;
+  size: number;
+};
+
 export type WorkbenchProps = {
   basePath: string;
   assistantName: string;
   currentProjectId: string | null;
   currentSessionKey: string;
+  treeMenuOpenKey: string | null;
   currentModelId: string;
   newTaskProjectId: string | null;
   newTaskProjectMenuOpen: boolean;
@@ -88,6 +93,7 @@ export type WorkbenchProps = {
   sessionsResult: SessionsListResult | null;
   chatMessages: unknown[];
   chatMessage: string;
+  pendingChatFiles: PendingChatFileView[];
   chatSending: boolean;
   chatRunId: string | null;
   chatStream: string | null;
@@ -95,9 +101,6 @@ export type WorkbenchProps = {
   chatToolMessages: unknown[];
   chatStreamSegments: Array<{ text: string; ts: number }>;
   lastError: string | null;
-  toolsCatalogResult: ToolsCatalogResult | null;
-  toolsCatalogLoading: boolean;
-  toolsCatalogError: string | null;
   skillsPage: SkillsProps;
   automationsPage: CronProps;
   modelCatalog: ModelCatalogEntry[];
@@ -112,9 +115,12 @@ export type WorkbenchProps = {
   settingsView: {
     localeOptions: Array<{ value: string; label: string }>;
     modelConfigs: WorkbenchModelConfig[];
+    expandedModelConfigId: string | null;
     onLocaleChange: (value: string) => void;
     onThemeChange: (value: string) => void;
     onThemeModeChange: (value: string) => void;
+    onToggleModelConfigEnabled: (id: string, enabled: boolean) => void;
+    onToggleModelConfigExpanded: (id: string) => void;
     onModelConfigChange: (
       id: string,
       field: "name" | "baseUrl" | "apiKey" | "model",
@@ -124,10 +130,6 @@ export type WorkbenchProps = {
     onRemoveModelConfig: (id: string) => void;
   };
   section: WorkbenchSection;
-  toolsOpen: boolean;
-  toolsClosing: boolean;
-  toolQuery: string;
-  toolsCategory: WorkbenchToolsCategory;
   settingsOpen: boolean;
   settingsClosing: boolean;
   settingsTab: WorkbenchSettingsTab;
@@ -148,7 +150,6 @@ export type WorkbenchProps = {
   projectDirectoryCreateFolderOpen: boolean;
   projectDirectoryCreateFolderName: string;
   projectDirectoryCreateFolderBusy: boolean;
-  fileManagerOpen: boolean;
   fileManagerLoading: boolean;
   fileManagerError: string | null;
   fileManagerAgentId: string | null;
@@ -157,8 +158,6 @@ export type WorkbenchProps = {
   fileManagerCurrentName: string | null;
   fileManagerParentPath: string | null;
   fileManagerEntries: WorkbenchFileEntry[];
-  fileManagerBackCount: number;
-  fileManagerForwardCount: number;
   fileManagerBusyPath: string | null;
   fileManagerCreateFolderOpen: boolean;
   fileManagerNewFolderName: string;
@@ -166,19 +165,22 @@ export type WorkbenchProps = {
   onSectionChange: (section: WorkbenchSection) => void;
   onSelectProject: (projectId: string) => void;
   onSelectSession: (sessionKey: string) => void;
+  onToggleProjectMenu: (projectId: string) => void;
+  onToggleSessionMenu: (sessionKey: string) => void;
+  onRenameProject: (projectId: string) => void;
+  onDeleteProject: (projectId: string) => void;
+  onRenameSession: (sessionKey: string) => void;
+  onDeleteSession: (sessionKey: string) => void;
   onSelectNewTaskProject: (projectId: string) => void;
   onToggleNewTaskProjectMenu: () => void;
   onStartTask: (projectId: string) => void;
   onOpenAttachment: () => void;
+  onRemovePendingChatFile: (id: string) => void;
   onComposerChange: (value: string) => void;
   onComposerKeyDown: (event: KeyboardEvent) => void;
   onChatScroll: (event: Event) => void;
   onSend: () => void;
   onAbort: () => void;
-  onOpenTools: () => void;
-  onCloseTools: () => void;
-  onToolQueryChange: (value: string) => void;
-  onToolsCategoryChange: (value: WorkbenchToolsCategory) => void;
   onOpenSettings: () => void;
   onCloseSettings: () => void;
   onSettingsTabChange: (value: WorkbenchSettingsTab) => void;
@@ -192,12 +194,7 @@ export type WorkbenchProps = {
   onCancelProjectDirectoryCreateFolder: () => void;
   onCreateProjectDirectoryFolder: () => void;
   onCreateProjectFromDirectory: (path: string | null) => void;
-  onOpenFileManager: (agentId: string, path: string | null) => void;
-  onOpenFileManagerForCreateFolder: (agentId: string, path: string | null) => void;
-  onCloseFileManager: () => void;
   onNavigateFileManager: (path: string | null) => void;
-  onNavigateFileManagerBack: () => void;
-  onNavigateFileManagerForward: () => void;
   onRefreshFileManager: () => void;
   onOpenProjectFilePicker: (agentId: string, path: string | null) => void;
   onDownloadProjectFile: (agentId: string, path: string) => void;
@@ -224,6 +221,10 @@ function dialogStateClass(isOpen: boolean, isClosing: boolean): string {
   return isClosing && !isOpen ? "is-closing" : isOpen ? "is-open" : "";
 }
 
+function isTreeMenuOpen(props: WorkbenchProps, key: string): boolean {
+  return props.treeMenuOpenKey === key;
+}
+
 export function renderWorkbench(props: WorkbenchProps) {
   const locale = props.settings.locale;
   const projects = resolveProjects(props);
@@ -247,9 +248,9 @@ export function renderWorkbench(props: WorkbenchProps) {
 
   return html`
     <div
-      class="workbench ${props.themeResolved.includes("light") ? "workbench--light" : ""} ${
-        props.sidebarCollapsed ? "workbench--sidebar-collapsed" : ""
-      }"
+      class="workbench ${props.themeResolved.includes("light")
+        ? "workbench--light"
+        : ""} ${props.sidebarCollapsed ? "workbench--sidebar-collapsed" : ""}"
     >
       <aside class="workbench-sidebar">
         <div class="workbench-brand">
@@ -316,10 +317,9 @@ export function renderWorkbench(props: WorkbenchProps) {
           )}
         </nav>
 
-        ${
-          props.sidebarCollapsed
-            ? nothing
-            : html`
+        ${props.sidebarCollapsed
+          ? nothing
+          : html`
               <section class="workbench-projects">
                 <div class="workbench-tree-header">
                   <button
@@ -341,10 +341,9 @@ export function renderWorkbench(props: WorkbenchProps) {
                 </div>
 
                 <div class="workbench-projects__scroll">
-                  ${
-                    props.projectsCollapsed
-                      ? nothing
-                      : html`
+                  ${props.projectsCollapsed
+                    ? nothing
+                    : html`
                         <div class="workbench-project-tree">
                           ${repeat(
                             projects,
@@ -352,12 +351,10 @@ export function renderWorkbench(props: WorkbenchProps) {
                             (project) => renderProjectTreeRow(project, props),
                           )}
                         </div>
-                      `
-                  }
+                      `}
                 </div>
               </section>
-            `
-        }
+            `}
 
         <div class="workbench-sidebar__footer">
           <button
@@ -376,45 +373,35 @@ export function renderWorkbench(props: WorkbenchProps) {
       </aside>
 
       <div class="workbench-main">
-        ${
-          showContextBar && activeProject && activeSession
-            ? renderContextBar(props, activeProject, activeSession)
-            : nothing
-        }
+        ${showContextBar && activeProject && activeSession
+          ? renderContextBar(props, activeProject, activeSession)
+          : nothing}
         <div
-          class="workbench-content ${showRightRail ? "workbench-content--rail" : ""} ${
-            props.section === "newTask" && !showRightRail
-              ? "workbench-content--session-centered"
-              : ""
-          }"
+          class="workbench-content ${showRightRail
+            ? "workbench-content--rail"
+            : ""} ${props.section === "newTask" && !showRightRail
+            ? "workbench-content--session-centered"
+            : ""}"
         >
           <section class="workbench-center">
-            ${
-              props.section === "skills"
-                ? renderSkillsPage(props)
-                : props.section === "automations"
-                  ? renderAutomationsPage(props, activeProject)
-                  : activeSession
-                    ? renderSessionView(props, activeProject, activeSession)
-                    : renderNewTaskView(props, currentProject, projects)
-            }
+            ${props.section === "skills"
+              ? renderSkillsPage(props)
+              : props.section === "automations"
+                ? renderAutomationsPage(props, activeProject)
+                : activeSession
+                  ? renderSessionView(props, activeProject, activeSession)
+                  : renderNewTaskView(props, currentProject, projects)}
           </section>
 
-          ${
-            showRightRail && activeProject && activeSession
-              ? renderRightRail(props, activeProject)
-              : nothing
-          }
+          ${showRightRail && activeProject && activeSession
+            ? renderRightRail(props, activeProject)
+            : nothing}
         </div>
       </div>
-      ${props.toolsOpen || props.toolsClosing ? renderToolsDialog(props) : nothing}
       ${props.settingsOpen || props.settingsClosing ? renderSettingsDialog(props) : nothing}
-      ${
-        props.projectDirectoryOpen || props.projectDirectoryClosing
-          ? renderProjectDirectoryDialog(props)
-          : nothing
-      }
-      ${props.fileManagerOpen ? renderFileManagerDialog(props) : nothing}
+      ${props.projectDirectoryOpen || props.projectDirectoryClosing
+        ? renderProjectDirectoryDialog(props)
+        : nothing}
     </div>
   `;
 }
@@ -432,9 +419,9 @@ function renderContextBar(
       </div>
       <button
         type="button"
-        class="workbench-icon-button workbench-context-bar__toggle ${
-          props.rightRailCollapsed ? "is-collapsed" : ""
-        }"
+        class="workbench-icon-button workbench-context-bar__toggle ${props.rightRailCollapsed
+          ? "is-collapsed"
+          : ""}"
         title=${props.rightRailCollapsed ? "展开卡片区" : "折叠卡片区"}
         aria-label=${props.rightRailCollapsed ? "展开卡片区" : "折叠卡片区"}
         @click=${props.onToggleRightRail}
@@ -451,6 +438,7 @@ function renderNewTaskView(
   projects: WorkbenchProject[],
 ) {
   const locale = props.settings.locale;
+  const canSend = Boolean(props.chatMessage.trim() || props.pendingChatFiles.length > 0);
   return html`
     <section class="workbench-session-shell workbench-session-shell--centered">
       <section class="workbench-chat-surface">
@@ -464,40 +452,44 @@ function renderNewTaskView(
                 class="workbench-new-thread__project-button"
                 @click=${props.onToggleNewTaskProjectMenu}
               >
-                <span>${currentProject?.label ?? tLocale(locale, "Select project", "选择项目")}</span>
+                <span
+                  >${currentProject?.label ?? tLocale(locale, "Select project", "选择项目")}</span
+                >
                 <span class="workbench-new-thread__project-chevron">
                   ${props.newTaskProjectMenuOpen ? icons.chevronUp : icons.chevronDown}
                 </span>
               </button>
 
-              ${
-                props.newTaskProjectMenuOpen
-                  ? html`
+              ${props.newTaskProjectMenuOpen
+                ? html`
                     <div class="workbench-new-thread__project-menu">
                       <div class="workbench-new-thread__project-menu-title">
                         ${tLocale(locale, "Choose project", "选择项目")}
                       </div>
-                        ${repeat(
-                          projects,
-                          (project) => project.id,
-                          (project) => html`
+                      ${repeat(
+                        projects,
+                        (project) => project.id,
+                        (project) => html`
                           <button
                             type="button"
-                            class="workbench-new-thread__project-item ${
-                              currentProject?.id === project.id ? "is-active" : ""
-                            }"
+                            class="workbench-new-thread__project-item ${currentProject?.id ===
+                            project.id
+                              ? "is-active"
+                              : ""}"
                             @click=${() => props.onSelectNewTaskProject(project.id)}
                           >
-                            <span class="workbench-new-thread__project-item-icon">${icons.folder}</span>
+                            <span class="workbench-new-thread__project-item-icon"
+                              >${icons.folder}</span
+                            >
                             <span>${project.label}</span>
-                            ${
-                              currentProject?.id === project.id
-                                ? html`<span class="workbench-new-thread__project-item-check">${icons.check}</span>`
-                                : nothing
-                            }
+                            ${currentProject?.id === project.id
+                              ? html`<span class="workbench-new-thread__project-item-check"
+                                  >${icons.check}</span
+                                >`
+                              : nothing}
                           </button>
                         `,
-                        )}
+                      )}
                       <div class="workbench-new-thread__project-divider"></div>
                       <button
                         type="button"
@@ -509,13 +501,13 @@ function renderNewTaskView(
                       </button>
                     </div>
                   `
-                  : nothing
-              }
+                : nothing}
             </div>
           </div>
         </div>
 
         <div class="workbench-chat-composer workbench-chat-composer--floating">
+          ${renderPendingChatFiles(props)}
           <textarea
             class="workbench-composer workbench-composer--session"
             .value=${props.chatMessage}
@@ -549,28 +541,20 @@ function renderNewTaskView(
                 >
                   ${repeat(
                     props.modelCatalog,
-                    (model) => model.id,
-                    (model) => html`<option value=${model.id}>${model.id}</option>`,
+                    (model) => `${model.provider}/${model.id}`,
+                    (model) =>
+                      html`<option value=${`${model.provider}/${model.id}`}>${model.id}</option>`,
                   )}
                 </select>
                 <span class="workbench-model-select__chevron">${icons.chevronDown}</span>
               </label>
-              <button
-                type="button"
-                class="workbench-circle-button"
-                title="Open tools"
-                aria-label="Open tools"
-                @click=${props.onOpenTools}
-              >
-                ${icons.wrench}
-              </button>
             </div>
             <button
               type="button"
               class="workbench-send-button"
               title="Send"
               aria-label="Send"
-              ?disabled=${props.chatSending || !props.chatMessage.trim() || !currentProject}
+              ?disabled=${props.chatSending || !canSend || !currentProject}
               @click=${props.onSend}
             >
               ${icons.arrowUp}
@@ -641,31 +625,26 @@ function renderProjectDirectoryDialog(props: WorkbenchProps) {
                 >${tLocale(locale, "Path:", "路径:")}</span
               >
               <span class="workbench-directory-pathbar__value">
-                ${
-                  selectedPath ??
-                  props.projectDirectoryRoots[0]?.path ??
-                  tLocale(locale, "Allowed roots", "允许访问的根目录")
-                }
+                ${selectedPath ??
+                props.projectDirectoryRoots[0]?.path ??
+                tLocale(locale, "Allowed roots", "允许访问的根目录")}
               </span>
             </div>
           </div>
 
-          ${
-            props.projectDirectoryError
-              ? html`
-                  <div class="workbench-directory-section workbench-directory-section--error">
-                    <div class="workbench-callout workbench-callout--danger">
-                      ${props.projectDirectoryError}
-                    </div>
+          ${props.projectDirectoryError
+            ? html`
+                <div class="workbench-directory-section workbench-directory-section--error">
+                  <div class="workbench-callout workbench-callout--danger">
+                    ${props.projectDirectoryError}
                   </div>
-                `
-              : nothing
-          }
+                </div>
+              `
+            : nothing}
 
           <div class="workbench-directory-section workbench-directory-section--tree">
             <div class="workbench-directory-browser">
-            ${
-              props.projectDirectoryLoading
+              ${props.projectDirectoryLoading
                 ? html`
                     <div class="workbench-empty workbench-empty--small">
                       ${tLocale(locale, "Loading directories…", "正在加载目录…")}
@@ -684,7 +663,9 @@ function renderProjectDirectoryDialog(props: WorkbenchProps) {
                           (entry) => entry.path,
                           (entry) => html`
                             <div
-                              class="workbench-directory-entry ${entry.selected ? "is-selected" : ""}"
+                              class="workbench-directory-entry ${entry.selected
+                                ? "is-selected"
+                                : ""}"
                               style=${`--tree-depth: ${entry.depth};`}
                             >
                               <button
@@ -692,86 +673,79 @@ function renderProjectDirectoryDialog(props: WorkbenchProps) {
                                 class="workbench-directory-entry__main"
                                 @click=${() => props.onBrowseProjectDirectory(entry.path)}
                               >
-                                ${
-                                  entry.hasToggle
-                                    ? html`
-                                        <span class="workbench-directory-entry__toggle-icon">
-                                          ${entry.expanded ? icons.chevronDown : icons.chevronRight}
-                                        </span>
-                                      `
-                                    : html`
-                                        <span class="workbench-directory-entry__toggle-spacer"></span>
-                                      `
-                                }
+                                ${entry.hasToggle
+                                  ? html`
+                                      <span class="workbench-directory-entry__toggle-icon">
+                                        ${entry.expanded ? icons.chevronDown : icons.chevronRight}
+                                      </span>
+                                    `
+                                  : html`
+                                      <span class="workbench-directory-entry__toggle-spacer"></span>
+                                    `}
                                 <span class="workbench-directory-entry__icon">
                                   ${entry.expanded ? icons.folderOpen : icons.folder}
                                 </span>
                                 <span class="workbench-directory-entry__name">${entry.name}</span>
-                                ${
-                                  entry.loading
-                                    ? html`
-                                        <span class="workbench-directory-entry__loading"
-                                          >${tLocale(locale, "Loading…", "加载中…")}</span
-                                        >
-                                      `
-                                    : nothing
-                                }
+                                ${entry.loading
+                                  ? html`
+                                      <span class="workbench-directory-entry__loading"
+                                        >${tLocale(locale, "Loading…", "加载中…")}</span
+                                      >
+                                    `
+                                  : nothing}
                               </button>
                             </div>
                           `,
                         )}
                       </div>
-                    `
-            }
-          </div>
+                    `}
+            </div>
           </div>
 
-          ${
-            props.projectDirectoryCreateFolderOpen
-              ? html`
-                  <div class="workbench-directory-section workbench-directory-section--create">
-                    <div class="workbench-directory-create">
-                      <span class="workbench-directory-create__icon">${icons.folderPlus}</span>
-                      <input
-                        class="workbench-directory-create__input"
-                        .value=${props.projectDirectoryCreateFolderName}
-                        placeholder=${tLocale(locale, "Enter folder name...", "输入文件夹名称...")}
-                        @input=${(event: Event) =>
-                          props.onProjectDirectoryFolderNameChange(
-                            (event.currentTarget as HTMLInputElement).value,
-                          )}
-                        @keydown=${(event: KeyboardEvent) => {
-                          if (event.key === "Enter") {
-                            event.preventDefault();
-                            props.onCreateProjectDirectoryFolder();
-                          }
-                          if (event.key === "Escape") {
-                            event.preventDefault();
-                            props.onCancelProjectDirectoryCreateFolder();
-                          }
-                        }}
-                      />
-                      <button
-                        type="button"
-                        class="workbench-directory-create__confirm"
-                        ?disabled=${props.projectDirectoryCreateFolderBusy}
-                        @click=${props.onCreateProjectDirectoryFolder}
-                      >
-                        ${icons.check}
-                      </button>
-                      <button
-                        type="button"
-                        class="workbench-directory-create__cancel"
-                        ?disabled=${props.projectDirectoryCreateFolderBusy}
-                        @click=${props.onCancelProjectDirectoryCreateFolder}
-                      >
-                        ${icons.x}
-                      </button>
-                    </div>
+          ${props.projectDirectoryCreateFolderOpen
+            ? html`
+                <div class="workbench-directory-section workbench-directory-section--create">
+                  <div class="workbench-directory-create">
+                    <span class="workbench-directory-create__icon">${icons.folderPlus}</span>
+                    <input
+                      class="workbench-directory-create__input"
+                      .value=${props.projectDirectoryCreateFolderName}
+                      placeholder=${tLocale(locale, "Enter folder name...", "输入文件夹名称...")}
+                      @input=${(event: Event) =>
+                        props.onProjectDirectoryFolderNameChange(
+                          (event.currentTarget as HTMLInputElement).value,
+                        )}
+                      @keydown=${(event: KeyboardEvent) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          props.onCreateProjectDirectoryFolder();
+                        }
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          props.onCancelProjectDirectoryCreateFolder();
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      class="workbench-directory-create__confirm"
+                      ?disabled=${props.projectDirectoryCreateFolderBusy}
+                      @click=${props.onCreateProjectDirectoryFolder}
+                    >
+                      ${icons.check}
+                    </button>
+                    <button
+                      type="button"
+                      class="workbench-directory-create__cancel"
+                      ?disabled=${props.projectDirectoryCreateFolderBusy}
+                      @click=${props.onCancelProjectDirectoryCreateFolder}
+                    >
+                      ${icons.x}
+                    </button>
                   </div>
-                `
-              : nothing
-          }
+                </div>
+              `
+            : nothing}
 
           <div class="workbench-directory-actions">
             <button
@@ -808,249 +782,6 @@ function renderProjectDirectoryDialog(props: WorkbenchProps) {
   `;
 }
 
-function buildFileManagerBreadcrumbs(props: WorkbenchProps) {
-  const workspace = props.fileManagerWorkspace?.trim() || "";
-  const currentPath = props.fileManagerCurrentPath?.trim() || "";
-  if (!workspace || !currentPath || !currentPath.startsWith(workspace)) {
-    return [];
-  }
-  const relative = currentPath.slice(workspace.length).replace(/^\/+/, "");
-  if (!relative) {
-    return [{ label: props.fileManagerCurrentName || "Workspace", path: workspace }];
-  }
-  const segments = relative.split("/").filter(Boolean);
-  const breadcrumbs: Array<{ label: string; path: string }> = [
-    {
-      label:
-        props.fileManagerCurrentName && segments.length === 0
-          ? props.fileManagerCurrentName
-          : "Workspace",
-      path: workspace,
-    },
-  ];
-  let cursor = workspace;
-  for (const segment of segments) {
-    cursor = `${cursor}/${segment}`.replace(/\/+/g, "/");
-    breadcrumbs.push({ label: segment, path: cursor });
-  }
-  return breadcrumbs;
-}
-
-function renderFileManagerDialog(props: WorkbenchProps) {
-  const breadcrumbs = buildFileManagerBreadcrumbs(props);
-  const currentPath = props.fileManagerCurrentPath;
-  return html`
-    <div class="workbench-overlay">
-      <div class="workbench-overlay__backdrop" @click=${props.onCloseFileManager}></div>
-      <div class="workbench-dialog workbench-dialog--files">
-        <div class="workbench-dialog__topbar">
-          <div>
-            <h3>File Manager</h3>
-            <p>Browse the current project workspace, upload files, create folders, and manage assets.</p>
-          </div>
-          <button type="button" class="workbench-icon-button" @click=${props.onCloseFileManager}>
-            ${icons.x}
-          </button>
-        </div>
-
-        <div class="workbench-dialog__body">
-          <div class="workbench-file-toolbar">
-            <div class="workbench-file-toolbar__nav">
-              <button
-                type="button"
-                class="workbench-secondary-button workbench-file-toolbar__button"
-                title="返回"
-                aria-label="返回"
-                ?disabled=${props.fileManagerLoading || props.fileManagerBackCount === 0}
-                @click=${props.onNavigateFileManagerBack}
-              >
-                返回
-              </button>
-              <button
-                type="button"
-                class="workbench-secondary-button workbench-file-toolbar__button"
-                ?disabled=${props.fileManagerLoading || !props.fileManagerParentPath}
-                @click=${() => props.onNavigateFileManager(props.fileManagerParentPath)}
-              >
-                向上
-              </button>
-            </div>
-
-            <div class="workbench-file-breadcrumbs">
-              ${repeat(
-                breadcrumbs,
-                (item) => item.path,
-                (item, index) => html`
-                  <button
-                    type="button"
-                    class="workbench-file-breadcrumb ${index === breadcrumbs.length - 1 ? "is-active" : ""}"
-                    ?disabled=${index === breadcrumbs.length - 1}
-                    @click=${() => props.onNavigateFileManager(item.path)}
-                  >
-                    ${item.label}
-                  </button>
-                `,
-              )}
-            </div>
-
-            <div class="workbench-file-toolbar__actions">
-              <button
-                type="button"
-                class="workbench-secondary-button"
-                ?disabled=${props.fileManagerLoading || !props.fileManagerAgentId}
-                @click=${() =>
-                  props.fileManagerAgentId &&
-                  props.onOpenProjectFilePicker(props.fileManagerAgentId, currentPath)}
-              >
-                ${icons.plus}
-                Upload
-              </button>
-              <button
-                type="button"
-                class="workbench-secondary-button"
-                ?disabled=${props.fileManagerLoading || !props.fileManagerAgentId}
-                @click=${props.onToggleCreateFolder}
-              >
-                ${icons.folder}
-                New Folder
-              </button>
-              <button
-                type="button"
-                class="workbench-secondary-button"
-                ?disabled=${props.fileManagerLoading || !props.fileManagerAgentId}
-                @click=${props.onRefreshFileManager}
-              >
-                Refresh
-              </button>
-            </div>
-          </div>
-
-          ${
-            props.fileManagerCreateFolderOpen
-              ? html`
-                  <div class="workbench-file-create">
-                    <input
-                      type="text"
-                      .value=${props.fileManagerNewFolderName}
-                      placeholder="Folder name"
-                      @input=${(event: Event) =>
-                        props.onFileManagerFolderNameChange(
-                          (event.target as HTMLInputElement).value,
-                        )}
-                    />
-                    <button
-                      type="button"
-                      class="workbench-primary-button"
-                      ?disabled=${props.fileManagerLoading || !props.fileManagerNewFolderName.trim()}
-                      @click=${props.onCreateFileManagerFolder}
-                    >
-                      Create
-                    </button>
-                    <button
-                      type="button"
-                      class="workbench-secondary-button"
-                      ?disabled=${props.fileManagerLoading}
-                      @click=${props.onToggleCreateFolder}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                `
-              : nothing
-          }
-
-          ${
-            props.fileManagerError
-              ? html`<div class="workbench-callout workbench-callout--danger">${props.fileManagerError}</div>`
-              : nothing
-          }
-
-          ${
-            props.fileManagerLoading
-              ? html`
-                  <div class="workbench-empty workbench-empty--small">Loading files…</div>
-                `
-              : props.fileManagerEntries.length === 0
-                ? html`
-                    <div class="workbench-empty workbench-empty--small">This folder is empty.</div>
-                  `
-                : html`
-                    <div class="workbench-file-list">
-                      ${repeat(
-                        props.fileManagerEntries,
-                        (entry) => entry.path,
-                        (entry) => html`
-                          <div class="workbench-file-row">
-                            <button
-                              type="button"
-                              class="workbench-file-row__main ${entry.kind === "directory" ? "is-directory" : ""}"
-                              @click=${() =>
-                                entry.kind === "directory"
-                                  ? props.onNavigateFileManager(entry.path)
-                                  : props.onDownloadProjectFile(
-                                      props.fileManagerAgentId ?? "",
-                                      entry.path,
-                                    )}
-                            >
-                              <span class="workbench-file-row__icon">
-                                ${entry.kind === "directory" ? icons.folder : icons.fileText}
-                              </span>
-                              <span class="workbench-file-row__name">${entry.name}</span>
-                              <span class="workbench-file-row__meta">
-                                ${
-                                  entry.kind === "directory"
-                                    ? "Folder"
-                                    : `${formatBytes(entry.size ?? 0)}${entry.updatedAtMs ? ` · ${formatTimestamp(entry.updatedAtMs)}` : ""}`
-                                }
-                              </span>
-                            </button>
-                            <div class="workbench-file-row__actions">
-                              ${
-                                entry.kind === "file"
-                                  ? html`
-                                      <button
-                                        type="button"
-                                        class="workbench-icon-button"
-                                        title="Download file"
-                                        aria-label="Download file"
-                                        ?disabled=${props.fileManagerBusyPath === entry.path}
-                                        @click=${() =>
-                                          props.fileManagerAgentId &&
-                                          props.onDownloadProjectFile(
-                                            props.fileManagerAgentId,
-                                            entry.path,
-                                          )}
-                                      >
-                                        ${icons.download}
-                                      </button>
-                                    `
-                                  : nothing
-                              }
-                              <button
-                                type="button"
-                                class="workbench-icon-button"
-                                title="Delete item"
-                                aria-label="Delete item"
-                                ?disabled=${props.fileManagerBusyPath === entry.path}
-                                @click=${() =>
-                                  props.fileManagerAgentId &&
-                                  props.onDeleteProjectEntry(props.fileManagerAgentId, entry.path)}
-                              >
-                                ${icons.trash}
-                              </button>
-                            </div>
-                          </div>
-                        `,
-                      )}
-                    </div>
-                  `
-          }
-        </div>
-      </div>
-    </div>
-  `;
-}
-
 function renderNavButton(
   key: string,
   label: string,
@@ -1077,6 +808,8 @@ function renderNavButton(
 function renderProjectTreeRow(project: WorkbenchProject, props: WorkbenchProps) {
   const selected = props.currentProjectId === project.id;
   const expanded = props.expandedProjectIds.includes(project.id);
+  const projectMenuKey = `project:${project.id}`;
+  const projectMenuOpen = isTreeMenuOpen(props, projectMenuKey);
   return html`
     <div class="workbench-tree-node ${selected ? "is-active" : ""}">
       <div class="workbench-tree-node__row">
@@ -1103,39 +836,118 @@ function renderProjectTreeRow(project: WorkbenchProject, props: WorkbenchProps) 
         >
           <span class="workbench-tree-node__label">${project.label}</span>
         </button>
-        <button type="button" class="workbench-tree-node__more">${icons.moreHorizontal}</button>
+        <div class="workbench-tree-node__menu-anchor">
+          <button
+            type="button"
+            class="workbench-tree-node__more ${projectMenuOpen ? "is-open" : ""}"
+            aria-label="Project actions"
+            aria-haspopup="menu"
+            aria-expanded=${projectMenuOpen}
+            @click=${(event: Event) => {
+              event.stopPropagation();
+              props.onToggleProjectMenu(project.id);
+            }}
+          >
+            ${icons.moreHorizontal}
+          </button>
+          ${projectMenuOpen
+            ? html`
+                <div class="workbench-tree-menu" role="menu">
+                  <button
+                    type="button"
+                    class="workbench-tree-menu__item"
+                    role="menuitem"
+                    @click=${() => props.onRenameProject(project.id)}
+                  >
+                    Rename
+                  </button>
+                  <button
+                    type="button"
+                    class="workbench-tree-menu__item workbench-tree-menu__item--danger"
+                    role="menuitem"
+                    @click=${() => props.onDeleteProject(project.id)}
+                  >
+                    Delete
+                  </button>
+                </div>
+              `
+            : nothing}
+        </div>
       </div>
 
       ${html`
-          <div class="workbench-tree-node__children ${expanded ? "is-expanded" : ""}">
-            <div class="workbench-tree-node__children-inner">
-              ${
-                !expanded
-                  ? nothing
-                  : project.sessions.length === 0
-                    ? html`
-                        <div class="workbench-empty workbench-empty--tiny">No sessions yet.</div>
-                      `
-                    : repeat(
-                        project.sessions.slice(0, 6),
-                        (session) => session.key,
-                        (session) => html`
+        <div class="workbench-tree-node__children ${expanded ? "is-expanded" : ""}">
+          <div class="workbench-tree-node__children-inner">
+            ${!expanded
+              ? nothing
+              : project.sessions.length === 0
+                ? html` <div class="workbench-empty workbench-empty--tiny">No sessions yet.</div> `
+                : repeat(
+                    project.sessions.slice(0, 6),
+                    (session) => session.key,
+                    (session) => {
+                      const sessionMenuKey = `session:${session.key}`;
+                      const sessionMenuOpen = isTreeMenuOpen(props, sessionMenuKey);
+                      return html`
+                        <div
+                          class="workbench-tree-session ${props.currentSessionKey === session.key
+                            ? "is-active"
+                            : ""}"
+                        >
                           <button
                             type="button"
-                            class="workbench-tree-session ${
-                              props.currentSessionKey === session.key ? "is-active" : ""
-                            }"
+                            class="workbench-tree-session__main"
                             @click=${() => props.onSelectSession(session.key)}
                           >
                             <span class="workbench-tree-session__icon">${icons.messageSquare}</span>
                             <span class="workbench-tree-session__label">${session.label}</span>
                           </button>
-                        `,
-                      )
-              }
-            </div>
+                          <div class="workbench-tree-session__menu-anchor">
+                            <button
+                              type="button"
+                              class="workbench-tree-session__more ${sessionMenuOpen
+                                ? "is-open"
+                                : ""}"
+                              aria-label="Session actions"
+                              aria-haspopup="menu"
+                              aria-expanded=${sessionMenuOpen}
+                              @click=${(event: Event) => {
+                                event.stopPropagation();
+                                props.onToggleSessionMenu(session.key);
+                              }}
+                            >
+                              ${icons.moreHorizontal}
+                            </button>
+                            ${sessionMenuOpen
+                              ? html`
+                                  <div class="workbench-tree-menu" role="menu">
+                                    <button
+                                      type="button"
+                                      class="workbench-tree-menu__item"
+                                      role="menuitem"
+                                      @click=${() => props.onRenameSession(session.key)}
+                                    >
+                                      Rename
+                                    </button>
+                                    <button
+                                      type="button"
+                                      class="workbench-tree-menu__item workbench-tree-menu__item--danger"
+                                      role="menuitem"
+                                      @click=${() => props.onDeleteSession(session.key)}
+                                    >
+                                      Delete
+                                    </button>
+                                  </div>
+                                `
+                              : nothing}
+                          </div>
+                        </div>
+                      `;
+                    },
+                  )}
           </div>
-        `}
+        </div>
+      `}
     </div>
   `;
 }
@@ -1156,8 +968,13 @@ function renderSessionView(
     props.chatToolMessages.length > 0 ||
     props.chatStreamSegments.length > 0 ||
     Boolean(props.chatStream?.trim());
+  const canSend = Boolean(props.chatMessage.trim() || props.pendingChatFiles.length > 0);
   return html`
-    <section class="workbench-session-shell ${props.rightRailCollapsed ? "workbench-session-shell--centered" : ""}">
+    <section
+      class="workbench-session-shell ${props.rightRailCollapsed
+        ? "workbench-session-shell--centered"
+        : ""}"
+    >
       <section class="workbench-chat-surface">
         ${renderPowerChatThread({
           messages: props.chatMessages,
@@ -1181,6 +998,7 @@ function renderSessionView(
         })}
 
         <div class="workbench-chat-composer workbench-chat-composer--floating">
+          ${renderPendingChatFiles(props)}
           <textarea
             class="workbench-composer workbench-composer--session"
             .value=${props.chatMessage}
@@ -1208,25 +1026,16 @@ function renderSessionView(
                 >
                   ${repeat(
                     props.modelCatalog,
-                    (model) => model.id,
-                    (model) => html`<option value=${model.id}>${model.id}</option>`,
+                    (model) => `${model.provider}/${model.id}`,
+                    (model) =>
+                      html`<option value=${`${model.provider}/${model.id}`}>${model.id}</option>`,
                   )}
                 </select>
                 <span class="workbench-model-select__chevron">${icons.chevronDown}</span>
               </label>
-              <button
-                type="button"
-                class="workbench-circle-button"
-                title="Open tools"
-                aria-label="Open tools"
-                @click=${props.onOpenTools}
-              >
-                ${icons.wrench}
-              </button>
             </div>
-            ${
-              props.chatRunId
-                ? html`
+            ${props.chatRunId
+              ? html`
                   <button
                     type="button"
                     class="workbench-send-button"
@@ -1237,23 +1046,54 @@ function renderSessionView(
                     ${icons.x}
                   </button>
                 `
-                : html`
+              : html`
                   <button
                     type="button"
                     class="workbench-send-button"
                     title="Send"
                     aria-label="Send"
-                    ?disabled=${props.chatSending || !props.chatMessage.trim()}
+                    ?disabled=${props.chatSending || !canSend}
                     @click=${props.onSend}
                   >
                     ${icons.arrowUp}
                   </button>
-                `
-            }
+                `}
           </div>
         </div>
       </section>
     </section>
+  `;
+}
+
+function renderPendingChatFiles(props: WorkbenchProps) {
+  if (props.pendingChatFiles.length === 0) {
+    return nothing;
+  }
+  return html`
+    <div class="workbench-chat-files">
+      ${repeat(
+        props.pendingChatFiles,
+        (entry) => entry.id,
+        (entry) => html`
+          <div class="workbench-chat-file-chip">
+            <span class="workbench-chat-file-chip__icon">${icons.fileText}</span>
+            <span class="workbench-chat-file-chip__body">
+              <span class="workbench-chat-file-chip__name" title=${entry.name}>${entry.name}</span>
+              <span class="workbench-chat-file-chip__meta">${formatBytes(entry.size)}</span>
+            </span>
+            <button
+              type="button"
+              class="workbench-chat-file-chip__remove"
+              aria-label="Remove file"
+              title="Remove file"
+              @click=${() => props.onRemovePendingChatFile(entry.id)}
+            >
+              ${icons.x}
+            </button>
+          </div>
+        `,
+      )}
+    </div>
   `;
 }
 
@@ -1273,245 +1113,192 @@ function renderSkillsPage(props: WorkbenchProps) {
   `;
 }
 
+function formatWorkspaceRelativePath(workspacePath: string | null, currentPath: string | null) {
+  const workspace = workspacePath?.trim() || "";
+  const current = currentPath?.trim() || "";
+  if (!workspace || !current) {
+    return "/";
+  }
+  if (!current.startsWith(workspace)) {
+    return current;
+  }
+  const relative = current.slice(workspace.length).replace(/^\/+/, "");
+  return relative ? `/${relative}` : "/";
+}
+
 function renderRightRail(props: WorkbenchProps, project: WorkbenchProject) {
-  const entries = props.projectFilesAgentId === project.id ? props.projectFilesEntries : [];
+  const isActiveBrowser = props.fileManagerAgentId === project.id;
   const workspacePath =
-    props.projectFilesAgentId === project.id ? props.projectFilesWorkspace : project.workspace;
+    (isActiveBrowser ? props.fileManagerWorkspace : props.projectFilesWorkspace) ??
+    project.workspace;
+  const currentPath = isActiveBrowser ? props.fileManagerCurrentPath : workspacePath;
+  const parentPath = isActiveBrowser ? props.fileManagerParentPath : null;
+  const entries = isActiveBrowser ? props.fileManagerEntries : props.projectFilesEntries;
+  const loading = isActiveBrowser ? props.fileManagerLoading : props.projectFilesLoading;
+  const error = isActiveBrowser ? props.fileManagerError : props.projectFilesError;
+  const busyPath = props.fileManagerBusyPath;
+  const folderCount = entries.filter((entry) => entry.kind === "directory").length;
+  const fileCount = entries.filter((entry) => entry.kind === "file").length;
+  const canCreate = Boolean(currentPath && !loading);
+  const pathLabel = formatWorkspaceRelativePath(workspacePath, currentPath);
 
   return html`
     <aside class="workbench-rail">
-      <section class="workbench-sidecard">
+      <section class="workbench-sidecard workbench-sidecard--files">
         <div class="workbench-sidecard__header">
-          <h4>Project files</h4>
+          <h4>Project Files</h4>
           <div class="workbench-sidecard__actions">
             <button
               type="button"
-              class="workbench-icon-button"
+              class="workbench-icon-button workbench-sidecard__toolbar-icon"
               title="Create folder"
               aria-label="Create folder"
-              ?disabled=${!workspacePath}
-              @click=${() =>
-                workspacePath && props.onOpenFileManagerForCreateFolder(project.id, workspacePath)}
+              ?disabled=${!canCreate}
+              @click=${props.onToggleCreateFolder}
             >
-              ${icons.folder}
+              ${icons.folderPlus}
             </button>
             <button
               type="button"
-              class="workbench-icon-button"
-              title="Upload files"
-              aria-label="Upload files"
-              ?disabled=${!workspacePath}
-              @click=${() => workspacePath && props.onOpenProjectFilePicker(project.id, workspacePath)}
+              class="workbench-icon-button workbench-sidecard__toolbar-icon"
+              title="Refresh"
+              aria-label="Refresh"
+              ?disabled=${!workspacePath || loading}
+              @click=${props.onRefreshFileManager}
             >
-              ${icons.plus}
-            </button>
-            <button
-              type="button"
-              class="workbench-icon-button"
-              title="Open file manager"
-              aria-label="Open file manager"
-              ?disabled=${!workspacePath}
-              @click=${() => props.onOpenFileManager(project.id, workspacePath)}
-            >
-              ${icons.externalLink}
+              ${icons.rotateCw}
             </button>
           </div>
         </div>
+
+        ${currentPath && parentPath
+          ? html`
+              <div class="workbench-sidecard__toolbar">
+                <button
+                  type="button"
+                  class="workbench-sidecard__back-button"
+                  ?disabled=${loading}
+                  @click=${() => props.onNavigateFileManager(parentPath)}
+                >
+                  ${icons.chevronLeft}
+                  <span>返回</span>
+                </button>
+                <span class="workbench-sidecard__path" title=${currentPath ?? pathLabel}
+                  >${pathLabel}</span
+                >
+              </div>
+            `
+          : nothing}
+        ${props.fileManagerCreateFolderOpen
+          ? html`
+              <div class="workbench-sidecard__create-row">
+                <input
+                  type="text"
+                  class="workbench-sidecard__create-input"
+                  .value=${props.fileManagerNewFolderName}
+                  placeholder="输入文件夹名称..."
+                  @input=${(event: Event) =>
+                    props.onFileManagerFolderNameChange(
+                      (event.currentTarget as HTMLInputElement).value,
+                    )}
+                  @keydown=${(event: KeyboardEvent) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      props.onCreateFileManagerFolder();
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      props.onToggleCreateFolder();
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  class="workbench-sidecard__create-confirm"
+                  ?disabled=${loading || !props.fileManagerNewFolderName.trim()}
+                  @click=${props.onCreateFileManagerFolder}
+                >
+                  ${icons.check}
+                </button>
+                <button
+                  type="button"
+                  class="workbench-sidecard__create-cancel"
+                  ?disabled=${loading}
+                  @click=${props.onToggleCreateFolder}
+                >
+                  ${icons.x}
+                </button>
+              </div>
+            `
+          : nothing}
+
         <div class="workbench-sidecard__body workbench-sidecard__body--scroll">
-          ${
-            props.projectFilesError
-              ? html`<div class="workbench-callout workbench-callout--danger">${props.projectFilesError}</div>`
-              : nothing
-          }
-          ${
-            props.projectFilesLoading
-              ? html`
-                  <div class="workbench-skeleton">Loading files…</div>
-                `
-              : entries.length === 0
-                ? html`
-                    <div class="workbench-empty workbench-empty--tiny">
-                      No files yet. Upload from the plus button or open the manager to create folders.
-                    </div>
-                  `
-                : repeat(
-                    entries,
-                    (entry) => entry.path,
-                    (entry) => html`
-                      <div class="workbench-mini-row workbench-mini-row--file">
-                        <span class="workbench-mini-row__icon">
-                          ${entry.kind === "directory" ? icons.folder : icons.fileText}
-                        </span>
+          ${error
+            ? html`<div class="workbench-callout workbench-callout--danger">${error}</div>`
+            : nothing}
+          ${loading
+            ? html` <div class="workbench-skeleton">Loading files…</div> `
+            : entries.length === 0
+              ? html` <div class="workbench-empty workbench-empty--tiny">当前目录为空。</div> `
+              : repeat(
+                  entries,
+                  (entry) => entry.path,
+                  (entry) => html`
+                    <div
+                      class="workbench-mini-row workbench-mini-row--file workbench-mini-row--hoverable"
+                    >
+                      <span class="workbench-mini-row__icon">
+                        ${entry.kind === "directory" ? icons.folder : icons.fileText}
+                      </span>
+                      <button
+                        type="button"
+                        class="workbench-mini-row__content ${entry.kind === "directory"
+                          ? "is-directory"
+                          : ""}"
+                        title=${entry.name}
+                        @dblclick=${() =>
+                          entry.kind === "directory" && props.onNavigateFileManager(entry.path)}
+                      >
+                        <span class="workbench-mini-row__name">${entry.name}</span>
+                        <div class="workbench-mini-row__meta">
+                          ${entry.kind === "directory"
+                            ? "文件夹"
+                            : `${formatBytes(entry.size ?? 0)}${entry.updatedAtMs ? ` · ${formatTimestamp(entry.updatedAtMs)}` : ""}`}
+                        </div>
+                      </button>
+                      <div class="workbench-mini-row__actions workbench-mini-row__actions--hover">
+                        ${entry.kind === "file"
+                          ? html`
+                              <button
+                                type="button"
+                                class="workbench-icon-button"
+                                title="Download file"
+                                aria-label="Download file"
+                                ?disabled=${busyPath === entry.path}
+                                @click=${() => props.onDownloadProjectFile(project.id, entry.path)}
+                              >
+                                ${icons.download}
+                              </button>
+                            `
+                          : nothing}
                         <button
                           type="button"
-                          class="workbench-mini-row__content ${entry.kind === "directory" ? "is-directory" : ""}"
-                          @dblclick=${() =>
-                            entry.kind === "directory" &&
-                            props.onOpenFileManager(project.id, entry.path)}
+                          class="workbench-icon-button"
+                          title=${entry.kind === "directory" ? "Delete folder" : "Delete file"}
+                          aria-label=${entry.kind === "directory" ? "Delete folder" : "Delete file"}
+                          ?disabled=${busyPath === entry.path}
+                          @click=${() => props.onDeleteProjectEntry(project.id, entry.path)}
                         >
-                          <span class="workbench-mini-row__name">${entry.name}</span>
-                          <div class="workbench-mini-row__meta">
-                            ${entry.kind === "directory" ? "Folder" : formatBytes(entry.size ?? 0)}
-                          </div>
+                          ${icons.trash}
                         </button>
-                        <div class="workbench-mini-row__actions">
-                          ${
-                            entry.kind === "file"
-                              ? html`
-                                  <button
-                                    type="button"
-                                    class="workbench-icon-button"
-                                    title="Download file"
-                                    aria-label="Download file"
-                                    @click=${() => props.onDownloadProjectFile(project.id, entry.path)}
-                                  >
-                                    ${icons.download}
-                                  </button>
-                                `
-                              : nothing
-                          }
-                          <button
-                            type="button"
-                            class="workbench-icon-button"
-                            title=${entry.kind === "directory" ? "Delete folder" : "Delete file"}
-                            aria-label=${entry.kind === "directory" ? "Delete folder" : "Delete file"}
-                            @click=${() => props.onDeleteProjectEntry(project.id, entry.path)}
-                          >
-                            ${icons.trash}
-                          </button>
-                        </div>
                       </div>
-                    `,
-                  )
-          }
+                    </div>
+                  `,
+                )}
         </div>
+        <div class="workbench-sidecard__footer">${folderCount} 个文件夹 · ${fileCount} 个文件</div>
       </section>
     </aside>
-  `;
-}
-
-function renderToolsDialog(props: WorkbenchProps) {
-  const sections = resolveToolSections(props.toolsCatalogResult);
-  const filteredTools = filterToolEntries(sections, props.toolQuery, props.toolsCategory);
-  const featuredTools = filteredTools.slice(0, 4);
-  const catalogTools = filteredTools.slice(4);
-  const locale = props.settings.locale;
-  const stateClass = dialogStateClass(props.toolsOpen, props.toolsClosing);
-  return html`
-    <div class="workbench-overlay ${stateClass}">
-      <div class="workbench-overlay__backdrop" @click=${props.onCloseTools}></div>
-      <div class="workbench-dialog workbench-dialog--tools ${stateClass}">
-        <div class="workbench-dialog__topbar">
-          <div>
-            <h3>${tLocale(locale, "Tools", "工具")}</h3>
-            <p>
-              ${tLocale(
-                locale,
-                "Configure the runtime catalog your current project can access.",
-                "配置当前项目可访问的运行时工具目录。",
-              )}
-            </p>
-          </div>
-          <button type="button" class="workbench-icon-button" @click=${props.onCloseTools}>
-            ${icons.x}
-          </button>
-        </div>
-
-        <div class="workbench-dialog__tabs">
-          ${renderTabChip(
-            "builtIn",
-            tLocale(locale, "Built-in", "内置"),
-            props.toolsCategory,
-            props.onToolsCategoryChange,
-          )}
-          ${renderTabChip("mcp", "MCP", props.toolsCategory, props.onToolsCategoryChange)}
-          ${renderTabChip(
-            "connectors",
-            tLocale(locale, "Connectors", "连接器"),
-            props.toolsCategory,
-            props.onToolsCategoryChange,
-          )}
-          <label class="workbench-search-field">
-            ${icons.search}
-            <input
-              .value=${props.toolQuery}
-              placeholder=${tLocale(locale, "Search tools", "搜索工具")}
-              @input=${(event: Event) =>
-                props.onToolQueryChange((event.target as HTMLInputElement).value)}
-            />
-          </label>
-        </div>
-
-        <div class="workbench-dialog__body">
-          ${
-            props.toolsCatalogError
-              ? html`<div class="workbench-callout workbench-callout--danger">${props.toolsCatalogError}</div>`
-              : nothing
-          }
-          ${
-            filteredTools.length === 0
-              ? html`
-                  <div class="workbench-empty workbench-empty--small">
-                    ${tLocale(locale, "No tools in this category.", "这个分类下没有工具。")}
-                  </div>
-                `
-              : html`
-                <section class="workbench-tool-section">
-                  <div class="workbench-tool-section__header">
-                    <div>
-                      <h4>${tLocale(locale, "Recommended", "推荐")}</h4>
-                      <p>
-                        ${tLocale(
-                          locale,
-                          "High-signal tools surfaced first for project setup.",
-                          "优先展示更适合当前项目初始化的高价值工具。",
-                        )}
-                      </p>
-                    </div>
-                  </div>
-                  <div class="workbench-grid workbench-grid--tools">
-                    ${repeat(
-                      featuredTools,
-                      (tool) => `${tool.sectionId}:${tool.tool.id}`,
-                      ({ tool, sectionLabel, source }) =>
-                        renderToolCard(tool, sectionLabel, source),
-                    )}
-                  </div>
-                </section>
-
-                ${
-                  catalogTools.length > 0
-                    ? html`
-                      <section class="workbench-tool-section">
-                        <div class="workbench-tool-section__header">
-                          <div>
-                            <h4>${tLocale(locale, "Catalog", "目录")}</h4>
-                            <p>
-                              ${tLocale(
-                                locale,
-                                "The rest of the runtime-accessible tools for this category.",
-                                "当前分类下其余可用的运行时工具。",
-                              )}
-                            </p>
-                          </div>
-                        </div>
-                        <div class="workbench-grid workbench-grid--tools">
-                          ${repeat(
-                            catalogTools,
-                            (tool) => `${tool.sectionId}:${tool.tool.id}`,
-                            ({ tool, sectionLabel, source }) =>
-                              renderToolCard(tool, sectionLabel, source),
-                          )}
-                        </div>
-                      </section>
-                    `
-                    : nothing
-                }
-              `
-          }
-        </div>
-      </div>
-    </div>
   `;
 }
 
@@ -1545,31 +1332,29 @@ function renderSettingsDialog(props: WorkbenchProps) {
             </button>
           </aside>
 
-          <section class="workbench-settings-panel">
+          <section
+            class="workbench-settings-panel ${props.settingsTab === "models"
+              ? "workbench-settings-panel--models"
+              : ""}"
+          >
             <div class="workbench-settings-panel__header">
               <div>
                 <h4>
-                  ${
-                    props.settingsTab === "general"
-                      ? tLocale(locale, "General", "通用")
-                      : tLocale(locale, "Model Settings", "模型设置")
-                  }
+                  ${props.settingsTab === "general"
+                    ? tLocale(locale, "General", "通用")
+                    : tLocale(locale, "Model Settings", "模型设置")}
                 </h4>
-                <p>
-                  ${
-                    props.settingsTab === "general"
-                      ? tLocale(
+                ${props.settingsTab === "general"
+                  ? html`
+                      <p>
+                        ${tLocale(
                           locale,
                           "Control language and interface appearance.",
                           "控制语言和界面外观。",
-                        )
-                      : tLocale(
-                          locale,
-                          "Manage provider endpoints and model presets.",
-                          "管理 provider 端点和模型预设。",
-                        )
-                  }
-                </p>
+                        )}
+                      </p>
+                    `
+                  : nothing}
               </div>
               <button
                 type="button"
@@ -1580,9 +1365,8 @@ function renderSettingsDialog(props: WorkbenchProps) {
                 ${icons.x}
               </button>
             </div>
-            ${
-              props.settingsTab === "general"
-                ? html`
+            ${props.settingsTab === "general"
+              ? html`
                   <article class="workbench-setting-card">
                     <div class="workbench-settings-section">
                       <div class="workbench-settings-section__header">
@@ -1666,115 +1450,30 @@ function renderSettingsDialog(props: WorkbenchProps) {
                     </div>
                   </article>
                 `
-                : html`
-                  <article class="workbench-setting-card">
-                    <div class="workbench-settings-section__header">
-                      <span>Models</span>
-                      <button
-                        type="button"
-                        class="workbench-secondary-button workbench-settings-add-button"
-                        @click=${props.settingsView.onAddModelConfig}
-                      >
-                        <span class="workbench-settings-add-button__icon">${icons.plus}</span>
-                        Add model
-                      </button>
-                    </div>
-                    <div class="workbench-settings-models">
-                      ${
-                        props.settingsView.modelConfigs.length === 0
-                          ? html`
-                              <div class="workbench-empty workbench-empty--tiny">No model presets yet.</div>
-                            `
-                          : repeat(
-                              props.settingsView.modelConfigs,
-                              (config) => config.id,
-                              (config, index) => html`
-                                <section class="workbench-model-config">
-                                  <div class="workbench-model-config__header">
-                                    <div>
-                                      <h4>${config.name.trim() || `Model ${index + 1}`}</h4>
-                                      <p>${config.model.trim() || "Configure provider details below."}</p>
-                                    </div>
-                                    <div class="workbench-model-config__actions">
-                                      <button
-                                        type="button"
-                                        class="workbench-model-config__icon-button"
-                                        aria-label="Focus model fields"
-                                        @click=${(event: Event) => {
-                                          const root = (event.currentTarget as HTMLElement).closest(
-                                            ".workbench-model-config",
-                                          );
-                                          root?.querySelector("input")?.focus();
-                                        }}
-                                      >
-                                        ${icons.edit}
-                                      </button>
-                                      <button
-                                        type="button"
-                                        class="workbench-model-config__icon-button workbench-model-config__icon-button--danger"
-                                        aria-label="Remove model"
-                                        @click=${() =>
-                                          props.settingsView.onRemoveModelConfig(config.id)}
-                                      >
-                                        ${icons.trash}
-                                      </button>
-                                    </div>
-                                  </div>
-                                  <div class="workbench-model-config__grid">
-                                    ${renderSettingsInput(
-                                      "Model name",
-                                      config.name,
-                                      "GPT-4",
-                                      (value) =>
-                                        props.settingsView.onModelConfigChange(
-                                          config.id,
-                                          "name",
-                                          value,
-                                        ),
-                                    )}
-                                    ${renderSettingsInput(
-                                      "API URL",
-                                      config.baseUrl,
-                                      "https://api.openai.com/v1",
-                                      (value) =>
-                                        props.settingsView.onModelConfigChange(
-                                          config.id,
-                                          "baseUrl",
-                                          value,
-                                        ),
-                                    )}
-                                    ${renderSettingsInput(
-                                      "API Key",
-                                      config.apiKey,
-                                      "sk-...",
-                                      (value) =>
-                                        props.settingsView.onModelConfigChange(
-                                          config.id,
-                                          "apiKey",
-                                          value,
-                                        ),
-                                      "password",
-                                    )}
-                                    ${renderSettingsInput(
-                                      "Model ID",
-                                      config.model,
-                                      "gpt-4",
-                                      (value) =>
-                                        props.settingsView.onModelConfigChange(
-                                          config.id,
-                                          "model",
-                                          value,
-                                        ),
-                                    )}
-                                  </div>
-                                </section>
-                              `,
-                            )
-                      }
+              : html`
+                  <article class="workbench-setting-card workbench-setting-card--models">
+                    <div class="workbench-settings-model-shell">
+                      <div class="workbench-settings-model-shell__head"></div>
+                      <div class="workbench-settings-model-shell__list">
+                        <div class="workbench-settings-models">
+                          ${repeat(
+                            props.settingsView.modelConfigs,
+                            (config) => config.id,
+                            (config) => renderModelCard(props, config, locale),
+                          )}
+                          <button
+                            type="button"
+                            class="workbench-settings-model-add"
+                            @click=${props.settingsView.onAddModelConfig}
+                          >
+                            <span class="workbench-settings-model-add__icon">${icons.plus}</span>
+                            ${tLocale(locale, "Add model", "添加模型")}
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </article>
-                `
-            }
+                `}
           </section>
         </div>
       </div>
@@ -1826,68 +1525,146 @@ function renderAppearanceCard(
   `;
 }
 
-function renderSettingsInput(
-  label: string,
+function renderModelCard(
+  props: WorkbenchProps,
+  config: WorkbenchModelConfig,
+  locale: string | undefined,
+) {
+  const expanded = props.settingsView.expandedModelConfigId === config.id;
+  const configured = Boolean(
+    config.name.trim() && config.baseUrl.trim() && config.model.trim() && config.apiKey.trim(),
+  );
+  const title = config.name.trim() || tLocale(locale, "Untitled model", "未命名模型");
+  const badge = config.model.trim() || tLocale(locale, "Pending", "待配置");
+  return html`
+    <section class="workbench-model-card ${config.enabled ? "" : "is-disabled"}">
+      <div class="workbench-model-card__summary">
+        <label
+          class="workbench-model-card__switch"
+          aria-label=${tLocale(locale, "Enable model", "启用模型")}
+        >
+          <input
+            type="checkbox"
+            .checked=${config.enabled}
+            @change=${(event: Event) =>
+              props.settingsView.onToggleModelConfigEnabled(
+                config.id,
+                (event.target as HTMLInputElement).checked,
+              )}
+          />
+          <span></span>
+        </label>
+        <button
+          type="button"
+          class="workbench-model-card__title"
+          @click=${() => props.settingsView.onToggleModelConfigExpanded(config.id)}
+        >
+          <span class="workbench-model-card__name">${title}</span>
+          <span class="workbench-model-card__badge">${badge}</span>
+          ${!configured
+            ? html`
+                <span class="workbench-model-card__status"
+                  >${tLocale(locale, "Pending", "待配置")}</span
+                >
+              `
+            : nothing}
+        </button>
+        <div class="workbench-model-card__actions">
+          <button
+            type="button"
+            class="workbench-model-card__delete"
+            aria-label=${tLocale(locale, "Delete model", "删除模型")}
+            @click=${() => props.settingsView.onRemoveModelConfig(config.id)}
+          >
+            ${icons.trash}
+          </button>
+          <button
+            type="button"
+            class="workbench-model-card__chevron ${expanded ? "is-expanded" : ""}"
+            aria-label=${expanded
+              ? tLocale(locale, "Collapse model", "收起模型")
+              : tLocale(locale, "Expand model", "展开模型")}
+            @click=${() => props.settingsView.onToggleModelConfigExpanded(config.id)}
+          >
+            ${icons.chevronDown}
+          </button>
+        </div>
+      </div>
+      ${expanded
+        ? html`
+            <div class="workbench-model-card__fields">
+              ${renderModelInputRow(
+                locale,
+                icons.tag,
+                "Model name",
+                "模型名称",
+                config.name,
+                "例如: GPT-4o",
+                "例如: GPT-4o",
+                (value) => props.settingsView.onModelConfigChange(config.id, "name", value),
+              )}
+              ${renderModelInputRow(
+                locale,
+                icons.globe,
+                "API URL",
+                "API URL",
+                config.baseUrl,
+                "https://api.openai.com/v1",
+                "https://api.openai.com/v1",
+                (value) => props.settingsView.onModelConfigChange(config.id, "baseUrl", value),
+              )}
+              ${renderModelInputRow(
+                locale,
+                icons.zap,
+                "Model ID",
+                "Model ID",
+                config.model,
+                "gpt-4o",
+                "gpt-4o",
+                (value) => props.settingsView.onModelConfigChange(config.id, "model", value),
+              )}
+              ${renderModelInputRow(
+                locale,
+                icons.keyRound,
+                "API Key",
+                "API Key",
+                config.apiKey,
+                "sk-...",
+                "sk-...",
+                (value) => props.settingsView.onModelConfigChange(config.id, "apiKey", value),
+                "password",
+              )}
+            </div>
+          `
+        : nothing}
+    </section>
+  `;
+}
+
+function renderModelInputRow(
+  locale: string | undefined,
+  icon: unknown,
+  labelEn: string,
+  labelZh: string,
   value: string,
-  placeholder: string,
+  placeholderEn: string,
+  placeholderZh: string,
   onInput: (value: string) => void,
   type = "text",
 ) {
   return html`
-    <label class="workbench-settings-field">
-      <span>${label}</span>
+    <label class="workbench-model-row">
+      <span class="workbench-model-row__field">
+        <span class="workbench-model-row__icon">${icon}</span>
+        ${tLocale(locale, labelEn, labelZh)}
+      </span>
       <input
         type=${type}
         .value=${value}
-        placeholder=${placeholder}
+        placeholder=${tLocale(locale, placeholderEn, placeholderZh)}
         @input=${(event: Event) => onInput((event.target as HTMLInputElement).value)}
       />
     </label>
-  `;
-}
-
-function renderToolCard(
-  tool: AgentToolEntry,
-  sectionLabel: string,
-  source: "core" | "plugin" | undefined,
-) {
-  const actionLabel = source === "plugin" ? "Add" : "Configure";
-  const statusLabel = source === "plugin" ? "Available" : "Enabled";
-  return html`
-    <article class="workbench-tool-card">
-      <div class="workbench-tool-card__icon">${icons.wrench}</div>
-      <div class="workbench-tool-card__body">
-        <div class="workbench-tool-card__topline">
-          <div class="workbench-tool-card__title">${tool.label}</div>
-          <span class="workbench-inline-badge">${source === "plugin" ? "Plugin" : "Built-in"}</span>
-        </div>
-        <div class="workbench-tool-card__sub">${tool.description}</div>
-        <div class="workbench-tool-card__meta">
-          <span>${sectionLabel}</span>
-          <span>${statusLabel}</span>
-        </div>
-      </div>
-      <div class="workbench-tool-card__actions">
-        <button type="button" class="workbench-secondary-button">${actionLabel}</button>
-      </div>
-    </article>
-  `;
-}
-
-function renderTabChip(
-  id: WorkbenchToolsCategory,
-  label: string,
-  active: WorkbenchToolsCategory,
-  onChange: (value: WorkbenchToolsCategory) => void,
-) {
-  return html`
-    <button
-      type="button"
-      class="workbench-tab-chip ${active === id ? "is-active" : ""}"
-      @click=${() => onChange(id)}
-    >
-      ${label}
-    </button>
   `;
 }
 
@@ -1954,45 +1731,6 @@ function resolveProjects(props: WorkbenchProps): WorkbenchProject[] {
         return leftPriority - rightPriority;
       }
       return (right.updatedAt ?? 0) - (left.updatedAt ?? 0);
-    });
-}
-
-function filterToolEntries(
-  sections: Array<{
-    id: string;
-    label: string;
-    tools: AgentToolEntry[];
-    source?: "core" | "plugin";
-    pluginId?: string;
-  }>,
-  query: string,
-  category: WorkbenchToolsCategory,
-) {
-  const normalizedQuery = query.trim().toLowerCase();
-  return sections
-    .flatMap((section) =>
-      section.tools.map((tool) => ({
-        sectionId: section.id,
-        sectionLabel: section.label,
-        source: tool.source ?? section.source,
-        pluginId: tool.pluginId ?? section.pluginId ?? "",
-        tool,
-      })),
-    )
-    .filter((entry) => {
-      const haystack = [entry.tool.id, entry.tool.label, entry.tool.description, entry.sectionLabel]
-        .join(" ")
-        .toLowerCase();
-      if (normalizedQuery && !haystack.includes(normalizedQuery)) {
-        return false;
-      }
-      if (category === "builtIn") {
-        return entry.source !== "plugin";
-      }
-      if (category === "mcp") {
-        return entry.source === "plugin" && entry.pluginId.toLowerCase().includes("mcp");
-      }
-      return entry.source === "plugin" && !entry.pluginId.toLowerCase().includes("mcp");
     });
 }
 

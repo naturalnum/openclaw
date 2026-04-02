@@ -121,6 +121,20 @@ export const icons = {
       <path d="M9 14h6" />
     </svg>
   `,
+  tag: html`
+    <svg viewBox="0 0 24 24">
+      <path d="m20 10-8-8H4v8l8 8 8-8Z" />
+      <circle cx="7" cy="7" r="1.5" />
+    </svg>
+  `,
+  keyRound: html`
+    <svg viewBox="0 0 24 24">
+      <circle cx="7.5" cy="15.5" r="4.5" />
+      <path d="M12 15.5h8" />
+      <path d="M17 15.5v-2.5" />
+      <path d="M20 15.5v-2.5" />
+    </svg>
+  `,
 
   // UI icons
   menu: html`
@@ -136,9 +150,7 @@ export const icons = {
       <path d="m6 6 12 12" />
     </svg>
   `,
-  check: html`
-    <svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></svg>
-  `,
+  check: html` <svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></svg> `,
   arrowDown: html`
     <svg viewBox="0 0 24 24">
       <path d="M12 5v14" />
@@ -165,8 +177,12 @@ export const icons = {
   `,
   brain: html`
     <svg viewBox="0 0 24 24">
-      <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z" />
-      <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z" />
+      <path
+        d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"
+      />
+      <path
+        d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"
+      />
       <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4" />
       <path d="M17.599 6.5a3 3 0 0 0 .399-1.375" />
       <path d="M6.003 5.125A3 3 0 0 0 6.401 6.5" />
@@ -257,9 +273,7 @@ export const icons = {
       <path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z" />
     </svg>
   `,
-  circle: html`
-    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /></svg>
-  `,
+  circle: html` <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /></svg> `,
   puzzle: html`
     <svg viewBox="0 0 24 24">
       <path
@@ -291,6 +305,19 @@ export const icons = {
       <path d="M9 18l6-6-6-6" stroke-linecap="round" stroke-linejoin="round" />
     </svg>
   `,
+  chevronLeft: html`
+    <svg viewBox="0 0 24 24">
+      <path d="M15 18l-6-6 6-6" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
+  `,
+  rotateCw: html`
+    <svg viewBox="0 0 24 24">
+      <path d="M21 2v6h-6" />
+      <path d="M3 12a9 9 0 0 1 15.55-6.36L21 8" />
+      <path d="M3 22v-6h6" />
+      <path d="M21 12a9 9 0 0 1-15.55 6.36L3 16" />
+    </svg>
+  `,
   externalLink: html`
     <svg viewBox="0 0 24 24">
       <path
@@ -307,9 +334,7 @@ export const icons = {
       <path d="M22 2 11 13" />
     </svg>
   `,
-  stop: html`
-    <svg viewBox="0 0 24 24"><rect width="14" height="14" x="5" y="5" rx="1" /></svg>
-  `,
+  stop: html` <svg viewBox="0 0 24 24"><rect width="14" height="14" x="5" y="5" rx="1" /></svg> `,
   pin: html`
     <svg viewBox="0 0 24 24">
       <line x1="12" x2="12" y1="17" y2="22" />

@@ -723,6 +723,19 @@ export class MockWorkbenchAdapter implements WorkbenchAdapter {
     });
   }
 
+  async renameProject(projectId: string, name: string): Promise<void> {
+    const project = this.requireProject(projectId);
+    const nextName = name.trim();
+    if (!nextName) {
+      throw new Error("Project name is required.");
+    }
+    project.name = nextName;
+  }
+
+  async deleteProject(projectId: string): Promise<void> {
+    this.projects = this.projects.filter((project) => project.id !== projectId);
+  }
+
   async createProject(name: string, workspace: string) {
     const folderName = name.trim();
     if (!folderName) {
@@ -780,6 +793,27 @@ export class MockWorkbenchAdapter implements WorkbenchAdapter {
       sessionKey,
       runId,
     };
+  }
+
+  async renameSession(sessionKey: string, label: string): Promise<void> {
+    const session = this.requireSession(sessionKey);
+    const nextLabel = label.trim();
+    if (!nextLabel) {
+      throw new Error("Session name is required.");
+    }
+    session.label = toSessionLabel(nextLabel);
+    session.subject = nextLabel;
+    session.updatedAt = Date.now();
+  }
+
+  async deleteSession(sessionKey: string): Promise<void> {
+    for (const project of this.projects) {
+      const nextSessions = project.sessions.filter((session) => session.key !== sessionKey);
+      if (nextSessions.length !== project.sessions.length) {
+        project.sessions = nextSessions;
+        return;
+      }
+    }
   }
 
   async abortRun(_sessionKey: string, runId: string | null) {
