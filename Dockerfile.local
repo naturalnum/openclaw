@@ -77,6 +77,7 @@ COPY openclaw.mjs ./openclaw.mjs
 COPY extensions   ./extensions
 COPY skills       ./skills
 COPY docs         ./docs
+RUN mkdir -p /root/.openclaw/workspace
 
 # Bundle default config: openclaw.json -> /root/.openclaw/
 COPY default_config/openclaw.json /root/.openclaw/openclaw.json
