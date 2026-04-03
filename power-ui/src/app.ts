@@ -1,79 +1,6 @@
 import { LitElement, html } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { parseAgentSessionKey } from "../../src/routing/session-key.ts";
-import { i18n, I18nController, type Locale } from "../../ui/src/i18n/index.ts";
-import { DEFAULT_CRON_FORM } from "../../ui/src/ui/app-defaults.ts";
-import {
-  handleChatScroll,
-  resetChatScroll,
-  scheduleChatScroll,
-} from "../../ui/src/ui/app-scroll.ts";
-import {
-  flushToolStreamSync,
-  handleAgentEvent,
-  resetToolStream,
-  type ToolStreamEntry,
-} from "../../ui/src/ui/app-tool-stream.ts";
-import { loadChannels } from "../../ui/src/ui/controllers/channels.ts";
-import type { ChannelsState } from "../../ui/src/ui/controllers/channels.types.ts";
-import {
-  abortChatRun,
-  handleChatEvent,
-  sendChatMessage,
-  type ChatState,
-} from "../../ui/src/ui/controllers/chat.ts";
-import {
-  cloneConfigObject,
-  serializeConfigForm,
-} from "../../ui/src/ui/controllers/config/form-utils.ts";
-import {
-  addCronJob,
-  cancelCronEdit,
-  getVisibleCronJobs,
-  hasCronFormErrors,
-  loadCronJobs,
-  loadCronModelSuggestions,
-  loadCronRuns,
-  loadCronStatus,
-  loadMoreCronJobs,
-  loadMoreCronRuns,
-  normalizeCronFormState,
-  reloadCronJobs,
-  removeCronJob,
-  runCronJob,
-  startCronClone,
-  startCronEdit,
-  toggleCronJob,
-  updateCronJobsFilter,
-  updateCronRunsFilter,
-  validateCronForm,
-  type CronModelSuggestionsState,
-  type CronState,
-} from "../../ui/src/ui/controllers/cron.ts";
-import {
-  installSkill,
-  loadSkills,
-  saveSkillApiKey,
-  updateSkillEdit,
-  updateSkillEnabled,
-  type SkillsState,
-} from "../../ui/src/ui/controllers/skills.ts";
-import type { GatewayBrowserClient } from "../../ui/src/ui/gateway.ts";
-import { inferBasePathFromPathname, normalizeBasePath } from "../../ui/src/ui/navigation.ts";
-import { loadSettings, saveSettings, type UiSettings } from "../../ui/src/ui/storage.ts";
-import { resolveTheme, type ThemeMode, type ThemeName } from "../../ui/src/ui/theme.ts";
-import type {
-  AgentIdentityResult,
-  AgentsFilesListResult,
-  AgentsListResult,
-  ConfigSnapshot,
-  ModelCatalogEntry,
-  SessionsListResult,
-} from "../../ui/src/ui/types.ts";
-import {
-  resolveConfiguredCronModelSuggestions,
-  sortLocaleStrings,
-} from "../../ui/src/ui/views/agents-utils.ts";
 import { GatewayWorkbenchAdapter } from "./adapters/gateway-workbench-adapter.ts";
 import type { WorkbenchSnapshot } from "./adapters/mock-workbench-adapter.ts";
 import type {
@@ -83,6 +10,74 @@ import type {
   WorkbenchFileEntry,
   WorkbenchUploadedFile,
 } from "./adapters/workbench-adapter.ts";
+import {
+  abortChatRun,
+  addCronJob,
+  cancelCronEdit,
+  cloneConfigObject,
+  getVisibleCronJobs,
+  handleChatEvent,
+  hasCronFormErrors,
+  installSkill,
+  loadChannels,
+  loadCronJobs,
+  loadCronModelSuggestions,
+  loadCronRuns,
+  loadCronStatus,
+  loadMoreCronJobs,
+  loadMoreCronRuns,
+  loadSkills,
+  normalizeCronFormState,
+  reloadCronJobs,
+  removeCronJob,
+  runCronJob,
+  saveSkillApiKey,
+  sendChatMessage,
+  serializeConfigForm,
+  startCronClone,
+  startCronEdit,
+  toggleCronJob,
+  updateCronJobsFilter,
+  updateCronRunsFilter,
+  updateSkillEdit,
+  updateSkillEnabled,
+  validateCronForm,
+  type ChannelsState,
+  type ChatState,
+  type CronModelSuggestionsState,
+  type CronState,
+  type SkillsState,
+} from "./compat/controllers.ts";
+import type { GatewayBrowserClient } from "./compat/gateway.ts";
+import { i18n, I18nController, type Locale } from "./compat/i18n.ts";
+import type {
+  AgentIdentityResult,
+  AgentsFilesListResult,
+  AgentsListResult,
+  ConfigSnapshot,
+  ModelCatalogEntry,
+  SessionsListResult,
+} from "./compat/types.ts";
+import {
+  DEFAULT_CRON_FORM,
+  flushToolStreamSync,
+  handleAgentEvent,
+  handleChatScroll,
+  inferBasePathFromPathname,
+  loadSettings,
+  normalizeBasePath,
+  resetChatScroll,
+  resetToolStream,
+  resolveConfiguredCronModelSuggestions,
+  resolveTheme,
+  saveSettings,
+  scheduleChatScroll,
+  sortLocaleStrings,
+  type ThemeMode,
+  type ThemeName,
+  type ToolStreamEntry,
+  type UiSettings,
+} from "./compat/ui-core.ts";
 import {
   renderWorkbench,
   type WorkbenchModelConfig,

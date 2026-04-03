@@ -1,5 +1,5 @@
 import { normalizeAgentId } from "../../../../src/routing/session-key.ts";
-import { generateUUID } from "../../../../ui/src/ui/uuid.ts";
+import { generateUUID } from "../../compat/ui-core.ts";
 
 function truncateWords(input: string, limit: number) {
   return input.trim().split(/\s+/).filter(Boolean).slice(0, limit).join(" ");

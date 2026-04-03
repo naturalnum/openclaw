@@ -1,4 +1,4 @@
-import type { AgentEventPayload } from "../../../ui/src/ui/app-tool-stream.ts";
+import type { AgentEventPayload } from "../compat/ui-core.ts";
 import type { WorkbenchSnapshot } from "../mock/adapter.ts";
 
 export type WorkbenchSelection = {

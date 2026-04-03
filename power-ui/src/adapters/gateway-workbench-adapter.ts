@@ -7,7 +7,7 @@ import type {
   SessionsListResult,
   SkillStatusReport,
   ToolsCatalogResult,
-} from "../../../ui/src/ui/types.ts";
+} from "../compat/types.ts";
 import { PowerGatewayClient } from "../integrations/openclaw/gateway-client.ts";
 import {
   buildPowerSessionKey,

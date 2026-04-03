@@ -1,11 +1,11 @@
-import type { AgentEventPayload } from "../../../../ui/src/ui/app-tool-stream.ts";
-import { extractText } from "../../../../ui/src/ui/chat/message-extract.ts";
+import type { WorkbenchAdapterEvent } from "../../adapters/workbench-adapter.ts";
+import { extractText } from "../../compat/chat.ts";
 import {
   GatewayBrowserClient,
   type GatewayEventFrame,
   type GatewayHelloOk,
-} from "../../../../ui/src/ui/gateway.ts";
-import type { WorkbenchAdapterEvent } from "../../adapters/workbench-adapter.ts";
+} from "../../compat/gateway.ts";
+import type { AgentEventPayload } from "../../compat/ui-core.ts";
 
 export type PowerGatewaySettings = {
   gatewayUrl: string;

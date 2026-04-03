@@ -1,21 +1,16 @@
 import { html, nothing } from "lit";
 import { repeat } from "lit/directives/repeat.js";
 import { parseAgentSessionKey } from "../../../src/routing/session-key.ts";
-import { icons } from "../../../ui/src/ui/icons.ts";
+import type { WorkbenchFileEntry } from "../adapters/workbench-adapter.ts";
 import type {
   AgentIdentityResult,
   AgentsFilesListResult,
   AgentsListResult,
   ModelCatalogEntry,
   SessionsListResult,
-} from "../../../ui/src/ui/types.ts";
-import {
-  normalizeAgentLabel,
-  resolveAgentAvatarUrl,
-} from "../../../ui/src/ui/views/agents-utils.ts";
-import { renderCron, type CronProps } from "../../../ui/src/ui/views/cron.ts";
-import { renderSkills, type SkillsProps } from "../../../ui/src/ui/views/skills.ts";
-import type { WorkbenchFileEntry } from "../adapters/workbench-adapter.ts";
+} from "../compat/types.ts";
+import { icons, normalizeAgentLabel, resolveAgentAvatarUrl } from "../compat/ui-core.ts";
+import { renderCron, renderSkills, type CronProps, type SkillsProps } from "../compat/views.ts";
 import { renderPowerChatThread } from "../integrations/openclaw/chat/thread.ts";
 
 export type WorkbenchSection = "newTask" | "automations" | "skills";
@@ -248,9 +243,9 @@ export function renderWorkbench(props: WorkbenchProps) {
 
   return html`
     <div
-      class="workbench ${props.themeResolved.includes("light")
-        ? "workbench--light"
-        : ""} ${props.sidebarCollapsed ? "workbench--sidebar-collapsed" : ""}"
+      class="workbench ${
+        props.themeResolved.includes("light") ? "workbench--light" : ""
+      } ${props.sidebarCollapsed ? "workbench--sidebar-collapsed" : ""}"
     >
       <aside class="workbench-sidebar">
         <div class="workbench-brand">
@@ -317,9 +312,10 @@ export function renderWorkbench(props: WorkbenchProps) {
           )}
         </nav>
 
-        ${props.sidebarCollapsed
-          ? nothing
-          : html`
+        ${
+          props.sidebarCollapsed
+            ? nothing
+            : html`
               <section class="workbench-projects">
                 <div class="workbench-tree-header">
                   <button
@@ -341,9 +337,10 @@ export function renderWorkbench(props: WorkbenchProps) {
                 </div>
 
                 <div class="workbench-projects__scroll">
-                  ${props.projectsCollapsed
-                    ? nothing
-                    : html`
+                  ${
+                    props.projectsCollapsed
+                      ? nothing
+                      : html`
                         <div class="workbench-project-tree">
                           ${repeat(
                             projects,
@@ -351,10 +348,12 @@ export function renderWorkbench(props: WorkbenchProps) {
                             (project) => renderProjectTreeRow(project, props),
                           )}
                         </div>
-                      `}
+                      `
+                  }
                 </div>
               </section>
-            `}
+            `
+        }
 
         <div class="workbench-sidebar__footer">
           <button
@@ -373,35 +372,43 @@ export function renderWorkbench(props: WorkbenchProps) {
       </aside>
 
       <div class="workbench-main">
-        ${showContextBar && activeProject && activeSession
-          ? renderContextBar(props, activeProject, activeSession)
-          : nothing}
+        ${
+          showContextBar && activeProject && activeSession
+            ? renderContextBar(props, activeProject, activeSession)
+            : nothing
+        }
         <div
-          class="workbench-content ${showRightRail
-            ? "workbench-content--rail"
-            : ""} ${props.section === "newTask" && !showRightRail
-            ? "workbench-content--session-centered"
-            : ""}"
+          class="workbench-content ${showRightRail ? "workbench-content--rail" : ""} ${
+            props.section === "newTask" && !showRightRail
+              ? "workbench-content--session-centered"
+              : ""
+          }"
         >
           <section class="workbench-center">
-            ${props.section === "skills"
-              ? renderSkillsPage(props)
-              : props.section === "automations"
-                ? renderAutomationsPage(props, activeProject)
-                : activeSession
-                  ? renderSessionView(props, activeProject, activeSession)
-                  : renderNewTaskView(props, currentProject, projects)}
+            ${
+              props.section === "skills"
+                ? renderSkillsPage(props)
+                : props.section === "automations"
+                  ? renderAutomationsPage(props, activeProject)
+                  : activeSession
+                    ? renderSessionView(props, activeProject, activeSession)
+                    : renderNewTaskView(props, currentProject, projects)
+            }
           </section>
 
-          ${showRightRail && activeProject && activeSession
-            ? renderRightRail(props, activeProject)
-            : nothing}
+          ${
+            showRightRail && activeProject && activeSession
+              ? renderRightRail(props, activeProject)
+              : nothing
+          }
         </div>
       </div>
       ${props.settingsOpen || props.settingsClosing ? renderSettingsDialog(props) : nothing}
-      ${props.projectDirectoryOpen || props.projectDirectoryClosing
-        ? renderProjectDirectoryDialog(props)
-        : nothing}
+      ${
+        props.projectDirectoryOpen || props.projectDirectoryClosing
+          ? renderProjectDirectoryDialog(props)
+          : nothing
+      }
     </div>
   `;
 }
@@ -419,9 +426,9 @@ function renderContextBar(
       </div>
       <button
         type="button"
-        class="workbench-icon-button workbench-context-bar__toggle ${props.rightRailCollapsed
-          ? "is-collapsed"
-          : ""}"
+        class="workbench-icon-button workbench-context-bar__toggle ${
+          props.rightRailCollapsed ? "is-collapsed" : ""
+        }"
         title=${props.rightRailCollapsed ? "展开卡片区" : "折叠卡片区"}
         aria-label=${props.rightRailCollapsed ? "展开卡片区" : "折叠卡片区"}
         @click=${props.onToggleRightRail}
@@ -460,8 +467,9 @@ function renderNewTaskView(
                 </span>
               </button>
 
-              ${props.newTaskProjectMenuOpen
-                ? html`
+              ${
+                props.newTaskProjectMenuOpen
+                  ? html`
                     <div class="workbench-new-thread__project-menu">
                       <div class="workbench-new-thread__project-menu-title">
                         ${tLocale(locale, "Choose project", "选择项目")}
@@ -472,21 +480,22 @@ function renderNewTaskView(
                         (project) => html`
                           <button
                             type="button"
-                            class="workbench-new-thread__project-item ${currentProject?.id ===
-                            project.id
-                              ? "is-active"
-                              : ""}"
+                            class="workbench-new-thread__project-item ${
+                              currentProject?.id === project.id ? "is-active" : ""
+                            }"
                             @click=${() => props.onSelectNewTaskProject(project.id)}
                           >
                             <span class="workbench-new-thread__project-item-icon"
                               >${icons.folder}</span
                             >
                             <span>${project.label}</span>
-                            ${currentProject?.id === project.id
-                              ? html`<span class="workbench-new-thread__project-item-check"
+                            ${
+                              currentProject?.id === project.id
+                                ? html`<span class="workbench-new-thread__project-item-check"
                                   >${icons.check}</span
                                 >`
-                              : nothing}
+                                : nothing
+                            }
                           </button>
                         `,
                       )}
@@ -501,7 +510,8 @@ function renderNewTaskView(
                       </button>
                     </div>
                   `
-                : nothing}
+                  : nothing
+              }
             </div>
           </div>
         </div>
@@ -625,47 +635,52 @@ function renderProjectDirectoryDialog(props: WorkbenchProps) {
                 >${tLocale(locale, "Path:", "路径:")}</span
               >
               <span class="workbench-directory-pathbar__value">
-                ${selectedPath ??
-                props.projectDirectoryRoots[0]?.path ??
-                tLocale(locale, "Allowed roots", "允许访问的根目录")}
+                ${
+                  selectedPath ??
+                  props.projectDirectoryRoots[0]?.path ??
+                  tLocale(locale, "Allowed roots", "允许访问的根目录")
+                }
               </span>
             </div>
           </div>
 
-          ${props.projectDirectoryError
-            ? html`
+          ${
+            props.projectDirectoryError
+              ? html`
                 <div class="workbench-directory-section workbench-directory-section--error">
                   <div class="workbench-callout workbench-callout--danger">
                     ${props.projectDirectoryError}
                   </div>
                 </div>
               `
-            : nothing}
+              : nothing
+          }
 
           <div class="workbench-directory-section workbench-directory-section--tree">
             <div class="workbench-directory-browser">
-              ${props.projectDirectoryLoading
-                ? html`
+              ${
+                props.projectDirectoryLoading
+                  ? html`
                     <div class="workbench-empty workbench-empty--small">
                       ${tLocale(locale, "Loading directories…", "正在加载目录…")}
                     </div>
                   `
-                : treeRows.length === 0
-                  ? html`
+                  : treeRows.length === 0
+                    ? html`
                       <div class="workbench-empty workbench-empty--small">
                         ${tLocale(locale, "No directories available.", "没有可用目录。")}
                       </div>
                     `
-                  : html`
+                    : html`
                       <div class="workbench-directory-list workbench-directory-list--modal">
                         ${repeat(
                           treeRows,
                           (entry) => entry.path,
                           (entry) => html`
                             <div
-                              class="workbench-directory-entry ${entry.selected
-                                ? "is-selected"
-                                : ""}"
+                              class="workbench-directory-entry ${
+                                entry.selected ? "is-selected" : ""
+                              }"
                               style=${`--tree-depth: ${entry.depth};`}
                             >
                               <button
@@ -673,37 +688,43 @@ function renderProjectDirectoryDialog(props: WorkbenchProps) {
                                 class="workbench-directory-entry__main"
                                 @click=${() => props.onBrowseProjectDirectory(entry.path)}
                               >
-                                ${entry.hasToggle
-                                  ? html`
+                                ${
+                                  entry.hasToggle
+                                    ? html`
                                       <span class="workbench-directory-entry__toggle-icon">
                                         ${entry.expanded ? icons.chevronDown : icons.chevronRight}
                                       </span>
                                     `
-                                  : html`
-                                      <span class="workbench-directory-entry__toggle-spacer"></span>
-                                    `}
+                                    : html`
+                                        <span class="workbench-directory-entry__toggle-spacer"></span>
+                                      `
+                                }
                                 <span class="workbench-directory-entry__icon">
                                   ${entry.expanded ? icons.folderOpen : icons.folder}
                                 </span>
                                 <span class="workbench-directory-entry__name">${entry.name}</span>
-                                ${entry.loading
-                                  ? html`
+                                ${
+                                  entry.loading
+                                    ? html`
                                       <span class="workbench-directory-entry__loading"
                                         >${tLocale(locale, "Loading…", "加载中…")}</span
                                       >
                                     `
-                                  : nothing}
+                                    : nothing
+                                }
                               </button>
                             </div>
                           `,
                         )}
                       </div>
-                    `}
+                    `
+              }
             </div>
           </div>
 
-          ${props.projectDirectoryCreateFolderOpen
-            ? html`
+          ${
+            props.projectDirectoryCreateFolderOpen
+              ? html`
                 <div class="workbench-directory-section workbench-directory-section--create">
                   <div class="workbench-directory-create">
                     <span class="workbench-directory-create__icon">${icons.folderPlus}</span>
@@ -745,7 +766,8 @@ function renderProjectDirectoryDialog(props: WorkbenchProps) {
                   </div>
                 </div>
               `
-            : nothing}
+              : nothing
+          }
 
           <div class="workbench-directory-actions">
             <button
@@ -850,8 +872,9 @@ function renderProjectTreeRow(project: WorkbenchProject, props: WorkbenchProps) 
           >
             ${icons.moreHorizontal}
           </button>
-          ${projectMenuOpen
-            ? html`
+          ${
+            projectMenuOpen
+              ? html`
                 <div class="workbench-tree-menu" role="menu">
                   <button
                     type="button"
@@ -871,28 +894,32 @@ function renderProjectTreeRow(project: WorkbenchProject, props: WorkbenchProps) 
                   </button>
                 </div>
               `
-            : nothing}
+              : nothing
+          }
         </div>
       </div>
 
       ${html`
         <div class="workbench-tree-node__children ${expanded ? "is-expanded" : ""}">
           <div class="workbench-tree-node__children-inner">
-            ${!expanded
-              ? nothing
-              : project.sessions.length === 0
-                ? html` <div class="workbench-empty workbench-empty--tiny">No sessions yet.</div> `
-                : repeat(
-                    project.sessions.slice(0, 6),
-                    (session) => session.key,
-                    (session) => {
-                      const sessionMenuKey = `session:${session.key}`;
-                      const sessionMenuOpen = isTreeMenuOpen(props, sessionMenuKey);
-                      return html`
+            ${
+              !expanded
+                ? nothing
+                : project.sessions.length === 0
+                  ? html`
+                      <div class="workbench-empty workbench-empty--tiny">No sessions yet.</div>
+                    `
+                  : repeat(
+                      project.sessions.slice(0, 6),
+                      (session) => session.key,
+                      (session) => {
+                        const sessionMenuKey = `session:${session.key}`;
+                        const sessionMenuOpen = isTreeMenuOpen(props, sessionMenuKey);
+                        return html`
                         <div
-                          class="workbench-tree-session ${props.currentSessionKey === session.key
-                            ? "is-active"
-                            : ""}"
+                          class="workbench-tree-session ${
+                            props.currentSessionKey === session.key ? "is-active" : ""
+                          }"
                         >
                           <button
                             type="button"
@@ -905,9 +932,9 @@ function renderProjectTreeRow(project: WorkbenchProject, props: WorkbenchProps) 
                           <div class="workbench-tree-session__menu-anchor">
                             <button
                               type="button"
-                              class="workbench-tree-session__more ${sessionMenuOpen
-                                ? "is-open"
-                                : ""}"
+                              class="workbench-tree-session__more ${
+                                sessionMenuOpen ? "is-open" : ""
+                              }"
                               aria-label="Session actions"
                               aria-haspopup="menu"
                               aria-expanded=${sessionMenuOpen}
@@ -918,8 +945,9 @@ function renderProjectTreeRow(project: WorkbenchProject, props: WorkbenchProps) 
                             >
                               ${icons.moreHorizontal}
                             </button>
-                            ${sessionMenuOpen
-                              ? html`
+                            ${
+                              sessionMenuOpen
+                                ? html`
                                   <div class="workbench-tree-menu" role="menu">
                                     <button
                                       type="button"
@@ -939,12 +967,14 @@ function renderProjectTreeRow(project: WorkbenchProject, props: WorkbenchProps) 
                                     </button>
                                   </div>
                                 `
-                              : nothing}
+                                : nothing
+                            }
                           </div>
                         </div>
                       `;
-                    },
-                  )}
+                      },
+                    )
+            }
           </div>
         </div>
       `}
@@ -971,9 +1001,9 @@ function renderSessionView(
   const canSend = Boolean(props.chatMessage.trim() || props.pendingChatFiles.length > 0);
   return html`
     <section
-      class="workbench-session-shell ${props.rightRailCollapsed
-        ? "workbench-session-shell--centered"
-        : ""}"
+      class="workbench-session-shell ${
+        props.rightRailCollapsed ? "workbench-session-shell--centered" : ""
+      }"
     >
       <section class="workbench-chat-surface">
         ${renderPowerChatThread({
@@ -1034,8 +1064,9 @@ function renderSessionView(
                 <span class="workbench-model-select__chevron">${icons.chevronDown}</span>
               </label>
             </div>
-            ${props.chatRunId
-              ? html`
+            ${
+              props.chatRunId
+                ? html`
                   <button
                     type="button"
                     class="workbench-send-button"
@@ -1046,7 +1077,7 @@ function renderSessionView(
                     ${icons.x}
                   </button>
                 `
-              : html`
+                : html`
                   <button
                     type="button"
                     class="workbench-send-button"
@@ -1057,7 +1088,8 @@ function renderSessionView(
                   >
                     ${icons.arrowUp}
                   </button>
-                `}
+                `
+            }
           </div>
         </div>
       </section>
@@ -1171,8 +1203,9 @@ function renderRightRail(props: WorkbenchProps, project: WorkbenchProject) {
           </div>
         </div>
 
-        ${currentPath && parentPath
-          ? html`
+        ${
+          currentPath && parentPath
+            ? html`
               <div class="workbench-sidecard__toolbar">
                 <button
                   type="button"
@@ -1188,9 +1221,11 @@ function renderRightRail(props: WorkbenchProps, project: WorkbenchProject) {
                 >
               </div>
             `
-          : nothing}
-        ${props.fileManagerCreateFolderOpen
-          ? html`
+            : nothing
+        }
+        ${
+          props.fileManagerCreateFolderOpen
+            ? html`
               <div class="workbench-sidecard__create-row">
                 <input
                   type="text"
@@ -1230,20 +1265,28 @@ function renderRightRail(props: WorkbenchProps, project: WorkbenchProject) {
                 </button>
               </div>
             `
-          : nothing}
+            : nothing
+        }
 
         <div class="workbench-sidecard__body workbench-sidecard__body--scroll">
-          ${error
-            ? html`<div class="workbench-callout workbench-callout--danger">${error}</div>`
-            : nothing}
-          ${loading
-            ? html` <div class="workbench-skeleton">Loading files…</div> `
-            : entries.length === 0
-              ? html` <div class="workbench-empty workbench-empty--tiny">当前目录为空。</div> `
-              : repeat(
-                  entries,
-                  (entry) => entry.path,
-                  (entry) => html`
+          ${
+            error
+              ? html`<div class="workbench-callout workbench-callout--danger">${error}</div>`
+              : nothing
+          }
+          ${
+            loading
+              ? html`
+                  <div class="workbench-skeleton">Loading files…</div>
+                `
+              : entries.length === 0
+                ? html`
+                    <div class="workbench-empty workbench-empty--tiny">当前目录为空。</div>
+                  `
+                : repeat(
+                    entries,
+                    (entry) => entry.path,
+                    (entry) => html`
                     <div
                       class="workbench-mini-row workbench-mini-row--file workbench-mini-row--hoverable"
                     >
@@ -1252,23 +1295,26 @@ function renderRightRail(props: WorkbenchProps, project: WorkbenchProject) {
                       </span>
                       <button
                         type="button"
-                        class="workbench-mini-row__content ${entry.kind === "directory"
-                          ? "is-directory"
-                          : ""}"
+                        class="workbench-mini-row__content ${
+                          entry.kind === "directory" ? "is-directory" : ""
+                        }"
                         title=${entry.name}
                         @dblclick=${() =>
                           entry.kind === "directory" && props.onNavigateFileManager(entry.path)}
                       >
                         <span class="workbench-mini-row__name">${entry.name}</span>
                         <div class="workbench-mini-row__meta">
-                          ${entry.kind === "directory"
-                            ? "文件夹"
-                            : `${formatBytes(entry.size ?? 0)}${entry.updatedAtMs ? ` · ${formatTimestamp(entry.updatedAtMs)}` : ""}`}
+                          ${
+                            entry.kind === "directory"
+                              ? "文件夹"
+                              : `${formatBytes(entry.size ?? 0)}${entry.updatedAtMs ? ` · ${formatTimestamp(entry.updatedAtMs)}` : ""}`
+                          }
                         </div>
                       </button>
                       <div class="workbench-mini-row__actions workbench-mini-row__actions--hover">
-                        ${entry.kind === "file"
-                          ? html`
+                        ${
+                          entry.kind === "file"
+                            ? html`
                               <button
                                 type="button"
                                 class="workbench-icon-button"
@@ -1280,7 +1326,8 @@ function renderRightRail(props: WorkbenchProps, project: WorkbenchProject) {
                                 ${icons.download}
                               </button>
                             `
-                          : nothing}
+                            : nothing
+                        }
                         <button
                           type="button"
                           class="workbench-icon-button"
@@ -1294,7 +1341,8 @@ function renderRightRail(props: WorkbenchProps, project: WorkbenchProject) {
                       </div>
                     </div>
                   `,
-                )}
+                  )
+          }
         </div>
         <div class="workbench-sidecard__footer">${folderCount} 个文件夹 · ${fileCount} 个文件</div>
       </section>
@@ -1333,19 +1381,22 @@ function renderSettingsDialog(props: WorkbenchProps) {
           </aside>
 
           <section
-            class="workbench-settings-panel ${props.settingsTab === "models"
-              ? "workbench-settings-panel--models"
-              : ""}"
+            class="workbench-settings-panel ${
+              props.settingsTab === "models" ? "workbench-settings-panel--models" : ""
+            }"
           >
             <div class="workbench-settings-panel__header">
               <div>
                 <h4>
-                  ${props.settingsTab === "general"
-                    ? tLocale(locale, "General", "通用")
-                    : tLocale(locale, "Model Settings", "模型设置")}
+                  ${
+                    props.settingsTab === "general"
+                      ? tLocale(locale, "General", "通用")
+                      : tLocale(locale, "Model Settings", "模型设置")
+                  }
                 </h4>
-                ${props.settingsTab === "general"
-                  ? html`
+                ${
+                  props.settingsTab === "general"
+                    ? html`
                       <p>
                         ${tLocale(
                           locale,
@@ -1354,7 +1405,8 @@ function renderSettingsDialog(props: WorkbenchProps) {
                         )}
                       </p>
                     `
-                  : nothing}
+                    : nothing
+                }
               </div>
               <button
                 type="button"
@@ -1365,8 +1417,9 @@ function renderSettingsDialog(props: WorkbenchProps) {
                 ${icons.x}
               </button>
             </div>
-            ${props.settingsTab === "general"
-              ? html`
+            ${
+              props.settingsTab === "general"
+                ? html`
                   <article class="workbench-setting-card">
                     <div class="workbench-settings-section">
                       <div class="workbench-settings-section__header">
@@ -1450,7 +1503,7 @@ function renderSettingsDialog(props: WorkbenchProps) {
                     </div>
                   </article>
                 `
-              : html`
+                : html`
                   <article class="workbench-setting-card workbench-setting-card--models">
                     <div class="workbench-settings-model-shell">
                       <div class="workbench-settings-model-shell__head"></div>
@@ -1473,7 +1526,8 @@ function renderSettingsDialog(props: WorkbenchProps) {
                       </div>
                     </div>
                   </article>
-                `}
+                `
+            }
           </section>
         </div>
       </div>
@@ -1561,13 +1615,15 @@ function renderModelCard(
         >
           <span class="workbench-model-card__name">${title}</span>
           <span class="workbench-model-card__badge">${badge}</span>
-          ${!configured
-            ? html`
+          ${
+            !configured
+              ? html`
                 <span class="workbench-model-card__status"
                   >${tLocale(locale, "Pending", "待配置")}</span
                 >
               `
-            : nothing}
+              : nothing
+          }
         </button>
         <div class="workbench-model-card__actions">
           <button
@@ -1581,17 +1637,20 @@ function renderModelCard(
           <button
             type="button"
             class="workbench-model-card__chevron ${expanded ? "is-expanded" : ""}"
-            aria-label=${expanded
-              ? tLocale(locale, "Collapse model", "收起模型")
-              : tLocale(locale, "Expand model", "展开模型")}
+            aria-label=${
+              expanded
+                ? tLocale(locale, "Collapse model", "收起模型")
+                : tLocale(locale, "Expand model", "展开模型")
+            }
             @click=${() => props.settingsView.onToggleModelConfigExpanded(config.id)}
           >
             ${icons.chevronDown}
           </button>
         </div>
       </div>
-      ${expanded
-        ? html`
+      ${
+        expanded
+          ? html`
             <div class="workbench-model-card__fields">
               ${renderModelInputRow(
                 locale,
@@ -1636,7 +1695,8 @@ function renderModelCard(
               )}
             </div>
           `
-        : nothing}
+          : nothing
+      }
     </section>
   `;
 }

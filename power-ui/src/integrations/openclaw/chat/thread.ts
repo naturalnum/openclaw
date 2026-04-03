@@ -4,17 +4,16 @@ import {
   renderMessageGroup,
   renderReadingIndicatorGroup,
   renderStreamingGroup,
-} from "../../../../../ui/src/ui/chat/grouped-render.ts";
-import {
   normalizeMessage,
   normalizeRoleForGrouping,
-} from "../../../../../ui/src/ui/chat/message-normalizer.ts";
-import type { ChatItem, MessageGroup } from "../../../../../ui/src/ui/types/chat-types.ts";
+  type ChatItem,
+  type MessageGroup,
+} from "../../../compat/chat.ts";
 
 const CHAT_HISTORY_RENDER_LIMIT = 200;
 
 // Keep the item-building structure intentionally close to
-// ui/src/ui/views/chat.ts so future upstream chat behavior changes remain
+// compat/chat.ts upstream mappings so future chat behavior changes remain
 // easy to diff and port without rewiring the power-ui shell.
 
 export type PowerChatThreadProps = {

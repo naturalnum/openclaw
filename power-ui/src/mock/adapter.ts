@@ -3,18 +3,6 @@ import {
   parseAgentSessionKey,
 } from "../../../src/routing/session-key.ts";
 import type {
-  AgentFileEntry,
-  AgentIdentityResult,
-  AgentsFilesListResult,
-  AgentsListResult,
-  CronJob,
-  ModelCatalogEntry,
-  SessionsListResult,
-  SkillStatusEntry,
-  SkillStatusReport,
-  ToolsCatalogResult,
-} from "../../../ui/src/ui/types.ts";
-import type {
   WorkbenchAdapter,
   WorkbenchAdapterEvent,
   WorkbenchDirectoryCreateResult,
@@ -27,6 +15,18 @@ import type {
   WorkbenchUploadedFile,
   WorkbenchWorkspaceValidationResult,
 } from "../adapters/workbench-adapter.ts";
+import type {
+  AgentFileEntry,
+  AgentIdentityResult,
+  AgentsFilesListResult,
+  AgentsListResult,
+  CronJob,
+  ModelCatalogEntry,
+  SessionsListResult,
+  SkillStatusEntry,
+  SkillStatusReport,
+  ToolsCatalogResult,
+} from "../compat/types.ts";
 
 type MockMessage = {
   role: "user" | "assistant";
