@@ -24,6 +24,12 @@ export type SkillsInstallConfig = {
   nodeManager?: "npm" | "pnpm" | "yarn" | "bun";
 };
 
+export type SkillsRegistryConfig = {
+  enabled?: boolean;
+  baseUrl?: string;
+  timeoutMs?: number;
+};
+
 export type SkillsLimitsConfig = {
   /** Max number of immediate child directories to consider under a skills root before treating it as suspicious. */
   maxCandidatesPerRoot?: number;
@@ -42,6 +48,7 @@ export type SkillsConfig = {
   allowBundled?: string[];
   load?: SkillsLoadConfig;
   install?: SkillsInstallConfig;
+  registry?: SkillsRegistryConfig;
   limits?: SkillsLimitsConfig;
   entries?: Record<string, SkillConfig>;
 };

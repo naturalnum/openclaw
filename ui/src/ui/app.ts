@@ -397,9 +397,23 @@ export class OpenClawApp extends LitElement {
   @state() skillsReport: SkillStatusReport | null = null;
   @state() skillsError: string | null = null;
   @state() skillsFilter = "";
+  @state() skillsCatalog: import("./types.js").SkillsRegistryCatalogItem[] = [];
+  @state() skillsCategories: import("./types.js").SkillsRegistryCategory[] = [];
+  @state() skillsRegistryBaseUrl: string | null = null;
+  @state() skillsPagination: import("./types.js").SkillsRegistryPagination = {
+    page: 1,
+    limit: 12,
+    total: 0,
+    totalPages: 1,
+  };
+  @state() skillsCategory: string | null = null;
+  @state() skillsSortBy: import("./types.js").SkillsRegistrySortBy = "comprehensive";
+  @state() skillsInstallFilter: import("./types.js").SkillsRegistryInstallFilter = "all";
   @state() skillEdits: Record<string, string> = {};
   @state() skillsBusyKey: string | null = null;
+  @state() skillsArchiveBusy = false;
   @state() skillMessages: Record<string, SkillMessage> = {};
+  @state() skillsNotice: SkillMessage | null = null;
 
   @state() healthLoading = false;
   @state() healthResult: HealthSummary | null = null;

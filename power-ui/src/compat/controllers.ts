@@ -34,10 +34,22 @@ export {
 } from "../../../ui/src/ui/controllers/cron.ts";
 export type { CronModelSuggestionsState, CronState } from "../../../ui/src/ui/controllers/cron.ts";
 export {
-  installSkill,
   loadSkills,
-  saveSkillApiKey,
-  updateSkillEdit,
-  updateSkillEnabled,
+  DEFAULT_SKILLS_INSTALL_FILTER,
+  DEFAULT_SKILLS_REGISTRY_PAGINATION,
+  DEFAULT_SKILLS_SORT_BY,
+  importRegistrySkillArchive,
+  setSkillsCategory,
+  setSkillsFilter,
+  setSkillsInstallFilter,
+  setSkillsPage,
+  setSkillsSortBy,
+  toggleRegistrySkillInstall,
 } from "../../../ui/src/ui/controllers/skills.ts";
-export type { SkillsState } from "../../../ui/src/ui/controllers/skills.ts";
+export type {
+  SkillMessage,
+  SkillMessageMap,
+  SkillsState,
+} from "../../../ui/src/ui/controllers/skills.ts";
+export { loadLogs } from "../../../ui/src/ui/controllers/logs.ts";
+export type { LogsState } from "../../../ui/src/ui/controllers/logs.ts";

@@ -10,10 +10,17 @@ import type {
   SessionsListResult,
 } from "../compat/types.ts";
 import { icons, normalizeAgentLabel, resolveAgentAvatarUrl } from "../compat/ui-core.ts";
-import { renderCron, renderSkills, type CronProps, type SkillsProps } from "../compat/views.ts";
+import {
+  renderCron,
+  renderLogs,
+  renderSkills,
+  type CronProps,
+  type LogsProps,
+  type SkillsProps,
+} from "../compat/views.ts";
 import { renderPowerChatThread } from "../integrations/openclaw/chat/thread.ts";
 
-export type WorkbenchSection = "newTask" | "automations" | "skills";
+export type WorkbenchSection = "newTask" | "skills" | "files" | "automations" | "logs";
 export type WorkbenchSettingsTab = "general" | "models";
 
 export type WorkbenchModelConfig = {
@@ -98,6 +105,7 @@ export type WorkbenchProps = {
   lastError: string | null;
   skillsPage: SkillsProps;
   automationsPage: CronProps;
+  logsPage: LogsProps;
   modelCatalog: ModelCatalogEntry[];
   modelsLoading: boolean;
   themeResolved: string;
@@ -295,20 +303,36 @@ export function renderWorkbench(props: WorkbenchProps) {
             () => props.onSectionChange("newTask"),
           )}
           ${renderNavButton(
-            "automations",
-            tLocale(locale, "Automations", "自动化"),
-            icons.loader,
-            props.section === "automations",
-            props.sidebarCollapsed,
-            () => props.onSectionChange("automations"),
-          )}
-          ${renderNavButton(
             "skills",
             tLocale(locale, "Skills", "技能"),
             icons.puzzle,
             props.section === "skills",
             props.sidebarCollapsed,
             () => props.onSectionChange("skills"),
+          )}
+          ${renderNavButton(
+            "files",
+            tLocale(locale, "Files", "文件"),
+            icons.folder,
+            props.section === "files",
+            props.sidebarCollapsed,
+            () => props.onSectionChange("files"),
+          )}
+          ${renderNavButton(
+            "automations",
+            tLocale(locale, "Scheduled Jobs", "定时任务"),
+            icons.loader,
+            props.section === "automations",
+            props.sidebarCollapsed,
+            () => props.onSectionChange("automations"),
+          )}
+          ${renderNavButton(
+            "logs",
+            tLocale(locale, "Logs", "日志"),
+            icons.terminal,
+            props.section === "logs",
+            props.sidebarCollapsed,
+            () => props.onSectionChange("logs"),
           )}
         </nav>
 
@@ -386,13 +410,17 @@ export function renderWorkbench(props: WorkbenchProps) {
         >
           <section class="workbench-center">
             ${
-              props.section === "skills"
-                ? renderSkillsPage(props)
-                : props.section === "automations"
-                  ? renderAutomationsPage(props, activeProject)
-                  : activeSession
-                    ? renderSessionView(props, activeProject, activeSession)
-                    : renderNewTaskView(props, currentProject, projects)
+              props.section === "files"
+                ? renderFilesPage(props, currentProject)
+                : props.section === "skills"
+                  ? renderSkillsPage(props)
+                  : props.section === "automations"
+                    ? renderAutomationsPage(props, activeProject)
+                    : props.section === "logs"
+                      ? renderLogsPage(props)
+                      : activeSession
+                        ? renderSessionView(props, activeProject, activeSession)
+                        : renderNewTaskView(props, currentProject, projects)
             }
           </section>
 
@@ -1129,10 +1157,90 @@ function renderPendingChatFiles(props: WorkbenchProps) {
   `;
 }
 
-function renderAutomationsPage(props: WorkbenchProps, _currentProject: WorkbenchProject | null) {
+function renderFilesPage(props: WorkbenchProps, project: WorkbenchProject | null) {
+  const locale = props.settings.locale;
+  if (!project) {
+    return html`
+      <section class="workbench-page-shell workbench-page-shell--scroll">
+        <div class="workbench-page-shell__body">
+          <div class="workbench-empty workbench-empty--chat">
+            <h4>${tLocale(locale, "No project selected", "尚未选择项目")}</h4>
+            <p>
+              ${tLocale(
+                locale,
+                "Choose a project from the sidebar to browse workspace files.",
+                "从左侧选择项目后即可浏览工作区文件。",
+              )}
+            </p>
+          </div>
+        </div>
+      </section>
+    `;
+  }
   return html`
     <section class="workbench-page-shell workbench-page-shell--scroll">
+      <div class="workbench-page-shell__body workbench-page-shell__body--files-page">
+        <div class="workbench-sidecard__header">
+          <div>
+            <h4>${tLocale(locale, "Project Files", "项目文件")}</h4>
+            <div class="workbench-mini-row__meta">
+              ${project.label}
+              ${
+                project.workspace
+                  ? html`<span class="workbench-sidecard__path" title=${project.workspace}
+                    >${project.workspace}</span
+                  >`
+                  : nothing
+              }
+            </div>
+          </div>
+        </div>
+        ${renderProjectFilesBrowser(props, project, { fullPage: true })}
+      </div>
+    </section>
+  `;
+}
+
+function renderAutomationsPage(props: WorkbenchProps, _currentProject: WorkbenchProject | null) {
+  const locale = props.settings.locale;
+  return html`
+    <section class="workbench-page-shell workbench-page-shell--scroll">
+      <header class="workbench-page-shell__header">
+        <div>
+          <p class="workbench-page-shell__eyebrow">${tLocale(locale, "Automation", "自动化")}</p>
+          <h2>${tLocale(locale, "Scheduled Jobs", "定时任务")}</h2>
+          <span>
+            ${tLocale(
+              locale,
+              "Create, schedule, and monitor recurring jobs.",
+              "创建、编排并监控周期执行的任务。",
+            )}
+          </span>
+        </div>
+      </header>
       <div class="workbench-page-shell__body">${renderCron(props.automationsPage)}</div>
+    </section>
+  `;
+}
+
+function renderLogsPage(props: WorkbenchProps) {
+  const locale = props.settings.locale;
+  return html`
+    <section class="workbench-page-shell workbench-page-shell--scroll">
+      <header class="workbench-page-shell__header">
+        <div>
+          <p class="workbench-page-shell__eyebrow">${tLocale(locale, "System logs", "系统日志")}</p>
+          <h2>${tLocale(locale, "Logs", "日志")}</h2>
+          <span>
+            ${tLocale(
+              locale,
+              "Gateway file logs, with filtering and export.",
+              "查看 gateway 文件日志，支持筛选和导出。",
+            )}
+          </span>
+        </div>
+      </header>
+      <div class="workbench-page-shell__body">${renderLogs(props.logsPage)}</div>
     </section>
   `;
 }
@@ -1159,6 +1267,15 @@ function formatWorkspaceRelativePath(workspacePath: string | null, currentPath: 
 }
 
 function renderRightRail(props: WorkbenchProps, project: WorkbenchProject) {
+  return html`<aside class="workbench-rail">${renderProjectFilesBrowser(props, project)}</aside>`;
+}
+
+function renderProjectFilesBrowser(
+  props: WorkbenchProps,
+  project: WorkbenchProject,
+  options: { fullPage?: boolean } = {},
+) {
+  const locale = props.settings.locale;
   const isActiveBrowser = props.fileManagerAgentId === project.id;
   const workspacePath =
     (isActiveBrowser ? props.fileManagerWorkspace : props.projectFilesWorkspace) ??
@@ -1173,18 +1290,30 @@ function renderRightRail(props: WorkbenchProps, project: WorkbenchProject) {
   const fileCount = entries.filter((entry) => entry.kind === "file").length;
   const canCreate = Boolean(currentPath && !loading);
   const pathLabel = formatWorkspaceRelativePath(workspacePath, currentPath);
+  const cardClass = options.fullPage
+    ? "workbench-sidecard workbench-sidecard--files workbench-sidecard--files-page"
+    : "workbench-sidecard workbench-sidecard--files";
 
   return html`
-    <aside class="workbench-rail">
-      <section class="workbench-sidecard workbench-sidecard--files">
+      <section class=${cardClass}>
         <div class="workbench-sidecard__header">
-          <h4>Project Files</h4>
+          <h4>${tLocale(locale, "Project Files", "项目文件")}</h4>
           <div class="workbench-sidecard__actions">
             <button
               type="button"
               class="workbench-icon-button workbench-sidecard__toolbar-icon"
-              title="Create folder"
-              aria-label="Create folder"
+              title=${tLocale(locale, "Upload files", "上传文件")}
+              aria-label=${tLocale(locale, "Upload files", "上传文件")}
+              ?disabled=${!currentPath || loading}
+              @click=${() => props.onOpenProjectFilePicker(project.id, currentPath)}
+            >
+              ${icons.plus}
+            </button>
+            <button
+              type="button"
+              class="workbench-icon-button workbench-sidecard__toolbar-icon"
+              title=${tLocale(locale, "Create folder", "新建文件夹")}
+              aria-label=${tLocale(locale, "Create folder", "新建文件夹")}
               ?disabled=${!canCreate}
               @click=${props.onToggleCreateFolder}
             >
@@ -1193,8 +1322,8 @@ function renderRightRail(props: WorkbenchProps, project: WorkbenchProject) {
             <button
               type="button"
               class="workbench-icon-button workbench-sidecard__toolbar-icon"
-              title="Refresh"
-              aria-label="Refresh"
+              title=${tLocale(locale, "Refresh", "刷新")}
+              aria-label=${tLocale(locale, "Refresh", "刷新")}
               ?disabled=${!workspacePath || loading}
               @click=${props.onRefreshFileManager}
             >
@@ -1214,7 +1343,7 @@ function renderRightRail(props: WorkbenchProps, project: WorkbenchProject) {
                   @click=${() => props.onNavigateFileManager(parentPath)}
                 >
                   ${icons.chevronLeft}
-                  <span>返回</span>
+                  <span>${tLocale(locale, "Back", "返回")}</span>
                 </button>
                 <span class="workbench-sidecard__path" title=${currentPath ?? pathLabel}
                   >${pathLabel}</span
@@ -1231,7 +1360,7 @@ function renderRightRail(props: WorkbenchProps, project: WorkbenchProject) {
                   type="text"
                   class="workbench-sidecard__create-input"
                   .value=${props.fileManagerNewFolderName}
-                  placeholder="输入文件夹名称..."
+                  placeholder=${tLocale(locale, "Enter folder name...", "输入文件夹名称...")}
                   @input=${(event: Event) =>
                     props.onFileManagerFolderNameChange(
                       (event.currentTarget as HTMLInputElement).value,
@@ -1268,7 +1397,13 @@ function renderRightRail(props: WorkbenchProps, project: WorkbenchProject) {
             : nothing
         }
 
-        <div class="workbench-sidecard__body workbench-sidecard__body--scroll">
+        <div
+          class=${
+            options.fullPage
+              ? "workbench-sidecard__body workbench-sidecard__body--scroll workbench-sidecard__body--fill"
+              : "workbench-sidecard__body workbench-sidecard__body--scroll"
+          }
+        >
           ${
             error
               ? html`<div class="workbench-callout workbench-callout--danger">${error}</div>`
@@ -1277,11 +1412,15 @@ function renderRightRail(props: WorkbenchProps, project: WorkbenchProject) {
           ${
             loading
               ? html`
-                  <div class="workbench-skeleton">Loading files…</div>
+                  <div class="workbench-skeleton">
+                    ${tLocale(locale, "Loading files...", "正在加载文件...")}
+                  </div>
                 `
               : entries.length === 0
                 ? html`
-                    <div class="workbench-empty workbench-empty--tiny">当前目录为空。</div>
+                    <div class="workbench-empty workbench-empty--tiny">
+                      ${tLocale(locale, "This folder is empty.", "当前目录为空。")}
+                    </div>
                   `
                 : repeat(
                     entries,
@@ -1306,7 +1445,7 @@ function renderRightRail(props: WorkbenchProps, project: WorkbenchProject) {
                         <div class="workbench-mini-row__meta">
                           ${
                             entry.kind === "directory"
-                              ? "文件夹"
+                              ? tLocale(locale, "Folder", "文件夹")
                               : `${formatBytes(entry.size ?? 0)}${entry.updatedAtMs ? ` · ${formatTimestamp(entry.updatedAtMs)}` : ""}`
                           }
                         </div>
@@ -1318,8 +1457,8 @@ function renderRightRail(props: WorkbenchProps, project: WorkbenchProject) {
                               <button
                                 type="button"
                                 class="workbench-icon-button"
-                                title="Download file"
-                                aria-label="Download file"
+                                title=${tLocale(locale, "Download file", "下载文件")}
+                                aria-label=${tLocale(locale, "Download file", "下载文件")}
                                 ?disabled=${busyPath === entry.path}
                                 @click=${() => props.onDownloadProjectFile(project.id, entry.path)}
                               >
@@ -1331,8 +1470,16 @@ function renderRightRail(props: WorkbenchProps, project: WorkbenchProject) {
                         <button
                           type="button"
                           class="workbench-icon-button"
-                          title=${entry.kind === "directory" ? "Delete folder" : "Delete file"}
-                          aria-label=${entry.kind === "directory" ? "Delete folder" : "Delete file"}
+                          title=${
+                            entry.kind === "directory"
+                              ? tLocale(locale, "Delete folder", "删除文件夹")
+                              : tLocale(locale, "Delete file", "删除文件")
+                          }
+                          aria-label=${
+                            entry.kind === "directory"
+                              ? tLocale(locale, "Delete folder", "删除文件夹")
+                              : tLocale(locale, "Delete file", "删除文件")
+                          }
                           ?disabled=${busyPath === entry.path}
                           @click=${() => props.onDeleteProjectEntry(project.id, entry.path)}
                         >
@@ -1344,9 +1491,11 @@ function renderRightRail(props: WorkbenchProps, project: WorkbenchProject) {
                   )
           }
         </div>
-        <div class="workbench-sidecard__footer">${folderCount} 个文件夹 · ${fileCount} 个文件</div>
+        <div class="workbench-sidecard__footer">
+          ${folderCount} ${tLocale(locale, "folders", "个文件夹")} · ${fileCount}
+          ${tLocale(locale, "files", "个文件")}
+        </div>
       </section>
-    </aside>
   `;
 }
 

@@ -114,6 +114,11 @@ export type GatewayHelloOk = {
   policy?: { tickIntervalMs?: number };
 };
 
+export type GatewayUploadProgress = {
+  loaded: number;
+  total: number | null;
+};
+
 type Pending = {
   resolve: (value: unknown) => void;
   reject: (err: unknown) => void;
@@ -477,6 +482,124 @@ export class GatewayBrowserClient {
     });
     this.ws.send(JSON.stringify(frame));
     return p;
+  }
+
+  async uploadHttpFile(params: {
+    routePath: string;
+    query?: Record<string, string | null | undefined>;
+    file: File;
+    onProgress?: (progress: GatewayUploadProgress) => void;
+  }): Promise<void> {
+    const url = this.buildHttpRouteUrl(params.routePath, params.query);
+    await new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", url, true);
+      if (params.file.type) {
+        xhr.setRequestHeader("Content-Type", params.file.type);
+      }
+      const bearer = this.opts.token ?? this.opts.password;
+      if (bearer) {
+        xhr.setRequestHeader("Authorization", `Bearer ${bearer}`);
+      }
+      xhr.upload.addEventListener("progress", (event) => {
+        params.onProgress?.({
+          loaded: event.loaded,
+          total: event.lengthComputable ? event.total : null,
+        });
+      });
+      xhr.addEventListener("error", () => reject(new Error("upload failed")));
+      xhr.addEventListener("abort", () => reject(new Error("upload aborted")));
+      xhr.addEventListener("load", () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve();
+          return;
+        }
+        reject(new Error(this.readHttpError(xhr)));
+      });
+      xhr.send(params.file);
+    });
+  }
+
+  async submitHttpDownload(params: {
+    routePath: string;
+    fields: Record<string, string | null | undefined>;
+  }): Promise<void> {
+    const url = this.buildHttpRouteUrl(params.routePath);
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = url;
+    form.style.display = "none";
+
+    const frame = document.createElement("iframe");
+    frame.name = `http-download-${generateUUID()}`;
+    frame.style.display = "none";
+    form.target = frame.name;
+
+    const appendField = (name: string, value: string | null | undefined) => {
+      const trimmed = typeof value === "string" ? value.trim() : "";
+      if (!trimmed) {
+        return;
+      }
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = name;
+      input.value = trimmed;
+      form.appendChild(input);
+    };
+
+    for (const [name, value] of Object.entries(params.fields)) {
+      appendField(name, value);
+    }
+
+    if (!("token" in params.fields) && this.opts.token?.trim()) {
+      appendField("token", this.opts.token);
+    }
+    if (!("password" in params.fields) && !this.opts.token?.trim() && this.opts.password?.trim()) {
+      appendField("password", this.opts.password);
+    }
+
+    document.body.append(frame, form);
+    form.submit();
+    window.setTimeout(() => {
+      form.remove();
+      frame.remove();
+    }, 60_000);
+  }
+
+  private buildHttpRouteUrl(
+    routePath: string,
+    query?: Record<string, string | null | undefined>,
+  ): string {
+    const gatewayUrl = new URL(this.opts.url);
+    gatewayUrl.protocol = gatewayUrl.protocol === "wss:" ? "https:" : "http:";
+    const basePath =
+      gatewayUrl.pathname === "/"
+        ? ""
+        : gatewayUrl.pathname.endsWith("/")
+          ? gatewayUrl.pathname.slice(0, -1)
+          : gatewayUrl.pathname;
+    gatewayUrl.pathname = `${basePath}${routePath}`;
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(query ?? {})) {
+      const trimmed = typeof value === "string" ? value.trim() : "";
+      if (trimmed) {
+        search.set(key, trimmed);
+      }
+    }
+    gatewayUrl.search = search.toString();
+    return gatewayUrl.toString();
+  }
+
+  private readHttpError(xhr: XMLHttpRequest): string {
+    try {
+      const body = JSON.parse(xhr.responseText);
+      if (body && typeof body === "object" && "error" in body) {
+        return String((body as { error?: unknown }).error);
+      }
+    } catch {
+      // Fall through to generic status text.
+    }
+    return `${xhr.status} ${xhr.statusText || "Request failed"}`;
   }
 
   private queueConnect() {

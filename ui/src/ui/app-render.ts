@@ -70,11 +70,14 @@ import { loadNodes } from "./controllers/nodes.ts";
 import { loadPresence } from "./controllers/presence.ts";
 import { deleteSessionAndRefresh, loadSessions, patchSession } from "./controllers/sessions.ts";
 import {
-  installSkill,
+  importRegistrySkillArchive,
   loadSkills,
-  saveSkillApiKey,
-  updateSkillEdit,
-  updateSkillEnabled,
+  setSkillsCategory,
+  setSkillsFilter,
+  setSkillsInstallFilter,
+  setSkillsPage,
+  setSkillsSortBy,
+  toggleRegistrySkillInstall,
 } from "./controllers/skills.ts";
 import "./components/dashboard-header.ts";
 import { buildExternalLinkRel, EXTERNAL_LINK_TARGET } from "./external-link.ts";
@@ -1227,19 +1230,33 @@ export function renderApp(state: AppViewState) {
                 m.renderSkills({
                   connected: state.connected,
                   loading: state.skillsLoading,
-                  report: state.skillsReport,
+                  archiveBusy: state.skillsArchiveBusy,
+                  items: state.skillsCatalog,
+                  categories: state.skillsCategories,
+                  pagination: state.skillsPagination,
                   error: state.skillsError,
+                  notice: state.skillsNotice,
                   filter: state.skillsFilter,
-                  edits: state.skillEdits,
+                  selectedCategory: state.skillsCategory,
+                  sortBy: state.skillsSortBy,
+                  installFilter: state.skillsInstallFilter,
                   messages: state.skillMessages,
                   busyKey: state.skillsBusyKey,
-                  onFilterChange: (next) => (state.skillsFilter = next),
+                  registryBaseUrl: state.skillsRegistryBaseUrl,
+                  onSearchChange: (next) => setSkillsFilter(state, next),
+                  onCategoryChange: (next) => setSkillsCategory(state, next),
+                  onSortChange: (next) => setSkillsSortBy(state, next),
+                  onInstallFilterChange: (next) => setSkillsInstallFilter(state, next),
                   onRefresh: () => loadSkills(state, { clearMessages: true }),
-                  onToggle: (key, enabled) => updateSkillEnabled(state, key, enabled),
-                  onEdit: (key, value) => updateSkillEdit(state, key, value),
-                  onSaveKey: (key) => saveSkillApiKey(state, key),
-                  onInstall: (skillKey, name, installId) =>
-                    installSkill(state, skillKey, name, installId),
+                  onPageChange: (next) => setSkillsPage(state, next),
+                  onToggleInstall: (item) => toggleRegistrySkillInstall(state, item),
+                  onImportArchive: (file) => void importRegistrySkillArchive(state, file),
+                  onDismissNotice: () => {
+                    state.skillsNotice = null;
+                  },
+                  onDismissError: () => {
+                    state.skillsError = null;
+                  },
                 }),
               )
             : nothing

@@ -36,7 +36,7 @@ describe("provider usage fetch shared helpers", () => {
       async (_input: URL | RequestInfo, init?: RequestInit) =>
         new Response(JSON.stringify({ aborted: init?.signal?.aborted ?? false }), { status: 200 }),
     );
-    const fetchFn = fetchFnMock as typeof fetch;
+    const fetchFn = fetchFnMock as unknown as typeof fetch;
 
     const response = await fetchJson(
       "https://example.com/usage",
@@ -71,7 +71,7 @@ describe("provider usage fetch shared helpers", () => {
           });
         }),
     );
-    const fetchFn = fetchFnMock as typeof fetch;
+    const fetchFn = fetchFnMock as unknown as typeof fetch;
 
     const request = fetchJson("https://example.com/usage", {}, 50, fetchFn);
     const rejection = expect(request).rejects.toThrow("aborted by timeout");

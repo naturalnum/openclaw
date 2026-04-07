@@ -46,21 +46,9 @@ export type WorkbenchFileListResult = {
   entries: WorkbenchFileEntry[];
 };
 
-export type WorkbenchFileDownloadResult = {
-  agentId: string;
-  workspace: string;
-  file: {
-    name: string;
-    path: string;
-    size: number;
-    updatedAtMs: number;
-    contentBase64: string;
-  };
-};
-
 export type WorkbenchUploadedFile = {
   name: string;
-  contentBase64: string;
+  file: File;
 };
 
 export type WorkbenchWorkspaceValidationResult = {
@@ -121,7 +109,7 @@ export interface WorkbenchAdapter {
     path: string | null,
     files: WorkbenchUploadedFile[],
   ): Promise<WorkbenchFileEntry[]>;
-  downloadProjectFile(agentId: string, path: string): Promise<WorkbenchFileDownloadResult>;
+  downloadProjectFile(agentId: string, path: string): Promise<void>;
   deleteProjectEntry(agentId: string, path: string): Promise<void>;
   renameProject(projectId: string, name: string): Promise<void>;
   deleteProject(projectId: string): Promise<void>;

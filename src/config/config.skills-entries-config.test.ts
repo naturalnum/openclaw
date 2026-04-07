@@ -44,4 +44,18 @@ describe("skills entries config schema", () => {
       ),
     ).toBe(true);
   });
+
+  it("accepts skills registry config", () => {
+    const res = OpenClawSchema.safeParse({
+      skills: {
+        registry: {
+          enabled: true,
+          baseUrl: "https://skillcenter.example.com",
+          timeoutMs: 5000,
+        },
+      },
+    });
+
+    expect(res.success).toBe(true);
+  });
 });

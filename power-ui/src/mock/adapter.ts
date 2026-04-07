@@ -8,7 +8,6 @@ import type {
   WorkbenchDirectoryCreateResult,
   WorkbenchDirectoryListResult,
   WorkbenchDirectoryRootsResult,
-  WorkbenchFileDownloadResult,
   WorkbenchFileEntry,
   WorkbenchFileListResult,
   WorkbenchSendResult,
@@ -671,8 +670,7 @@ export class MockWorkbenchAdapter implements WorkbenchAdapter {
     const currentPath = path?.trim() || project.workspace;
     const uploaded: WorkbenchFileEntry[] = [];
     for (const file of files) {
-      const content = file.contentBase64.trim();
-      const size = Math.floor((content.length * 3) / 4);
+      const size = file.file.size;
       const entryPath = `${currentPath}/${file.name}`.replace(/\/+/g, "/");
       project.files.unshift({
         name: file.name,
@@ -694,23 +692,9 @@ export class MockWorkbenchAdapter implements WorkbenchAdapter {
     return uploaded;
   }
 
-  async downloadProjectFile(
-    agentId: string,
-    filePath: string,
-  ): Promise<WorkbenchFileDownloadResult> {
-    const project = this.requireProject(agentId);
-    const name = filePath.split("/").filter(Boolean).pop() ?? "download.bin";
-    return {
-      agentId,
-      workspace: project.workspace,
-      file: {
-        name,
-        path: filePath,
-        size: 0,
-        updatedAtMs: Date.now(),
-        contentBase64: "",
-      },
-    };
+  async downloadProjectFile(agentId: string, filePath: string): Promise<void> {
+    void this.requireProject(agentId);
+    void filePath;
   }
 
   async deleteProjectEntry(agentId: string, filePath: string): Promise<void> {

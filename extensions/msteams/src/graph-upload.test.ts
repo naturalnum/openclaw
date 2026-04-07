@@ -22,7 +22,7 @@ describe("graph upload helpers", () => {
       buffer: Buffer.from("hello"),
       filename: "a.txt",
       tokenProvider,
-      fetchFn: fetchFn as typeof fetch,
+      fetchFn: fetchFn as unknown as typeof fetch,
     });
 
     expect(fetchFn).toHaveBeenCalledWith(
@@ -59,7 +59,7 @@ describe("graph upload helpers", () => {
       filename: "b.txt",
       siteId: "site-123",
       tokenProvider,
-      fetchFn: fetchFn as typeof fetch,
+      fetchFn: fetchFn as unknown as typeof fetch,
     });
 
     expect(fetchFn).toHaveBeenCalledWith(
@@ -94,7 +94,7 @@ describe("graph upload helpers", () => {
         filename: "bad.txt",
         siteId: "site-123",
         tokenProvider,
-        fetchFn: fetchFn as typeof fetch,
+        fetchFn: fetchFn as unknown as typeof fetch,
       }),
     ).rejects.toThrow("SharePoint upload response missing required fields");
   });

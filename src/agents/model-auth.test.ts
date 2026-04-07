@@ -512,7 +512,7 @@ describe("applyLocalNoAuthHeaderOverride", () => {
         status: 401,
         headers: { "content-type": "application/json" },
       });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     const model = applyLocalNoAuthHeaderOverride(
       {

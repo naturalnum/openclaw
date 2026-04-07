@@ -1,0 +1,23 @@
+{
+  "id": "network-guard-plugin",
+  "name": "Network Guard Plugin",
+  "description": "Blocks configured outbound network requests and shell commands.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "blockedHosts": {
+        "type": "array",
+        "items": { "type": "string" }
+      },
+      "blockedUrlPrefixes": {
+        "type": "array",
+        "items": { "type": "string" }
+      },
+      "blockedCommands": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    }
+  }
+}

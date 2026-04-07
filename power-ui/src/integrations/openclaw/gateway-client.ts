@@ -57,6 +57,24 @@ export class PowerGatewayClient {
     return await client.request<T>(method, params);
   }
 
+  async uploadHttpFile(params: {
+    routePath: string;
+    query?: Record<string, string | null | undefined>;
+    file: File;
+    onProgress?: (progress: { loaded: number; total: number | null }) => void;
+  }): Promise<void> {
+    const client = await this.ensureConnected();
+    await client.uploadHttpFile(params);
+  }
+
+  async submitHttpDownload(params: {
+    routePath: string;
+    fields: Record<string, string | null | undefined>;
+  }): Promise<void> {
+    const client = await this.ensureConnected();
+    await client.submitHttpDownload(params);
+  }
+
   async ensureConnected(): Promise<GatewayBrowserClient> {
     const settings = this.getSettings();
     const key = `${settings.gatewayUrl.trim()}::${settings.token?.trim() ?? ""}`;

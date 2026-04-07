@@ -29,6 +29,11 @@ import type {
   SessionUsageTimeSeries,
   SessionsListResult,
   SkillStatusReport,
+  SkillsRegistryCatalogItem,
+  SkillsRegistryCategory,
+  SkillsRegistryInstallFilter,
+  SkillsRegistryPagination,
+  SkillsRegistrySortBy,
   StatusSummary,
   ToolsCatalogResult,
 } from "./types.ts";
@@ -266,6 +271,15 @@ export type AppViewState = {
     skillsReport: SkillStatusReport | null;
     skillsError: string | null;
     skillsFilter: string;
+    skillsCatalog: SkillsRegistryCatalogItem[];
+    skillsCategories: SkillsRegistryCategory[];
+    skillsRegistryBaseUrl: string | null;
+    skillsArchiveBusy: boolean;
+    skillsNotice: SkillMessage | null;
+    skillsPagination: SkillsRegistryPagination;
+    skillsCategory: string | null;
+    skillsSortBy: SkillsRegistrySortBy;
+    skillsInstallFilter: SkillsRegistryInstallFilter;
     skillEdits: Record<string, string>;
     skillMessages: Record<string, SkillMessage>;
     skillsBusyKey: string | null;

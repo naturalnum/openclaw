@@ -15,13 +15,17 @@ import {
   addCronJob,
   cancelCronEdit,
   cloneConfigObject,
+  DEFAULT_SKILLS_INSTALL_FILTER,
+  DEFAULT_SKILLS_REGISTRY_PAGINATION,
+  DEFAULT_SKILLS_SORT_BY,
   getVisibleCronJobs,
   handleChatEvent,
   hasCronFormErrors,
-  installSkill,
+  importRegistrySkillArchive,
   loadChannels,
   loadCronJobs,
   loadCronModelSuggestions,
+  loadLogs,
   loadCronRuns,
   loadCronStatus,
   loadMoreCronJobs,
@@ -31,21 +35,25 @@ import {
   reloadCronJobs,
   removeCronJob,
   runCronJob,
-  saveSkillApiKey,
   sendChatMessage,
   serializeConfigForm,
+  setSkillsCategory,
+  setSkillsFilter,
+  setSkillsInstallFilter,
+  setSkillsPage,
+  setSkillsSortBy,
   startCronClone,
   startCronEdit,
+  toggleRegistrySkillInstall,
   toggleCronJob,
   updateCronJobsFilter,
   updateCronRunsFilter,
-  updateSkillEdit,
-  updateSkillEnabled,
   validateCronForm,
   type ChannelsState,
   type ChatState,
   type CronModelSuggestionsState,
   type CronState,
+  type LogsState,
   type SkillsState,
 } from "./compat/controllers.ts";
 import type { GatewayBrowserClient } from "./compat/gateway.ts";
@@ -55,6 +63,7 @@ import type {
   AgentsFilesListResult,
   AgentsListResult,
   ConfigSnapshot,
+  LogLevel,
   ModelCatalogEntry,
   SessionsListResult,
 } from "./compat/types.ts";
@@ -203,6 +212,14 @@ const SETTINGS_LOCALE_OPTIONS = [
   { value: "zh-CN", label: "简体中文" },
   { value: "en", label: "English" },
 ] as const;
+const DEFAULT_LOG_LEVEL_FILTERS: Record<LogLevel, boolean> = {
+  trace: true,
+  debug: true,
+  info: true,
+  warn: true,
+  error: true,
+  fatal: true,
+};
 
 function normalizeSuggestionValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -258,21 +275,6 @@ async function readBrowserFileAsBase64(file: File): Promise<string> {
     binary += String.fromCharCode(...chunk);
   }
   return btoa(binary);
-}
-
-function triggerBrowserDownload(params: { name: string; contentBase64: string }) {
-  const binary = atob(params.contentBase64);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  const blob = new Blob([bytes]);
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = params.name;
-  anchor.click();
-  URL.revokeObjectURL(url);
 }
 
 function createEmptyModelConfig(): WorkbenchModelConfig {
@@ -546,8 +548,17 @@ export class OpenClawPowerApp extends LitElement {
     skillsReport: null,
     skillsError: null,
     skillsBusyKey: null,
-    skillEdits: {},
+    skillsArchiveBusy: false,
     skillMessages: {},
+    skillsNotice: null,
+    skillsFilter: "",
+    skillsCatalog: [],
+    skillsCategories: [],
+    skillsRegistryBaseUrl: null,
+    skillsPagination: { ...DEFAULT_SKILLS_REGISTRY_PAGINATION },
+    skillsCategory: null,
+    skillsSortBy: DEFAULT_SKILLS_SORT_BY,
+    skillsInstallFilter: DEFAULT_SKILLS_INSTALL_FILTER,
   };
   private readonly channelsState: ChannelsState = {
     client: this.controllerClient,
@@ -597,6 +608,19 @@ export class OpenClawPowerApp extends LitElement {
     cronRunsSortDir: "desc",
     cronBusy: false,
     cronModelSuggestions: [],
+  };
+  private readonly logsState: LogsState = {
+    client: this.controllerClient,
+    connected: false,
+    logsLoading: false,
+    logsError: null,
+    logsCursor: null,
+    logsFile: null,
+    logsEntries: [],
+    logsTruncated: false,
+    logsLastFetchAt: null,
+    logsLimit: 500,
+    logsMaxBytes: 250_000,
   };
 
   createRenderRoot() {
@@ -659,6 +683,9 @@ export class OpenClawPowerApp extends LitElement {
   @state() projectFilesAgentId: string | null = null;
   @state() projectFilesWorkspace: string | null = null;
   @state() projectFilesEntries: WorkbenchFileEntry[] = [];
+  @state() logsFilterText = "";
+  @state() logsAutoFollow = true;
+  @state() logsLevelFilters: Record<LogLevel, boolean> = { ...DEFAULT_LOG_LEVEL_FILTERS };
 
   @state() agentsList: AgentsListResult | null = null;
   @state() agentIdentityById: Record<string, AgentIdentityResult> = {};
@@ -684,6 +711,7 @@ export class OpenClawPowerApp extends LitElement {
   private modelConfigPersistTimer: number | null = null;
   private modelConfigPersistInFlight = false;
   private modelConfigPersistQueued = false;
+  private logsRefreshTimer: number | null = null;
 
   connectedCallback() {
     super.connectedCallback();
@@ -702,6 +730,10 @@ export class OpenClawPowerApp extends LitElement {
     if (this.modelConfigPersistTimer != null) {
       window.clearTimeout(this.modelConfigPersistTimer);
       this.modelConfigPersistTimer = null;
+    }
+    if (this.logsRefreshTimer != null) {
+      window.clearInterval(this.logsRefreshTimer);
+      this.logsRefreshTimer = null;
     }
     for (const timer of this.modalCloseTimers.values()) {
       window.clearTimeout(timer);
@@ -963,6 +995,8 @@ export class OpenClawPowerApp extends LitElement {
       this.applySnapshot(snapshot);
       await this.refreshProjectFiles(selection.projectId);
       this.connected = true;
+      this.logsState.connected = true;
+      this.logsState.client = this.controllerClient;
       for (const runtime of this.chatRuntimeBySessionKey.values()) {
         runtime.connected = true;
         runtime.client = this.controllerClient;
@@ -970,6 +1004,7 @@ export class OpenClawPowerApp extends LitElement {
       this.lastError = null;
     } catch (error) {
       this.connected = false;
+      this.logsState.connected = false;
       for (const runtime of this.chatRuntimeBySessionKey.values()) {
         runtime.connected = false;
       }
@@ -1218,6 +1253,54 @@ export class OpenClawPowerApp extends LitElement {
     );
   }
 
+  private async loadLogsPage(reset = false, quiet = false) {
+    this.logsState.client = this.controllerClient;
+    this.logsState.connected = this.connected;
+    await this.runControllerAction(loadLogs(this.logsState, { reset, quiet }));
+  }
+
+  private startLogsAutoRefresh() {
+    if (this.logsRefreshTimer != null) {
+      window.clearInterval(this.logsRefreshTimer);
+      this.logsRefreshTimer = null;
+    }
+    this.logsRefreshTimer = window.setInterval(() => {
+      if (this.workbenchSection !== "logs" || !this.logsAutoFollow || !this.connected) {
+        return;
+      }
+      void this.loadLogsPage(false, true);
+    }, 3000);
+  }
+
+  private stopLogsAutoRefresh() {
+    if (this.logsRefreshTimer != null) {
+      window.clearInterval(this.logsRefreshTimer);
+      this.logsRefreshTimer = null;
+    }
+  }
+
+  private handleLogsScroll(event: Event) {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+    const distanceToBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
+    this.logsAutoFollow = distanceToBottom <= 24;
+  }
+
+  private exportLogs(lines: string[], label: string) {
+    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    const suffix = label.trim() || "logs";
+    anchor.href = url;
+    anchor.download = `openclaw-${suffix}-${new Date().toISOString().replaceAll(":", "-")}.log`;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   private persistSettings(patch: Partial<UiSettings>) {
     this.settings = { ...this.settings, ...patch };
     saveSettings(this.settings);
@@ -1303,6 +1386,7 @@ export class OpenClawPowerApp extends LitElement {
   }
 
   private async enterNewTask() {
+    this.stopLogsAutoRefresh();
     this.workbenchSection = "newTask";
     this.workbenchSelectedSessionKey = null;
     this.newTaskProjectMenuOpen = false;
@@ -1317,7 +1401,9 @@ export class OpenClawPowerApp extends LitElement {
   }
 
   private async selectProject(projectId: string) {
-    this.workbenchSection = "newTask";
+    const preserveFilesView = this.workbenchSection === "files";
+    this.stopLogsAutoRefresh();
+    this.workbenchSection = preserveFilesView ? "files" : "newTask";
     this.workbenchSelectedProjectId = projectId;
     this.workbenchSelectedSessionKey = null;
     this.newTaskProjectMenuOpen = false;
@@ -1331,11 +1417,15 @@ export class OpenClawPowerApp extends LitElement {
       lastActiveSessionKey: "",
     });
     await this.refreshSnapshot(null, projectId);
+    if (preserveFilesView) {
+      await this.refreshProjectFiles(projectId);
+    }
   }
 
   private async selectSession(sessionKey: string) {
     const projectId =
       parseAgentSessionKey(sessionKey)?.agentId ?? this.workbenchSelectedProjectId ?? null;
+    this.stopLogsAutoRefresh();
     this.workbenchSection = "newTask";
     this.workbenchSelectedSessionKey = sessionKey;
     this.workbenchSelectedProjectId = projectId;
@@ -1646,11 +1736,7 @@ export class OpenClawPowerApp extends LitElement {
   private async downloadProjectFile(agentId: string, path: string) {
     try {
       this.fileManagerBusyPath = path;
-      const result = await this.adapter.downloadProjectFile(agentId, path);
-      triggerBrowserDownload({
-        name: result.file.name,
-        contentBase64: result.file.contentBase64,
-      });
+      await this.adapter.downloadProjectFile(agentId, path);
       this.lastError = null;
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : String(error);
@@ -1672,20 +1758,14 @@ export class OpenClawPowerApp extends LitElement {
     try {
       this.fileManagerLoading = true;
       this.fileManagerError = null;
-      const payloads: WorkbenchUploadedFile[] = await Promise.all(
-        files.map(async (file) => ({
-          name: file.name,
-          contentBase64: await readBrowserFileAsBase64(file),
-        })),
-      );
+      const payloads: WorkbenchUploadedFile[] = files.map((file) => ({
+        name: file.name,
+        file,
+      }));
       await this.adapter.uploadProjectFiles(agentId, path, payloads);
       await this.refreshProjectFiles(agentId);
       await this.refreshSnapshot();
-      if (
-        options?.refreshManager &&
-        this.fileManagerDialogOpen &&
-        this.fileManagerAgentId === agentId
-      ) {
+      if (options?.refreshManager && this.fileManagerAgentId === agentId) {
         await this.refreshFileManager();
       }
       this.lastError = null;
@@ -2068,9 +2148,16 @@ export class OpenClawPowerApp extends LitElement {
   private handleAdapterEvent(event: WorkbenchAdapterEvent) {
     if (event.type === "connection") {
       this.connected = event.connected;
+      this.logsState.connected = event.connected;
+      this.logsState.client = this.controllerClient;
       this.skillsState.connected = event.connected;
       this.channelsState.connected = event.connected;
       this.cronState.connected = event.connected;
+      if (!event.connected) {
+        this.stopLogsAutoRefresh();
+      } else if (this.workbenchSection === "logs") {
+        this.startLogsAutoRefresh();
+      }
       for (const runtime of this.chatRuntimeBySessionKey.values()) {
         runtime.connected = event.connected;
         runtime.client = this.controllerClient;
@@ -2211,31 +2298,55 @@ export class OpenClawPowerApp extends LitElement {
       skillsPage: {
         connected: this.skillsState.connected,
         loading: this.skillsState.skillsLoading,
-        report: this.skillsState.skillsReport,
+        archiveBusy: this.skillsState.skillsArchiveBusy,
+        items: this.skillsState.skillsCatalog,
+        categories: this.skillsState.skillsCategories,
+        pagination: this.skillsState.skillsPagination,
         error: this.skillsState.skillsError,
-        filter: "",
-        edits: this.skillsState.skillEdits,
+        notice: this.skillsState.skillsNotice,
+        filter: this.skillsState.skillsFilter,
+        selectedCategory: this.skillsState.skillsCategory,
+        sortBy: this.skillsState.skillsSortBy,
+        installFilter: this.skillsState.skillsInstallFilter,
         busyKey: this.skillsState.skillsBusyKey,
         messages: this.skillsState.skillMessages,
-        onFilterChange: (next) => {
+        registryBaseUrl: this.skillsState.skillsRegistryBaseUrl,
+        onSearchChange: (next) => {
+          setSkillsFilter(this.skillsState, next);
           this.requestUpdate();
-          void next;
+        },
+        onCategoryChange: (next) => {
+          setSkillsCategory(this.skillsState, next);
+          this.requestUpdate();
+        },
+        onSortChange: (next) => {
+          setSkillsSortBy(this.skillsState, next);
+          this.requestUpdate();
+        },
+        onInstallFilterChange: (next) => {
+          setSkillsInstallFilter(this.skillsState, next);
+          this.requestUpdate();
         },
         onRefresh: () => {
           void this.loadSkillsPage(true);
         },
-        onToggle: (skillKey, enabled) => {
-          void this.runControllerAction(updateSkillEnabled(this.skillsState, skillKey, enabled));
-        },
-        onEdit: (skillKey, value) => {
-          updateSkillEdit(this.skillsState, skillKey, value);
+        onPageChange: (next) => {
+          setSkillsPage(this.skillsState, next);
           this.requestUpdate();
         },
-        onSaveKey: (skillKey) => {
-          void this.runControllerAction(saveSkillApiKey(this.skillsState, skillKey));
+        onToggleInstall: (item) => {
+          void this.runControllerAction(toggleRegistrySkillInstall(this.skillsState, item));
         },
-        onInstall: (skillKey, name, installId) => {
-          void this.runControllerAction(installSkill(this.skillsState, skillKey, name, installId));
+        onImportArchive: (file) => {
+          void this.runControllerAction(importRegistrySkillArchive(this.skillsState, file));
+        },
+        onDismissNotice: () => {
+          this.skillsState.skillsNotice = null;
+          this.requestUpdate();
+        },
+        onDismissError: () => {
+          this.skillsState.skillsError = null;
+          this.requestUpdate();
         },
       },
       automationsPage: {
@@ -2372,6 +2483,37 @@ export class OpenClawPowerApp extends LitElement {
           );
         },
       },
+      logsPage: {
+        loading: this.logsState.logsLoading,
+        error: this.logsState.logsError,
+        file: this.logsState.logsFile,
+        entries: this.logsState.logsEntries,
+        filterText: this.logsFilterText,
+        levelFilters: this.logsLevelFilters,
+        autoFollow: this.logsAutoFollow,
+        truncated: this.logsState.logsTruncated,
+        onFilterTextChange: (next) => {
+          this.logsFilterText = next;
+        },
+        onLevelToggle: (level, enabled) => {
+          this.logsLevelFilters = { ...this.logsLevelFilters, [level]: enabled };
+        },
+        onToggleAutoFollow: (next) => {
+          this.logsAutoFollow = next;
+          if (next && this.workbenchSection === "logs") {
+            this.startLogsAutoRefresh();
+          }
+        },
+        onRefresh: () => {
+          void this.loadLogsPage(true);
+        },
+        onExport: (lines, label) => {
+          this.exportLogs(lines, label);
+        },
+        onScroll: (event) => {
+          this.handleLogsScroll(event);
+        },
+      },
       modelCatalog: this.chatModelCatalog,
       modelsLoading: false,
       themeResolved: this.themeResolved,
@@ -2421,19 +2563,42 @@ export class OpenClawPowerApp extends LitElement {
       onSectionChange: (section) => {
         void (async () => {
           if (section === "newTask") {
+            this.stopLogsAutoRefresh();
             await this.enterNewTask();
             return;
           }
           this.workbenchSection = section;
           this.newTaskProjectMenuOpen = false;
           this.treeMenuOpenKey = null;
+          if (section === "files") {
+            this.stopLogsAutoRefresh();
+            const projectId =
+              this.workbenchSelectedProjectId ??
+              this.agentsList?.defaultId ??
+              this.agentsList?.agents[0]?.id ??
+              null;
+            if (projectId) {
+              this.workbenchSelectedProjectId = projectId;
+              await this.refreshProjectFiles(projectId);
+            }
+            return;
+          }
           if (section === "skills") {
+            this.stopLogsAutoRefresh();
             await this.loadSkillsPage(true);
             return;
           }
           if (section === "automations") {
+            this.stopLogsAutoRefresh();
             await this.loadAutomationsPage();
+            return;
           }
+          if (section === "logs") {
+            await this.loadLogsPage(true);
+            this.startLogsAutoRefresh();
+            return;
+          }
+          this.stopLogsAutoRefresh();
         })();
       },
       onSelectProject: (projectId) => {

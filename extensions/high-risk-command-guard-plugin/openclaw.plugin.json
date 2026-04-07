@@ -1,0 +1,19 @@
+{
+  "id": "high-risk-command-guard-plugin",
+  "name": "High Risk Command Guard Plugin",
+  "description": "Blocks configured high-risk shell commands before execution.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "blockedCommands": {
+        "type": "array",
+        "items": { "type": "string" }
+      },
+      "blockedSubstrings": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    }
+  }
+}

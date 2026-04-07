@@ -20,7 +20,6 @@ import type {
   WorkbenchAdapterEvent,
   WorkbenchDirectoryListResult,
   WorkbenchDirectoryRootsResult,
-  WorkbenchFileDownloadResult,
   WorkbenchFileEntry,
   WorkbenchFileListResult,
   WorkbenchSelection,
@@ -309,25 +308,28 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
     path: string | null,
     files: WorkbenchUploadedFile[],
   ): Promise<WorkbenchFileEntry[]> {
-    const result = await requiredRequest<{ entries: WorkbenchFileEntry[] }>(
-      this.gateway.request("power.fs.uploadFiles", {
-        agentId,
-        path: path?.trim() || null,
-        files,
-      }),
-      "power.fs.uploadFiles",
-    );
-    return Array.isArray(result.entries) ? result.entries : [];
+    for (const file of files) {
+      await this.gateway.uploadHttpFile({
+        routePath: "/api/power/fs/upload",
+        query: {
+          agentId,
+          path: path?.trim() || "",
+          name: file.name,
+        },
+        file: file.file,
+      });
+    }
+    return [];
   }
 
-  async downloadProjectFile(agentId: string, path: string): Promise<WorkbenchFileDownloadResult> {
-    return await requiredRequest(
-      this.gateway.request<WorkbenchFileDownloadResult>("power.fs.downloadFile", {
+  async downloadProjectFile(agentId: string, path: string): Promise<void> {
+    await this.gateway.submitHttpDownload({
+      routePath: "/api/power/fs/download",
+      fields: {
         agentId,
         path,
-      }),
-      "power.fs.downloadFile",
-    );
+      },
+    });
   }
 
   async deleteProjectEntry(agentId: string, path: string): Promise<void> {

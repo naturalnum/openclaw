@@ -40,6 +40,13 @@ export type PowerFsWorkspaceFileResult = {
   contentBase64: string;
 };
 
+export type PowerFsWorkspaceFileInfo = {
+  name: string;
+  path: string;
+  size: number;
+  updatedAtMs: number;
+};
+
 type PowerFsWorkspaceEntryCandidate = PowerFsWorkspaceEntry | null;
 
 type PowerFsConfig = {
@@ -246,6 +253,30 @@ export class PowerFsService {
     } satisfies PowerFsWorkspaceEntry;
   }
 
+  resolveWorkspaceDirectoryPath(workspaceDir: string, currentPath: string | null) {
+    const workspaceRoot = this.resolveWorkspaceRoot(workspaceDir);
+    return currentPath?.trim()
+      ? this.resolveWorkspaceDirectory(workspaceRoot, currentPath)
+      : workspaceRoot;
+  }
+
+  resolveWorkspaceUploadPath(
+    workspaceDir: string,
+    currentPath: string | null,
+    fileName: string,
+  ): string {
+    const workspaceRoot = this.resolveWorkspaceRoot(workspaceDir);
+    const baseDir = currentPath?.trim()
+      ? this.resolveWorkspaceDirectory(workspaceRoot, currentPath)
+      : workspaceRoot;
+    const safeName = assertValidLeafName(fileName);
+    const nextPath = path.resolve(baseDir, safeName);
+    if (!this.isWithinRoot(nextPath, workspaceRoot)) {
+      throw new Error(`Path is outside workspace: ${nextPath}`);
+    }
+    return nextPath;
+  }
+
   writeWorkspaceFile(
     workspaceDir: string,
     currentPath: string | null,
@@ -284,6 +315,18 @@ export class PowerFsService {
       size: stats.size,
       updatedAtMs: Math.floor(stats.mtimeMs),
       contentBase64: buffer.toString("base64"),
+    };
+  }
+
+  statWorkspaceFile(workspaceDir: string, inputPath: string): PowerFsWorkspaceFileInfo {
+    const workspaceRoot = this.resolveWorkspaceRoot(workspaceDir);
+    const filePath = this.resolveWorkspaceFile(workspaceRoot, inputPath);
+    const stats = fs.statSync(filePath);
+    return {
+      name: path.basename(filePath) || filePath,
+      path: filePath,
+      size: stats.size,
+      updatedAtMs: Math.floor(stats.mtimeMs),
     };
   }
 

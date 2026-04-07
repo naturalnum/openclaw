@@ -128,6 +128,7 @@ describe("loadSettings default gateway URL derivation", () => {
       gatewayUrl: "wss://gateway.example:8443/openclaw",
       theme: "claw",
       themeMode: "system",
+      locale: "zh-CN",
       chatFocusMode: false,
       chatShowThinking: true,
       chatShowToolCalls: true,
