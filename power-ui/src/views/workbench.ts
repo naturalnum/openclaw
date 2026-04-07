@@ -1749,7 +1749,6 @@ function renderSettingsDialog(props: WorkbenchProps) {
 function renderStatisticsPanel(props: WorkbenchProps) {
   const locale = props.settings.locale;
   const statistics = props.settingsView.statistics;
-  const formatNumber = new Intl.NumberFormat(locale ?? undefined);
   const lastUpdated =
     statistics.updatedAt != null
       ? new Intl.DateTimeFormat(locale ?? undefined, {
@@ -1818,28 +1817,28 @@ function renderStatisticsPanel(props: WorkbenchProps) {
       <div class="workbench-statistics-grid">
         ${renderStatisticsMetricCard(
           tLocale(locale, "Total Tokens", "总 token"),
-          formatNumber.format(statistics.totalTokens),
+          formatCompactStatNumber(statistics.totalTokens, locale),
           statistics.loading,
         )}
         ${renderStatisticsMetricCard(
           tLocale(locale, "Input", "输入"),
-          formatNumber.format(statistics.inputTokens),
+          formatCompactStatNumber(statistics.inputTokens, locale),
           statistics.loading,
         )}
         ${renderStatisticsMetricCard(
           tLocale(locale, "Output", "输出"),
-          formatNumber.format(statistics.outputTokens),
+          formatCompactStatNumber(statistics.outputTokens, locale),
           statistics.loading,
         )}
         ${renderStatisticsMetricCard(
           tLocale(locale, "Cache", "缓存"),
-          formatNumber.format(statistics.cacheTokens),
+          formatCompactStatNumber(statistics.cacheTokens, locale),
           statistics.loading,
           tLocale(locale, "Read + Write", "命中 + 写入"),
         )}
         ${renderStatisticsMetricCard(
           tLocale(locale, "Sessions", "会话数"),
-          formatNumber.format(statistics.sessionCount),
+          formatCompactStatNumber(statistics.sessionCount, locale),
           statistics.loading,
         )}
       </div>
@@ -1855,6 +1854,31 @@ function renderStatisticsMetricCard(label: string, value: string, loading: boole
       ${hint ? html`<div class="workbench-statistics-card__hint">${hint}</div>` : nothing}
     </article>
   `;
+}
+
+function formatCompactStatNumber(value: number, locale?: string): string {
+  const abs = Math.abs(value);
+  const units = [
+    { threshold: 1_000_000_000_000, suffix: "T" },
+    { threshold: 1_000_000_000, suffix: "G" },
+    { threshold: 1_000_000, suffix: "M" },
+    { threshold: 1_000, suffix: "K" },
+  ] as const;
+  for (const unit of units) {
+    if (abs < unit.threshold) {
+      continue;
+    }
+    const normalized = value / unit.threshold;
+    const decimals = Math.abs(normalized) >= 10 ? 0 : 1;
+    const formatted = new Intl.NumberFormat(locale ?? undefined, {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: decimals,
+    }).format(normalized);
+    return `${formatted}${unit.suffix}`;
+  }
+  return new Intl.NumberFormat(locale ?? undefined, {
+    maximumFractionDigits: 0,
+  }).format(value);
 }
 
 function renderThemeCard(

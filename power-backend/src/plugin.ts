@@ -9,6 +9,7 @@ import { loadConfig } from "../../src/config/config.js";
 import { authorizeHttpGatewayConnect, resolveGatewayAuth } from "../../src/gateway/auth.js";
 import { readRequestBodyWithLimit } from "../../src/infra/http-body.js";
 import { requestBodyErrorToText, isRequestBodyLimitError } from "../../src/infra/http-body.js";
+import { PowerFsDownloadTicketStore } from "./download-ticket.js";
 import { PowerFsService } from "./fs-service.js";
 
 type PowerBackendPluginConfig = {
@@ -19,6 +20,7 @@ const POWER_FS_UPLOAD_HTTP_PATH = "/plugins/power-backend/fs/upload";
 const POWER_FS_DOWNLOAD_HTTP_PATH = "/plugins/power-backend/fs/download";
 const POWER_FS_TRANSFER_MAX_BYTES = 10 * 1024 * 1024 * 1024; // 10 GB
 const POWER_FS_DOWNLOAD_FORM_MAX_BYTES = 64 * 1024;
+const POWER_FS_DOWNLOAD_TICKET_TTL_MS = 60 * 1000;
 
 function parsePluginConfig(api: OpenClawPluginApi): PowerBackendPluginConfig {
   const raw = api.pluginConfig && typeof api.pluginConfig === "object" ? api.pluginConfig : {};
@@ -148,6 +150,7 @@ function resolveWorkspaceForAgent(agentIdRaw: unknown) {
 export default function register(api: OpenClawPluginApi) {
   const config = parsePluginConfig(api);
   const fsService = new PowerFsService(config);
+  const downloadTicketStore = new PowerFsDownloadTicketStore(POWER_FS_DOWNLOAD_TICKET_TTL_MS);
 
   api.registerHttpRoute({
     path: POWER_FS_UPLOAD_HTTP_PATH,
@@ -255,6 +258,7 @@ export default function register(api: OpenClawPluginApi) {
         let url = new URL(req.url ?? POWER_FS_DOWNLOAD_HTTP_PATH, "http://localhost");
         let agentId = trimQueryValue(url.searchParams.get("agentId"));
         let filePath = trimQueryValue(url.searchParams.get("path"));
+        let ticket = trimQueryValue(url.searchParams.get("ticket"));
         let token = trimQueryValue(url.searchParams.get("token")) ?? parseBearerToken(req);
         let password = trimQueryValue(url.searchParams.get("password"));
         if (method === "POST") {
@@ -265,17 +269,28 @@ export default function register(api: OpenClawPluginApi) {
           const form = new URLSearchParams(raw);
           agentId = trimQueryValue(form.get("agentId")) ?? agentId;
           filePath = trimQueryValue(form.get("path")) ?? filePath;
+          ticket = trimQueryValue(form.get("ticket")) ?? ticket;
           token = trimQueryValue(form.get("token")) ?? token;
           password = trimQueryValue(form.get("password")) ?? password;
         }
-        if (!agentId || !filePath) {
-          sendJson(res, 400, { ok: false, error: "agentId and path are required" });
-          return true;
-        }
-        const auth = await authorizePowerFsHttpRequest(req, token, password);
-        if (!auth.ok) {
-          sendJson(res, auth.status, auth.body);
-          return true;
+        if (ticket) {
+          const ticketRecord = downloadTicketStore.consume(ticket);
+          if (!ticketRecord) {
+            sendJson(res, 401, { ok: false, error: "invalid_or_expired_ticket" });
+            return true;
+          }
+          agentId = ticketRecord.agentId;
+          filePath = ticketRecord.filePath;
+        } else {
+          if (!agentId || !filePath) {
+            sendJson(res, 400, { ok: false, error: "agentId and path are required" });
+            return true;
+          }
+          const auth = await authorizePowerFsHttpRequest(req, token, password);
+          if (!auth.ok) {
+            sendJson(res, auth.status, auth.body);
+            return true;
+          }
         }
         const { workspace } = resolveWorkspaceForAgent(agentId);
         const info = fsService.statWorkspaceFile(workspace, filePath);
@@ -428,6 +443,38 @@ export default function register(api: OpenClawPluginApi) {
           return fsService.writeWorkspaceFile(workspace, currentPath || null, name, contentBase64);
         });
         respond(true, { ok: true, agentId, workspace, entries });
+      } catch (error) {
+        sendError(respond, error);
+      }
+    },
+  );
+
+  api.registerGatewayMethod(
+    "power.fs.createDownloadTicket",
+    async ({ params, respond }: GatewayRequestHandlerOptions) => {
+      try {
+        const { agentId, workspace } = resolveWorkspaceForAgent(params?.agentId);
+        const filePath = typeof params?.path === "string" ? params.path.trim() : "";
+        if (!filePath) {
+          respond(false, { error: "path required" });
+          return;
+        }
+        const info = fsService.statWorkspaceFile(workspace, filePath);
+        if (info.size > POWER_FS_TRANSFER_MAX_BYTES) {
+          respond(false, { error: "file exceeds 10GB download limit" });
+          return;
+        }
+        const ticket = downloadTicketStore.issue(agentId, filePath);
+        respond(true, {
+          ok: true,
+          agentId,
+          path: filePath,
+          routePath: POWER_FS_DOWNLOAD_HTTP_PATH,
+          ticket: ticket.ticket,
+          expiresAtMs: ticket.expiresAtMs,
+          fileName: info.name,
+          size: info.size,
+        });
       } catch (error) {
         sendError(respond, error);
       }

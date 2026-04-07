@@ -37,6 +37,11 @@ type ModelsListResult = {
   models?: ModelCatalogEntry[];
 };
 
+type PowerFsDownloadTicketResult = {
+  routePath?: string;
+  ticket?: string;
+};
+
 const EMPTY_SKILLS_REPORT: SkillStatusReport = {
   workspaceDir: "",
   managedSkillsDir: "",
@@ -323,11 +328,21 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
   }
 
   async downloadProjectFile(agentId: string, path: string): Promise<void> {
-    await this.gateway.submitHttpDownload({
-      routePath: "/api/power/fs/download",
-      fields: {
+    const issued = await requiredRequest<PowerFsDownloadTicketResult>(
+      this.gateway.request("power.fs.createDownloadTicket", {
         agentId,
         path,
+      }),
+      "power.fs.createDownloadTicket",
+    );
+    const ticket = issued.ticket?.trim() || "";
+    if (!ticket) {
+      throw new Error("power.fs.createDownloadTicket returned no ticket");
+    }
+    await this.gateway.submitHttpDownload({
+      routePath: issued.routePath?.trim() || "/plugins/power-backend/fs/download",
+      fields: {
+        ticket,
       },
     });
   }

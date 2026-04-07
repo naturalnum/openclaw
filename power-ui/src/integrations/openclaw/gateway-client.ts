@@ -14,6 +14,31 @@ export type PowerGatewaySettings = {
 
 type Listener = (event: WorkbenchAdapterEvent) => void;
 
+function buildHttpRouteUrl(
+  gatewayUrlRaw: string,
+  routePath: string,
+  query?: Record<string, string | null | undefined>,
+): string {
+  const gatewayUrl = new URL(gatewayUrlRaw);
+  gatewayUrl.protocol = gatewayUrl.protocol === "wss:" ? "https:" : "http:";
+  const basePath =
+    gatewayUrl.pathname === "/"
+      ? ""
+      : gatewayUrl.pathname.endsWith("/")
+        ? gatewayUrl.pathname.slice(0, -1)
+        : gatewayUrl.pathname;
+  gatewayUrl.pathname = `${basePath}${routePath}`;
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(query ?? {})) {
+    const trimmed = typeof value === "string" ? value.trim() : "";
+    if (trimmed) {
+      search.set(key, trimmed);
+    }
+  }
+  gatewayUrl.search = search.toString();
+  return gatewayUrl.toString();
+}
+
 function formatGatewayCloseError(params: {
   code: number;
   reason: string;
@@ -71,8 +96,22 @@ export class PowerGatewayClient {
     routePath: string;
     fields: Record<string, string | null | undefined>;
   }): Promise<void> {
-    const client = await this.ensureConnected();
-    await client.submitHttpDownload(params);
+    await this.ensureConnected();
+    const settings = this.getSettings();
+    const token = settings.token?.trim() || "";
+    const query: Record<string, string | null | undefined> = { ...params.fields };
+    if (!("token" in query) && token) {
+      query.token = token;
+    }
+    const url = buildHttpRouteUrl(settings.gatewayUrl, params.routePath, query);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    window.setTimeout(() => {
+      anchor.remove();
+    }, 1000);
   }
 
   async ensureConnected(): Promise<GatewayBrowserClient> {
