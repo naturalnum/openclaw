@@ -1218,7 +1218,7 @@ function renderFilesPage(props: WorkbenchProps, project: WorkbenchProject | null
       <div class="workbench-page-shell__body workbench-page-shell__body--files-page">
         <div class="workbench-sidecard__header">
           <div>
-            <h4>${tLocale(locale, "Project Files", "项目文件")}</h4>
+            <h4>${tLocale(locale, "Workspace", "工作目录")}</h4>
             <div class="workbench-mini-row__meta">
               ${project.label}
               ${
