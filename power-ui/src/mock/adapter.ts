@@ -22,6 +22,7 @@ import type {
   CronJob,
   ModelCatalogEntry,
   SessionsListResult,
+  SessionsUsageResult,
   SkillStatusEntry,
   SkillStatusReport,
   ToolsCatalogResult,
@@ -119,6 +120,92 @@ function sessionMessage(role: MockMessage["role"], text: string, timestamp: numb
 
 function buildReply(projectName: string, text: string, modelId: string) {
   return `已进入 ${projectName} 的原型上下文。接下来我会围绕“${text.trim()}”拆任务、列文件位和工具位，并按 ${modelId} 的展示风格返回工作台结果。`;
+}
+
+function createMockUsageResult(days: number, projects: MockProject[]): SessionsUsageResult {
+  const perSessionBase = 3200;
+  const sessions = projects.flatMap((project) =>
+    project.sessions.map((session, index) => {
+      const totalTokens = Math.max(session.totalTokens, perSessionBase * (index + 2));
+      const input = Math.round(totalTokens * 0.52);
+      const output = Math.round(totalTokens * 0.31);
+      const cacheRead = Math.round(totalTokens * 0.11);
+      const cacheWrite = totalTokens - input - output - cacheRead;
+      return {
+        key: session.key,
+        label: session.label,
+        sessionId: parseAgentSessionKey(session.key)?.rest ?? session.key,
+        updatedAt: session.updatedAt,
+        agentId: project.id,
+        modelProvider: "OpenAI",
+        model: "gpt-5.4",
+        usage: {
+          input,
+          output,
+          cacheRead,
+          cacheWrite,
+          totalTokens,
+          totalCost: 0,
+          inputCost: 0,
+          outputCost: 0,
+          cacheReadCost: 0,
+          cacheWriteCost: 0,
+          missingCostEntries: 0,
+        },
+      };
+    }),
+  );
+  const totals = sessions.reduce(
+    (acc, session) => {
+      const usage = session.usage;
+      if (!usage) {
+        return acc;
+      }
+      acc.input += usage.input ?? 0;
+      acc.output += usage.output ?? 0;
+      acc.cacheRead += usage.cacheRead ?? 0;
+      acc.cacheWrite += usage.cacheWrite ?? 0;
+      acc.totalTokens += usage.totalTokens ?? 0;
+      return acc;
+    },
+    {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      totalCost: 0,
+      inputCost: 0,
+      outputCost: 0,
+      cacheReadCost: 0,
+      cacheWriteCost: 0,
+      missingCostEntries: 0,
+    },
+  );
+  return {
+    updatedAt: Date.now(),
+    startDate: `last-${days}-days`,
+    endDate: "today",
+    sessions,
+    totals,
+    aggregates: {
+      messages: {
+        total: sessions.length * 6,
+        user: sessions.length * 3,
+        assistant: sessions.length * 3,
+        system: 0,
+        tool: 0,
+        other: 0,
+        errors: 0,
+      },
+      tools: { totalCalls: 0, uniqueTools: 0, tools: [] },
+      byModel: [],
+      byProvider: [],
+      byAgent: [],
+      byChannel: [],
+      daily: [],
+    },
+  };
 }
 
 function createLocalId() {
@@ -451,7 +538,18 @@ export class MockWorkbenchAdapter implements WorkbenchAdapter {
     };
   }
 
-  async request<T>(_method: string, _params?: unknown): Promise<T> {
+  async request<T>(method: string, params?: unknown): Promise<T> {
+    if (method === "sessions.usage") {
+      const daysRaw =
+        params && typeof params === "object" && "days" in params
+          ? (params as { days?: unknown }).days
+          : undefined;
+      const days =
+        typeof daysRaw === "number" && Number.isFinite(daysRaw) && daysRaw > 0
+          ? Math.floor(daysRaw)
+          : 7;
+      return createMockUsageResult(days, this.projects) as T;
+    }
     throw new Error("Mock adapter does not implement direct gateway RPC requests.");
   }
 

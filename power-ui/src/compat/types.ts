@@ -8,6 +8,7 @@ export type {
   LogEntry,
   LogLevel,
   ModelCatalogEntry,
+  SessionsUsageResult,
   SessionsListResult,
   SkillStatusEntry,
   SkillStatusReport,

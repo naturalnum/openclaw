@@ -21,7 +21,7 @@ import {
 import { renderPowerChatThread } from "../integrations/openclaw/chat/thread.ts";
 
 export type WorkbenchSection = "newTask" | "skills" | "files" | "automations" | "logs";
-export type WorkbenchSettingsTab = "general" | "models";
+export type WorkbenchSettingsTab = "general" | "models" | "statistics";
 
 export type WorkbenchModelConfig = {
   id: string;
@@ -32,6 +32,8 @@ export type WorkbenchModelConfig = {
   apiKey: string;
   model: string;
 };
+
+export type WorkbenchStatisticsRange = 1 | 7 | 30;
 
 type WorkbenchDirectoryEntry = {
   name: string;
@@ -119,6 +121,19 @@ export type WorkbenchProps = {
     localeOptions: Array<{ value: string; label: string }>;
     modelConfigs: WorkbenchModelConfig[];
     expandedModelConfigId: string | null;
+    statistics: {
+      loading: boolean;
+      error: string | null;
+      selectedRangeDays: WorkbenchStatisticsRange;
+      totalTokens: number;
+      inputTokens: number;
+      outputTokens: number;
+      cacheTokens: number;
+      sessionCount: number;
+      updatedAt: number | null;
+      onRangeChange: (value: WorkbenchStatisticsRange) => void;
+      onRefresh: () => void;
+    };
     onLocaleChange: (value: string) => void;
     onThemeChange: (value: string) => void;
     onThemeModeChange: (value: string) => void;
@@ -136,6 +151,8 @@ export type WorkbenchProps = {
   settingsOpen: boolean;
   settingsClosing: boolean;
   settingsTab: WorkbenchSettingsTab;
+  runningSessionKeys: Record<string, boolean>;
+  unreadSessionKeys: Record<string, boolean>;
   projectDirectoryOpen: boolean;
   projectDirectoryClosing: boolean;
   projectDirectoryLoading: boolean;
@@ -954,8 +971,27 @@ function renderProjectTreeRow(project: WorkbenchProject, props: WorkbenchProps) 
                             class="workbench-tree-session__main"
                             @click=${() => props.onSelectSession(session.key)}
                           >
-                            <span class="workbench-tree-session__icon">${icons.messageSquare}</span>
+                            <span
+                              class="workbench-tree-session__icon ${
+                                props.runningSessionKeys[session.key] ? "is-running" : ""
+                              }"
+                            >
+                              ${
+                                props.runningSessionKeys[session.key]
+                                  ? html`
+                                      <span class="workbench-tree-session__spinner"></span>
+                                    `
+                                  : icons.messageSquare
+                              }
+                            </span>
                             <span class="workbench-tree-session__label">${session.label}</span>
+                            ${
+                              props.unreadSessionKeys[session.key]
+                                ? html`
+                                    <span class="workbench-tree-session__unread-dot"></span>
+                                  `
+                                : nothing
+                            }
                           </button>
                           <div class="workbench-tree-session__menu-anchor">
                             <button
@@ -1527,6 +1563,14 @@ function renderSettingsDialog(props: WorkbenchProps) {
               <span class="workbench-settings-nav__icon">${icons.spark}</span>
               ${tLocale(locale, "Models", "模型")}
             </button>
+            <button
+              type="button"
+              class="${props.settingsTab === "statistics" ? "is-active" : ""}"
+              @click=${() => props.onSettingsTabChange("statistics")}
+            >
+              <span class="workbench-settings-nav__icon">${icons.barChart}</span>
+              ${tLocale(locale, "Statistics", "统计")}
+            </button>
           </aside>
 
           <section
@@ -1540,7 +1584,9 @@ function renderSettingsDialog(props: WorkbenchProps) {
                   ${
                     props.settingsTab === "general"
                       ? tLocale(locale, "General", "通用")
-                      : tLocale(locale, "Model Settings", "模型设置")
+                      : props.settingsTab === "models"
+                        ? tLocale(locale, "Model Settings", "模型设置")
+                        : tLocale(locale, "Statistics", "统计")
                   }
                 </h4>
                 ${
@@ -1554,7 +1600,17 @@ function renderSettingsDialog(props: WorkbenchProps) {
                         )}
                       </p>
                     `
-                    : nothing
+                    : props.settingsTab === "statistics"
+                      ? html`
+                        <p>
+                          ${tLocale(
+                            locale,
+                            "Check the recent token footprint.",
+                            "查看最近的 token 消耗概况。",
+                          )}
+                        </p>
+                      `
+                      : nothing
                 }
               </div>
               <button
@@ -1652,7 +1708,8 @@ function renderSettingsDialog(props: WorkbenchProps) {
                     </div>
                   </article>
                 `
-                : html`
+                : props.settingsTab === "models"
+                  ? html`
                   <article class="workbench-setting-card workbench-setting-card--models">
                     <div class="workbench-settings-model-shell">
                       <div class="workbench-settings-model-shell__head"></div>
@@ -1676,11 +1733,127 @@ function renderSettingsDialog(props: WorkbenchProps) {
                     </div>
                   </article>
                 `
+                  : html`
+                  <article class="workbench-setting-card">
+                    ${renderStatisticsPanel(props)}
+                  </article>
+                `
             }
           </section>
         </div>
       </div>
     </div>
+  `;
+}
+
+function renderStatisticsPanel(props: WorkbenchProps) {
+  const locale = props.settings.locale;
+  const statistics = props.settingsView.statistics;
+  const formatNumber = new Intl.NumberFormat(locale ?? undefined);
+  const lastUpdated =
+    statistics.updatedAt != null
+      ? new Intl.DateTimeFormat(locale ?? undefined, {
+          month: "numeric",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        }).format(new Date(statistics.updatedAt))
+      : null;
+  const rangeOptions: Array<{ value: WorkbenchStatisticsRange; en: string; zh: string }> = [
+    { value: 1, en: "Today", zh: "今天" },
+    { value: 7, en: "Last 7 days", zh: "最近 7 天" },
+    { value: 30, en: "Last 30 days", zh: "最近 30 天" },
+  ];
+
+  return html`
+    <section class="workbench-settings-section workbench-settings-section--statistics">
+      <div class="workbench-settings-section__header">
+        <span>${tLocale(locale, "Time Range", "时间范围")}</span>
+      </div>
+      <div class="workbench-statistics-toolbar">
+        <div class="workbench-statistics-range">
+          ${rangeOptions.map(
+            (option) => html`
+              <button
+                type="button"
+                class="${statistics.selectedRangeDays === option.value ? "is-active" : ""}"
+                @click=${() => statistics.onRangeChange(option.value)}
+              >
+                ${tLocale(locale, option.en, option.zh)}
+              </button>
+            `,
+          )}
+        </div>
+        <button
+          type="button"
+          class="workbench-icon-button"
+          ?disabled=${statistics.loading}
+          @click=${statistics.onRefresh}
+        >
+          ${icons.refresh}
+        </button>
+      </div>
+      ${
+        lastUpdated
+          ? html`
+              <div class="workbench-statistics-meta">
+                ${tLocale(locale, "Updated", "更新于")} ${lastUpdated}
+              </div>
+            `
+          : nothing
+      }
+    </section>
+
+    ${
+      statistics.error
+        ? html`
+            <section class="workbench-settings-section workbench-settings-section--statistics">
+              <div class="workbench-statistics-error">${statistics.error}</div>
+            </section>
+          `
+        : nothing
+    }
+
+    <section class="workbench-settings-section workbench-settings-section--statistics">
+      <div class="workbench-statistics-grid">
+        ${renderStatisticsMetricCard(
+          tLocale(locale, "Total Tokens", "总 token"),
+          formatNumber.format(statistics.totalTokens),
+          statistics.loading,
+        )}
+        ${renderStatisticsMetricCard(
+          tLocale(locale, "Input", "输入"),
+          formatNumber.format(statistics.inputTokens),
+          statistics.loading,
+        )}
+        ${renderStatisticsMetricCard(
+          tLocale(locale, "Output", "输出"),
+          formatNumber.format(statistics.outputTokens),
+          statistics.loading,
+        )}
+        ${renderStatisticsMetricCard(
+          tLocale(locale, "Cache", "缓存"),
+          formatNumber.format(statistics.cacheTokens),
+          statistics.loading,
+          tLocale(locale, "Read + Write", "命中 + 写入"),
+        )}
+        ${renderStatisticsMetricCard(
+          tLocale(locale, "Sessions", "会话数"),
+          formatNumber.format(statistics.sessionCount),
+          statistics.loading,
+        )}
+      </div>
+    </section>
+  `;
+}
+
+function renderStatisticsMetricCard(label: string, value: string, loading: boolean, hint?: string) {
+  return html`
+    <article class="workbench-statistics-card">
+      <div class="workbench-statistics-card__label">${label}</div>
+      <div class="workbench-statistics-card__value">${loading ? "..." : value}</div>
+      ${hint ? html`<div class="workbench-statistics-card__hint">${hint}</div>` : nothing}
+    </article>
   `;
 }
 

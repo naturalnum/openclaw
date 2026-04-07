@@ -65,6 +65,7 @@ import type {
   ConfigSnapshot,
   LogLevel,
   ModelCatalogEntry,
+  SessionsUsageResult,
   SessionsListResult,
 } from "./compat/types.ts";
 import {
@@ -91,6 +92,7 @@ import {
   renderWorkbench,
   type WorkbenchModelConfig,
   type WorkbenchSection,
+  type WorkbenchStatisticsRange,
   type WorkbenchSettingsTab,
 } from "./views/workbench.ts";
 
@@ -220,6 +222,45 @@ const DEFAULT_LOG_LEVEL_FILTERS: Record<LogLevel, boolean> = {
   error: true,
   fatal: true,
 };
+const DEFAULT_STATISTICS_RANGE_DAYS: WorkbenchStatisticsRange = 7;
+const STATISTICS_RANGE_OPTIONS: readonly WorkbenchStatisticsRange[] = new Set([1, 7, 30]);
+
+function formatUtcOffsetForLocalTimezone(): string {
+  const offsetFromUtcMinutes = -new Date().getTimezoneOffset();
+  const sign = offsetFromUtcMinutes >= 0 ? "+" : "-";
+  const absMinutes = Math.abs(offsetFromUtcMinutes);
+  const hours = Math.floor(absMinutes / 60);
+  const minutes = absMinutes % 60;
+  return minutes === 0
+    ? `UTC${sign}${hours}`
+    : `UTC${sign}${hours}:${minutes.toString().padStart(2, "0")}`;
+}
+
+function formatLocalDateValue(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function resolveStatisticsDateRange(days: WorkbenchStatisticsRange): {
+  startDate: string;
+  endDate: string;
+  mode: "specific";
+  utcOffset: string;
+} {
+  const normalizedDays = STATISTICS_RANGE_OPTIONS.has(days) ? days : DEFAULT_STATISTICS_RANGE_DAYS;
+  const end = new Date();
+  const start = new Date(end);
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - (normalizedDays - 1));
+  return {
+    startDate: formatLocalDateValue(start),
+    endDate: formatLocalDateValue(end),
+    mode: "specific",
+    utcOffset: formatUtcOffsetForLocalTimezone(),
+  };
+}
 
 function normalizeSuggestionValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -503,6 +544,14 @@ type PendingChatFile = {
   file: File;
 };
 
+type StatisticsState = {
+  loading: boolean;
+  error: string | null;
+  rangeDays: WorkbenchStatisticsRange;
+  result: SessionsUsageResult | null;
+  lastLoadedRangeDays: WorkbenchStatisticsRange | null;
+};
+
 @customElement("openclaw-power-app")
 export class OpenClawPowerApp extends LitElement {
   private i18nController = new I18nController(this);
@@ -648,6 +697,7 @@ export class OpenClawPowerApp extends LitElement {
   @state() workbenchSettingsOpen = false;
   @state() workbenchSettingsClosing = false;
   @state() workbenchSettingsTab: WorkbenchSettingsTab = "general";
+  @state() unreadSessionKeys: string[] = [];
   @state() modelConfigs: WorkbenchModelConfig[] = [createEmptyModelConfig()];
   @state() expandedModelConfigId: string | null = null;
   @state() projectDirectoryDialogOpen = false;
@@ -686,6 +736,13 @@ export class OpenClawPowerApp extends LitElement {
   @state() logsFilterText = "";
   @state() logsAutoFollow = true;
   @state() logsLevelFilters: Record<LogLevel, boolean> = { ...DEFAULT_LOG_LEVEL_FILTERS };
+  @state() statisticsState: StatisticsState = {
+    loading: false,
+    error: null,
+    rangeDays: DEFAULT_STATISTICS_RANGE_DAYS,
+    result: null,
+    lastLoadedRangeDays: null,
+  };
 
   @state() agentsList: AgentsListResult | null = null;
   @state() agentIdentityById: Record<string, AgentIdentityResult> = {};
@@ -845,6 +902,30 @@ export class OpenClawPowerApp extends LitElement {
       this.agentsList?.defaultId ??
       null
     );
+  }
+
+  private markSessionUnread(sessionKey: string | null) {
+    const key = sessionKey?.trim() ?? "";
+    if (!key || this.workbenchSelectedSessionKey === key || this.unreadSessionKeys.includes(key)) {
+      return;
+    }
+    this.unreadSessionKeys = [...this.unreadSessionKeys, key];
+  }
+
+  private clearSessionUnread(sessionKey: string | null) {
+    const key = sessionKey?.trim() ?? "";
+    if (!key || !this.unreadSessionKeys.includes(key)) {
+      return;
+    }
+    this.unreadSessionKeys = this.unreadSessionKeys.filter((entry) => entry !== key);
+  }
+
+  private pruneUnreadSessions(validSessionKeys: string[]) {
+    const allowed = new Set(validSessionKeys);
+    const next = this.unreadSessionKeys.filter((key) => allowed.has(key));
+    if (next.length !== this.unreadSessionKeys.length) {
+      this.unreadSessionKeys = next;
+    }
   }
 
   private clearPendingChatFiles() {
@@ -1041,6 +1122,7 @@ export class OpenClawPowerApp extends LitElement {
         resetToolStream(runtime as unknown as Parameters<typeof resetToolStream>[0]);
       }
     }
+    this.clearSessionUnread(snapshot.currentSessionKey);
     if (snapshot.currentProjectId && !this.expandedProjectIds.includes(snapshot.currentProjectId)) {
       this.expandedProjectIds = [...this.expandedProjectIds, snapshot.currentProjectId];
     }
@@ -1050,6 +1132,7 @@ export class OpenClawPowerApp extends LitElement {
     const sessionKeys = new Set(
       (snapshot.sessionsResult?.sessions ?? []).map((session) => session.key),
     );
+    this.pruneUnreadSessions(Array.from(sessionKeys));
     if (
       this.treeMenuOpenKey?.startsWith("project:") &&
       !(snapshot.agentsList?.agents ?? []).some(
@@ -1259,6 +1342,79 @@ export class OpenClawPowerApp extends LitElement {
     await this.runControllerAction(loadLogs(this.logsState, { reset, quiet }));
   }
 
+  private normalizeStatisticsRange(value: number): WorkbenchStatisticsRange {
+    return STATISTICS_RANGE_OPTIONS.has(value as WorkbenchStatisticsRange)
+      ? (value as WorkbenchStatisticsRange)
+      : DEFAULT_STATISTICS_RANGE_DAYS;
+  }
+
+  private async loadStatistics(force = false) {
+    const rangeDays = this.normalizeStatisticsRange(this.statisticsState.rangeDays);
+    if (this.statisticsState.loading) {
+      return;
+    }
+    if (!force && this.statisticsState.lastLoadedRangeDays === rangeDays) {
+      return;
+    }
+    this.statisticsState = {
+      ...this.statisticsState,
+      loading: true,
+      error: null,
+      rangeDays,
+    };
+    try {
+      const dateRange = resolveStatisticsDateRange(rangeDays);
+      const result = await this.adapter.request<SessionsUsageResult>("sessions.usage", {
+        startDate: dateRange.startDate,
+        endDate: dateRange.endDate,
+        mode: dateRange.mode,
+        utcOffset: dateRange.utcOffset,
+      });
+      this.statisticsState = {
+        ...this.statisticsState,
+        loading: false,
+        error: null,
+        result,
+        rangeDays,
+        lastLoadedRangeDays: rangeDays,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.statisticsState = {
+        ...this.statisticsState,
+        loading: false,
+        error: message,
+        rangeDays,
+      };
+    }
+  }
+
+  private openSettingsDialog() {
+    this.openModal("settings");
+    if (this.workbenchSettingsTab === "statistics") {
+      void this.loadStatistics();
+    }
+  }
+
+  private changeSettingsTab(value: WorkbenchSettingsTab) {
+    this.workbenchSettingsTab = value;
+    if (value === "statistics" && this.workbenchSettingsOpen) {
+      void this.loadStatistics();
+    }
+  }
+
+  private setStatisticsRange(value: WorkbenchStatisticsRange) {
+    const rangeDays = this.normalizeStatisticsRange(value);
+    this.statisticsState = {
+      ...this.statisticsState,
+      rangeDays,
+      error: null,
+    };
+    if (this.workbenchSettingsOpen && this.workbenchSettingsTab === "statistics") {
+      void this.loadStatistics(true);
+    }
+  }
+
   private startLogsAutoRefresh() {
     if (this.logsRefreshTimer != null) {
       window.clearInterval(this.logsRefreshTimer);
@@ -1428,6 +1584,7 @@ export class OpenClawPowerApp extends LitElement {
     this.stopLogsAutoRefresh();
     this.workbenchSection = "newTask";
     this.workbenchSelectedSessionKey = sessionKey;
+    this.clearSessionUnread(sessionKey);
     this.workbenchSelectedProjectId = projectId;
     this.rightRailCollapsed = false;
     this.newTaskProjectMenuOpen = false;
@@ -1715,6 +1872,7 @@ export class OpenClawPowerApp extends LitElement {
       const projectId =
         parseAgentSessionKey(sessionKey)?.agentId ?? this.workbenchSelectedProjectId ?? null;
       await this.adapter.deleteSession(sessionKey);
+      this.clearSessionUnread(sessionKey);
       if (deletingCurrentSession) {
         this.workbenchSelectedSessionKey = null;
         this.persistSettings({
@@ -2098,6 +2256,7 @@ export class OpenClawPowerApp extends LitElement {
       const { sessionKey } = await this.adapter.startTask(projectId, prompt, this.currentModelId);
       this.workbenchSelectedProjectId = projectId;
       this.workbenchSelectedSessionKey = sessionKey;
+      this.clearSessionUnread(sessionKey);
       this.rightRailCollapsed = false;
       this.resetSessionRuntimeViewState(sessionKey);
       this.persistSettings({
@@ -2212,15 +2371,19 @@ export class OpenClawPowerApp extends LitElement {
       message: event.message,
       errorMessage: event.errorMessage ?? undefined,
     });
-    if (this.workbenchSelectedSessionKey === event.sessionKey) {
+    const isActiveSession = this.workbenchSelectedSessionKey === event.sessionKey;
+    if (!isActiveSession && (event.state === "delta" || event.state === "final")) {
+      this.markSessionUnread(event.sessionKey);
+    }
+    this.bumpChatRuntime();
+    if (isActiveSession) {
       if (event.state === "final" || event.state === "aborted" || event.state === "error") {
         flushToolStreamSync(runtime as unknown as Parameters<typeof flushToolStreamSync>[0]);
       }
-      this.bumpChatRuntime();
       this.scheduleActiveChatScroll(false, event.state === "delta");
     }
     if (nextState === "final" || nextState === "aborted" || nextState === "error") {
-      if (this.workbenchSelectedSessionKey === event.sessionKey) {
+      if (isActiveSession) {
         void this.refreshSnapshot(event.sessionKey, projectId);
       } else {
         void this.refreshSnapshot(
@@ -2251,6 +2414,14 @@ export class OpenClawPowerApp extends LitElement {
 
     const visibleCronJobs = getVisibleCronJobs(this.cronState);
     const activeRuntime = this.activeSessionRuntime;
+    const runningSessionKeys = Object.fromEntries(
+      Array.from(this.chatRuntimeBySessionKey.entries()).flatMap(([sessionKey, runtime]) =>
+        runtime.chatSending || Boolean(runtime.chatRunId) ? [[sessionKey, true] as const] : [],
+      ),
+    );
+    const unreadSessionKeys = Object.fromEntries(
+      this.unreadSessionKeys.map((sessionKey) => [sessionKey, true] as const),
+    );
     const selectedDeliveryChannel =
       this.cronState.cronForm.deliveryChannel && this.cronState.cronForm.deliveryChannel.trim()
         ? this.cronState.cronForm.deliveryChannel.trim()
@@ -2527,6 +2698,25 @@ export class OpenClawPowerApp extends LitElement {
         localeOptions: SETTINGS_LOCALE_OPTIONS.map((option) => ({ ...option })),
         modelConfigs: this.modelConfigs,
         expandedModelConfigId: this.expandedModelConfigId,
+        statistics: {
+          loading: this.statisticsState.loading,
+          error: this.statisticsState.error,
+          selectedRangeDays: this.statisticsState.rangeDays,
+          totalTokens: this.statisticsState.result?.totals.totalTokens ?? 0,
+          inputTokens: this.statisticsState.result?.totals.input ?? 0,
+          outputTokens: this.statisticsState.result?.totals.output ?? 0,
+          cacheTokens:
+            (this.statisticsState.result?.totals.cacheRead ?? 0) +
+            (this.statisticsState.result?.totals.cacheWrite ?? 0),
+          sessionCount: this.statisticsState.result?.sessions.length ?? 0,
+          updatedAt: this.statisticsState.result?.updatedAt ?? null,
+          onRangeChange: (value) => {
+            this.setStatisticsRange(value);
+          },
+          onRefresh: () => {
+            void this.loadStatistics(true);
+          },
+        },
         onLocaleChange: (value) => {
           void this.setLocale(value);
         },
@@ -2556,6 +2746,8 @@ export class OpenClawPowerApp extends LitElement {
       settingsOpen: this.workbenchSettingsOpen,
       settingsClosing: this.workbenchSettingsClosing,
       settingsTab: this.workbenchSettingsTab,
+      runningSessionKeys,
+      unreadSessionKeys,
       onNavigateLegacy: () => {
         const base = this.basePath || "";
         window.location.href = `${base}/overview`;
@@ -2656,13 +2848,13 @@ export class OpenClawPowerApp extends LitElement {
         void this.abortCurrentRun();
       },
       onOpenSettings: () => {
-        this.openModal("settings");
+        this.openSettingsDialog();
       },
       onCloseSettings: () => {
         this.closeModal("settings");
       },
       onSettingsTabChange: (value) => {
-        this.workbenchSettingsTab = value;
+        this.changeSettingsTab(value);
       },
       onModelChange: (value) => {
         this.currentModelId = this.resolveAvailableModelRef(value);
