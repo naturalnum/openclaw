@@ -135,7 +135,21 @@ RUN --mount=type=cache,id=openclaw-bookworm-apt-cache,target=/var/cache/apt,shar
     apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      procps hostname curl git lsof openssl
+      procps hostname curl git lsof openssl \
+      python3 python3-pip libreoffice poppler-utils
+
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
+ENV PIP_DEFAULT_TIMEOUT=300
+ENV PIP_RETRIES=10
+
+# Install the minimal Python runtime needed by technical-report-docx.
+COPY skills/technical-report-docx/scripts/requirements.txt /tmp/technical-report-docx.requirements.txt
+RUN python3 -m pip install --upgrade pip setuptools wheel && \
+    python3 -m pip install \
+      --default-timeout="$PIP_DEFAULT_TIMEOUT" \
+      --retries="$PIP_RETRIES" \
+      -r /tmp/technical-report-docx.requirements.txt && \
+    rm -f /tmp/technical-report-docx.requirements.txt
 
 RUN chown node:node /app
 
