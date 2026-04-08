@@ -94,6 +94,17 @@ export type WorkbenchProps = {
   projectFilesAgentId: string | null;
   projectFilesWorkspace: string | null;
   projectFilesEntries: WorkbenchFileEntry[];
+  selectedProjectEntryPath: string | null;
+  filePreviewOpen: boolean;
+  filePreviewClosing: boolean;
+  filePreviewLoading: boolean;
+  filePreviewError: string | null;
+  filePreviewAgentId: string | null;
+  filePreviewName: string;
+  filePreviewPath: string | null;
+  filePreviewMode: "text" | "image" | "pdf" | null;
+  filePreviewTextContent: string;
+  filePreviewObjectUrl: string | null;
   sessionsResult: SessionsListResult | null;
   chatMessages: unknown[];
   chatMessage: string;
@@ -218,6 +229,10 @@ export type WorkbenchProps = {
   onRefreshFileManager: () => void;
   onOpenProjectFilePicker: (agentId: string, path: string | null) => void;
   onDownloadProjectFile: (agentId: string, path: string) => void;
+  onPreviewProjectFile: (agentId: string, entry: WorkbenchFileEntry) => void;
+  onSelectProjectEntry: (path: string | null) => void;
+  onClearProjectEntrySelection: () => void;
+  onCloseFilePreview: () => void;
   onDeleteProjectEntry: (agentId: string, path: string) => void;
   onToggleCreateFolder: () => void;
   onFileManagerFolderNameChange: (value: string) => void;
@@ -454,6 +469,107 @@ export function renderWorkbench(props: WorkbenchProps) {
           ? renderProjectDirectoryDialog(props)
           : nothing
       }
+      ${props.filePreviewOpen || props.filePreviewClosing ? renderFilePreviewDialog(props) : nothing}
+    </div>
+  `;
+}
+
+function renderFilePreviewDialog(props: WorkbenchProps) {
+  const locale = props.settings.locale;
+  const stateClass = dialogStateClass(props.filePreviewOpen, props.filePreviewClosing);
+  return html`
+    <div class="workbench-overlay ${stateClass}" aria-hidden=${String(!props.filePreviewOpen)}>
+      <button
+        type="button"
+        class="workbench-overlay__backdrop"
+        aria-label=${tLocale(locale, "Close preview", "关闭预览")}
+        @click=${props.onCloseFilePreview}
+      ></button>
+      <div class="workbench-dialog workbench-dialog--preview ${stateClass}">
+        <div class="workbench-dialog__topbar">
+          <div class="workbench-preview-dialog__header">
+            <div class="workbench-preview-dialog__title-row">
+              <div class="workbench-preview-dialog__title-wrap">
+                <h3>${props.filePreviewName || tLocale(locale, "File Preview", "文件预览")}</h3>
+              </div>
+              <div class="workbench-preview-dialog__actions">
+                ${
+                  props.filePreviewAgentId && props.filePreviewPath
+                    ? html`
+                        <button
+                          type="button"
+                          class="workbench-icon-button"
+                          title=${tLocale(locale, "Download file", "下载文件")}
+                          aria-label=${tLocale(locale, "Download file", "下载文件")}
+                          @click=${() =>
+                            props.onDownloadProjectFile(
+                              props.filePreviewAgentId!,
+                              props.filePreviewPath!,
+                            )}
+                        >
+                          ${icons.download}
+                        </button>
+                      `
+                    : nothing
+                }
+                <button
+                  type="button"
+                  class="workbench-icon-button"
+                  title=${tLocale(locale, "Close", "关闭")}
+                  aria-label=${tLocale(locale, "Close", "关闭")}
+                  @click=${props.onCloseFilePreview}
+                >
+                  ${icons.x}
+                </button>
+              </div>
+            </div>
+            ${
+              props.filePreviewPath
+                ? html`
+                    <span class="workbench-preview-dialog__path" title=${props.filePreviewPath}
+                      >${props.filePreviewPath}</span
+                    >
+                  `
+                : nothing
+            }
+          </div>
+        </div>
+        <div class="workbench-dialog__body workbench-preview-dialog__body">
+          ${
+            props.filePreviewLoading
+              ? html`<div class="workbench-skeleton">${tLocale(locale, "Loading preview...", "正在加载预览...")}</div>`
+              : props.filePreviewError
+                ? html`<div class="workbench-callout workbench-callout--danger">${props.filePreviewError}</div>`
+                : props.filePreviewMode === "text"
+                  ? html`
+                      <pre class="workbench-preview-dialog__text"><code>${props.filePreviewTextContent}</code></pre>
+                    `
+                  : props.filePreviewMode === "image" && props.filePreviewObjectUrl
+                    ? html`
+                        <div class="workbench-preview-dialog__media-shell">
+                          <img
+                            class="workbench-preview-dialog__image"
+                            src=${props.filePreviewObjectUrl}
+                            alt=${props.filePreviewName}
+                          />
+                        </div>
+                      `
+                    : props.filePreviewMode === "pdf" && props.filePreviewObjectUrl
+                      ? html`
+                          <iframe
+                            class="workbench-preview-dialog__pdf"
+                            src=${props.filePreviewObjectUrl}
+                            title=${props.filePreviewName}
+                          ></iframe>
+                        `
+                      : html`
+                          <div class="workbench-empty workbench-empty--tiny">
+                            ${tLocale(locale, "Preview unavailable.", "当前文件暂不支持预览。")}
+                          </div>
+                        `
+          }
+        </div>
+      </div>
     </div>
   `;
 }
@@ -1439,6 +1555,11 @@ function renderProjectFilesBrowser(
               ? "workbench-sidecard__body workbench-sidecard__body--scroll workbench-sidecard__body--fill"
               : "workbench-sidecard__body workbench-sidecard__body--scroll"
           }
+          @click=${(event: Event) => {
+            if (event.target === event.currentTarget) {
+              props.onClearProjectEntrySelection();
+            }
+          }}
         >
           ${
             error
@@ -1463,7 +1584,10 @@ function renderProjectFilesBrowser(
                     (entry) => entry.path,
                     (entry) => html`
                     <div
-                      class="workbench-mini-row workbench-mini-row--file workbench-mini-row--hoverable"
+                      class="workbench-mini-row workbench-mini-row--file workbench-mini-row--hoverable ${
+                        props.selectedProjectEntryPath === entry.path ? "is-selected" : ""
+                      }"
+                      @click=${() => props.onSelectProjectEntry(entry.path)}
                     >
                       <span class="workbench-mini-row__icon">
                         ${entry.kind === "directory" ? icons.folder : icons.fileText}
@@ -1474,8 +1598,14 @@ function renderProjectFilesBrowser(
                           entry.kind === "directory" ? "is-directory" : ""
                         }"
                         title=${entry.name}
-                        @dblclick=${() =>
-                          entry.kind === "directory" && props.onNavigateFileManager(entry.path)}
+                        @click=${() => props.onSelectProjectEntry(entry.path)}
+                        @dblclick=${() => {
+                          if (entry.kind === "directory") {
+                            props.onNavigateFileManager(entry.path);
+                            return;
+                          }
+                          props.onPreviewProjectFile(project.id, entry);
+                        }}
                       >
                         <span class="workbench-mini-row__name">${entry.name}</span>
                         <div class="workbench-mini-row__meta">
@@ -1496,7 +1626,10 @@ function renderProjectFilesBrowser(
                                 title=${tLocale(locale, "Download file", "下载文件")}
                                 aria-label=${tLocale(locale, "Download file", "下载文件")}
                                 ?disabled=${busyPath === entry.path}
-                                @click=${() => props.onDownloadProjectFile(project.id, entry.path)}
+                                @click=${(event: Event) => {
+                                  event.stopPropagation();
+                                  props.onDownloadProjectFile(project.id, entry.path);
+                                }}
                               >
                                 ${icons.download}
                               </button>
@@ -1517,7 +1650,10 @@ function renderProjectFilesBrowser(
                               : tLocale(locale, "Delete file", "删除文件")
                           }
                           ?disabled=${busyPath === entry.path}
-                          @click=${() => props.onDeleteProjectEntry(project.id, entry.path)}
+                          @click=${(event: Event) => {
+                            event.stopPropagation();
+                            props.onDeleteProjectEntry(project.id, entry.path);
+                          }}
                         >
                           ${icons.trash}
                         </button>

@@ -69,6 +69,6 @@ fi
 
 docker build "${docker_build_args[@]}" "$CTX_DIR"
 
-pnpm install --reporter=silent
+CI=true pnpm install --reporter=silent
 
 echo "Built image: $IMAGE_TAG"

@@ -18,6 +18,8 @@ import type {
   WorkbenchDirectoryCreateResult,
   WorkbenchAdapter,
   WorkbenchAdapterEvent,
+  WorkbenchFilePreviewMode,
+  WorkbenchFilePreviewResult,
   WorkbenchDirectoryListResult,
   WorkbenchDirectoryRootsResult,
   WorkbenchFileEntry,
@@ -315,7 +317,7 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
   ): Promise<WorkbenchFileEntry[]> {
     for (const file of files) {
       await this.gateway.uploadHttpFile({
-        routePath: "/api/power/fs/upload",
+        routePath: "/plugins/power-backend/fs/upload",
         query: {
           agentId,
           path: path?.trim() || "",
@@ -327,7 +329,7 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
     return [];
   }
 
-  async downloadProjectFile(agentId: string, path: string): Promise<void> {
+  private async createPowerFsTicket(agentId: string, path: string) {
     const issued = await requiredRequest<PowerFsDownloadTicketResult>(
       this.gateway.request("power.fs.createDownloadTicket", {
         agentId,
@@ -339,10 +341,40 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
     if (!ticket) {
       throw new Error("power.fs.createDownloadTicket returned no ticket");
     }
-    await this.gateway.submitHttpDownload({
+    return {
       routePath: issued.routePath?.trim() || "/plugins/power-backend/fs/download",
+      ticket,
+    };
+  }
+
+  async previewProjectFile(
+    agentId: string,
+    path: string,
+    mode: WorkbenchFilePreviewMode,
+  ): Promise<WorkbenchFilePreviewResult> {
+    const issued = await this.createPowerFsTicket(agentId, path);
+    const blob = await this.gateway.fetchHttpBlob({
+      routePath: issued.routePath,
+      fields: { ticket: issued.ticket },
+    });
+    if (mode === "text") {
+      return {
+        mode,
+        content: await blob.text(),
+      };
+    }
+    return {
+      mode,
+      blob,
+    };
+  }
+
+  async downloadProjectFile(agentId: string, path: string): Promise<void> {
+    const issued = await this.createPowerFsTicket(agentId, path);
+    await this.gateway.submitHttpDownload({
+      routePath: issued.routePath,
       fields: {
-        ticket,
+        ticket: issued.ticket,
       },
     });
   }

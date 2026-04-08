@@ -9,6 +9,8 @@ import type {
   WorkbenchDirectoryListResult,
   WorkbenchDirectoryRootsResult,
   WorkbenchFileEntry,
+  WorkbenchFilePreviewMode,
+  WorkbenchFilePreviewResult,
   WorkbenchFileListResult,
   WorkbenchSendResult,
   WorkbenchUploadedFile,
@@ -793,6 +795,26 @@ export class MockWorkbenchAdapter implements WorkbenchAdapter {
   async downloadProjectFile(agentId: string, filePath: string): Promise<void> {
     void this.requireProject(agentId);
     void filePath;
+  }
+
+  async previewProjectFile(
+    agentId: string,
+    filePath: string,
+    mode: WorkbenchFilePreviewMode,
+  ): Promise<WorkbenchFilePreviewResult> {
+    void this.requireProject(agentId);
+    if (mode === "text") {
+      return {
+        mode,
+        content: `Preview is not backed by a real workspace in mock mode.\n\n${filePath}`,
+      };
+    }
+    return {
+      mode,
+      blob: new Blob([`Mock preview for ${filePath}`], {
+        type: mode === "image" ? "image/png" : "application/pdf",
+      }),
+    };
   }
 
   async deleteProjectEntry(agentId: string, filePath: string): Promise<void> {

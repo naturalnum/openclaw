@@ -249,7 +249,13 @@ export default function register(api: OpenClawPluginApi) {
     auth: "plugin",
     match: "exact",
     handler: async (req, res) => {
+      applyCors(req, res);
       const method = (req.method ?? "GET").toUpperCase();
+      if (method === "OPTIONS") {
+        res.statusCode = 204;
+        res.end();
+        return true;
+      }
       if (method !== "GET" && method !== "POST") {
         sendText(res, 405, "Method Not Allowed");
         return true;

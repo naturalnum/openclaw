@@ -8,6 +8,7 @@ import type {
   WorkbenchAdapterEvent,
   WorkbenchDirectoryEntry,
   WorkbenchFileEntry,
+  WorkbenchFilePreviewMode,
   WorkbenchUploadedFile,
 } from "./adapters/workbench-adapter.ts";
 import {
@@ -552,6 +553,96 @@ type StatisticsState = {
   lastLoadedRangeDays: WorkbenchStatisticsRange | null;
 };
 
+type FilePreviewState = {
+  loading: boolean;
+  error: string | null;
+  agentId: string | null;
+  path: string | null;
+  name: string;
+  mode: WorkbenchFilePreviewMode | null;
+  textContent: string;
+  objectUrl: string | null;
+};
+
+const TEXT_PREVIEW_MAX_BYTES = 1024 * 1024;
+const TEXT_PREVIEW_EXTENSIONS = new Set([
+  "txt",
+  "md",
+  "json",
+  "js",
+  "ts",
+  "tsx",
+  "jsx",
+  "css",
+  "html",
+  "xml",
+  "yaml",
+  "yml",
+  "toml",
+  "sh",
+  "py",
+  "java",
+  "go",
+  "rs",
+  "sql",
+  "log",
+  "csv",
+]);
+const IMAGE_PREVIEW_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "gif", "svg", "bmp"]);
+
+function resolveFileExtension(name: string): string {
+  const dotIndex = name.lastIndexOf(".");
+  return dotIndex >= 0
+    ? name
+        .slice(dotIndex + 1)
+        .trim()
+        .toLowerCase()
+    : "";
+}
+
+function resolvePreviewMode(entry: WorkbenchFileEntry): WorkbenchFilePreviewMode | null {
+  const extension = resolveFileExtension(entry.name);
+  if (!extension) {
+    return null;
+  }
+  if (extension === "pdf") {
+    return "pdf";
+  }
+  if (IMAGE_PREVIEW_EXTENSIONS.has(extension)) {
+    return "image";
+  }
+  if (TEXT_PREVIEW_EXTENSIONS.has(extension)) {
+    return "text";
+  }
+  return null;
+}
+
+function resolvePreviewMimeType(mode: WorkbenchFilePreviewMode, fileName: string): string {
+  const extension = resolveFileExtension(fileName);
+  if (mode === "pdf") {
+    return "application/pdf";
+  }
+  if (mode === "image") {
+    if (extension === "svg") {
+      return "image/svg+xml";
+    }
+    if (extension === "jpg" || extension === "jpeg") {
+      return "image/jpeg";
+    }
+    if (extension === "gif") {
+      return "image/gif";
+    }
+    if (extension === "webp") {
+      return "image/webp";
+    }
+    if (extension === "bmp") {
+      return "image/bmp";
+    }
+    return "image/png";
+  }
+  return "text/plain; charset=utf-8";
+}
+
 @customElement("openclaw-power-app")
 export class OpenClawPowerApp extends LitElement {
   private i18nController = new I18nController(this);
@@ -725,6 +816,7 @@ export class OpenClawPowerApp extends LitElement {
   @state() fileManagerCurrentName: string | null = null;
   @state() fileManagerParentPath: string | null = null;
   @state() fileManagerEntries: WorkbenchFileEntry[] = [];
+  @state() selectedProjectEntryPath: string | null = null;
   @state() fileManagerBusyPath: string | null = null;
   @state() fileManagerCreateFolderOpen = false;
   @state() fileManagerNewFolderName = "";
@@ -733,6 +825,18 @@ export class OpenClawPowerApp extends LitElement {
   @state() projectFilesAgentId: string | null = null;
   @state() projectFilesWorkspace: string | null = null;
   @state() projectFilesEntries: WorkbenchFileEntry[] = [];
+  @state() filePreviewOpen = false;
+  @state() filePreviewClosing = false;
+  @state() filePreviewState: FilePreviewState = {
+    loading: false,
+    error: null,
+    agentId: null,
+    path: null,
+    name: "",
+    mode: null,
+    textContent: "",
+    objectUrl: null,
+  };
   @state() logsFilterText = "";
   @state() logsAutoFollow = true;
   @state() logsLevelFilters: Record<LogLevel, boolean> = { ...DEFAULT_LOG_LEVEL_FILTERS };
@@ -764,7 +868,7 @@ export class OpenClawPowerApp extends LitElement {
   private readonly initialSessionKeyFromUrl = INITIAL_SETTINGS.urlSessionKey;
   private pendingProjectFileUploadAgentId: string | null = null;
   private pendingProjectFileUploadPath: string | null = null;
-  private modalCloseTimers = new Map<"settings" | "projectDirectory", number>();
+  private modalCloseTimers = new Map<"settings" | "projectDirectory" | "filePreview", number>();
   private modelConfigPersistTimer: number | null = null;
   private modelConfigPersistInFlight = false;
   private modelConfigPersistQueued = false;
@@ -783,6 +887,7 @@ export class OpenClawPowerApp extends LitElement {
     this.adapterUnsubscribe?.();
     this.adapterUnsubscribe = null;
     this.adapter.dispose?.();
+    this.resetFilePreviewState();
     document.removeEventListener("pointerdown", this.handleDocumentPointerDown, true);
     if (this.modelConfigPersistTimer != null) {
       window.clearTimeout(this.modelConfigPersistTimer);
@@ -799,15 +904,22 @@ export class OpenClawPowerApp extends LitElement {
     super.disconnectedCallback();
   }
 
-  private setModalClosingState(key: "settings" | "projectDirectory", value: boolean) {
+  private setModalClosingState(
+    key: "settings" | "projectDirectory" | "filePreview",
+    value: boolean,
+  ) {
     if (key === "settings") {
       this.workbenchSettingsClosing = value;
       return;
     }
-    this.projectDirectoryDialogClosing = value;
+    if (key === "projectDirectory") {
+      this.projectDirectoryDialogClosing = value;
+      return;
+    }
+    this.filePreviewClosing = value;
   }
 
-  private openModal(key: "settings" | "projectDirectory") {
+  private openModal(key: "settings" | "projectDirectory" | "filePreview") {
     const existing = this.modalCloseTimers.get(key);
     if (typeof existing === "number") {
       window.clearTimeout(existing);
@@ -818,18 +930,24 @@ export class OpenClawPowerApp extends LitElement {
       this.workbenchSettingsOpen = true;
       return;
     }
-    this.projectDirectoryDialogOpen = true;
+    if (key === "projectDirectory") {
+      this.projectDirectoryDialogOpen = true;
+      return;
+    }
+    this.filePreviewOpen = true;
   }
 
-  private closeModal(key: "settings" | "projectDirectory", onClosed?: () => void) {
+  private closeModal(key: "settings" | "projectDirectory" | "filePreview", onClosed?: () => void) {
     const existing = this.modalCloseTimers.get(key);
     if (typeof existing === "number") {
       window.clearTimeout(existing);
     }
     if (key === "settings") {
       this.workbenchSettingsOpen = false;
-    } else {
+    } else if (key === "projectDirectory") {
       this.projectDirectoryDialogOpen = false;
+    } else {
+      this.filePreviewOpen = false;
     }
     this.setModalClosingState(key, true);
     const timer = window.setTimeout(() => {
@@ -1602,15 +1720,21 @@ export class OpenClawPowerApp extends LitElement {
   }
 
   private openChatFilePicker() {
-    const input = this.querySelector<HTMLInputElement>("[data-chat-file-input]");
-    input?.click();
+    const input = this.renderRoot.querySelector<HTMLInputElement>("[data-chat-file-input]");
+    if (!input) {
+      return;
+    }
+    input.click();
   }
 
   private openProjectFilePicker(agentId: string, path: string | null) {
     this.pendingProjectFileUploadAgentId = agentId;
     this.pendingProjectFileUploadPath = path;
-    const input = this.querySelector<HTMLInputElement>("[data-project-file-input]");
-    input?.click();
+    const input = this.renderRoot.querySelector<HTMLInputElement>("[data-project-file-input]");
+    if (!input) {
+      return;
+    }
+    input.click();
   }
 
   private clearFileManagerState() {
@@ -1622,6 +1746,7 @@ export class OpenClawPowerApp extends LitElement {
     this.fileManagerCurrentName = null;
     this.fileManagerParentPath = null;
     this.fileManagerEntries = [];
+    this.selectedProjectEntryPath = null;
     this.fileManagerBusyPath = null;
     this.fileManagerCreateFolderOpen = false;
     this.fileManagerNewFolderName = "";
@@ -1633,6 +1758,43 @@ export class OpenClawPowerApp extends LitElement {
     this.projectFilesAgentId = null;
     this.projectFilesWorkspace = null;
     this.projectFilesEntries = [];
+    this.selectedProjectEntryPath = null;
+  }
+
+  private revokeFilePreviewUrl() {
+    const objectUrl = this.filePreviewState.objectUrl;
+    if (objectUrl) {
+      URL.revokeObjectURL(objectUrl);
+    }
+  }
+
+  private resetFilePreviewState() {
+    this.revokeFilePreviewUrl();
+    this.filePreviewState = {
+      loading: false,
+      error: null,
+      agentId: null,
+      path: null,
+      name: "",
+      mode: null,
+      textContent: "",
+      objectUrl: null,
+    };
+  }
+
+  private setSelectedProjectEntry(path: string | null) {
+    const next = path?.trim() || null;
+    this.selectedProjectEntryPath = next;
+  }
+
+  private syncSelectedProjectEntry(entries: WorkbenchFileEntry[]) {
+    const selected = this.selectedProjectEntryPath;
+    if (!selected) {
+      return;
+    }
+    if (!entries.some((entry) => entry.path === selected)) {
+      this.selectedProjectEntryPath = null;
+    }
   }
 
   private async refreshProjectFiles(agentId = this.workbenchSelectedProjectId) {
@@ -1660,6 +1822,7 @@ export class OpenClawPowerApp extends LitElement {
       this.fileManagerCurrentName = listing.name;
       this.fileManagerParentPath = listing.parentPath;
       this.fileManagerEntries = listing.entries;
+      this.syncSelectedProjectEntry(listing.entries);
       this.lastError = null;
     } catch (error) {
       if ((this.workbenchSelectedProjectId ?? "") !== targetAgentId) {
@@ -1678,6 +1841,7 @@ export class OpenClawPowerApp extends LitElement {
       this.fileManagerCurrentName = null;
       this.fileManagerParentPath = null;
       this.fileManagerEntries = [];
+      this.selectedProjectEntryPath = null;
     } finally {
       if ((this.workbenchSelectedProjectId ?? "") === targetAgentId) {
         this.projectFilesLoading = false;
@@ -1694,6 +1858,7 @@ export class OpenClawPowerApp extends LitElement {
     this.fileManagerCurrentName = listing.name;
     this.fileManagerParentPath = listing.parentPath;
     this.fileManagerEntries = listing.entries;
+    this.selectedProjectEntryPath = null;
     this.fileManagerCreateFolderOpen = false;
     this.fileManagerNewFolderName = "";
   }
@@ -1764,6 +1929,9 @@ export class OpenClawPowerApp extends LitElement {
     try {
       this.fileManagerBusyPath = path;
       await this.adapter.deleteProjectEntry(agentId, path);
+      if (this.selectedProjectEntryPath === path) {
+        this.selectedProjectEntryPath = null;
+      }
       await this.refreshProjectFiles(agentId);
       await this.refreshSnapshot();
       this.lastError = null;
@@ -1901,6 +2069,67 @@ export class OpenClawPowerApp extends LitElement {
       this.fileManagerError = this.lastError;
     } finally {
       this.fileManagerBusyPath = null;
+    }
+  }
+
+  private closeFilePreview() {
+    this.closeModal("filePreview", () => {
+      this.resetFilePreviewState();
+    });
+  }
+
+  private async previewProjectFile(agentId: string, entry: WorkbenchFileEntry) {
+    const mode = resolvePreviewMode(entry);
+    if (!mode) {
+      await this.downloadProjectFile(agentId, entry.path);
+      return;
+    }
+    if (mode === "text" && typeof entry.size === "number" && entry.size > TEXT_PREVIEW_MAX_BYTES) {
+      this.lastError = "文本文件超过 1MB，请下载后查看。";
+      this.fileManagerError = this.lastError;
+      return;
+    }
+    this.openModal("filePreview");
+    this.revokeFilePreviewUrl();
+    this.filePreviewState = {
+      loading: true,
+      error: null,
+      agentId,
+      path: entry.path,
+      name: entry.name,
+      mode,
+      textContent: "",
+      objectUrl: null,
+    };
+    try {
+      const preview = await this.adapter.previewProjectFile(agentId, entry.path, mode);
+      if (preview.mode === "text") {
+        this.filePreviewState = {
+          ...this.filePreviewState,
+          loading: false,
+          textContent: preview.content,
+        };
+      } else {
+        const mimeType = resolvePreviewMimeType(preview.mode, entry.name);
+        const blob = preview.blob.type
+          ? preview.blob
+          : new Blob([preview.blob], { type: mimeType });
+        const objectUrl = URL.createObjectURL(blob);
+        this.filePreviewState = {
+          ...this.filePreviewState,
+          loading: false,
+          objectUrl,
+        };
+      }
+      this.lastError = null;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.filePreviewState = {
+        ...this.filePreviewState,
+        loading: false,
+        error: message,
+      };
+      this.lastError = message;
     }
   }
 
@@ -2451,6 +2680,17 @@ export class OpenClawPowerApp extends LitElement {
       projectFilesAgentId: this.projectFilesAgentId,
       projectFilesWorkspace: this.projectFilesWorkspace,
       projectFilesEntries: this.projectFilesEntries,
+      selectedProjectEntryPath: this.selectedProjectEntryPath,
+      filePreviewOpen: this.filePreviewOpen,
+      filePreviewClosing: this.filePreviewClosing,
+      filePreviewLoading: this.filePreviewState.loading,
+      filePreviewError: this.filePreviewState.error,
+      filePreviewAgentId: this.filePreviewState.agentId,
+      filePreviewName: this.filePreviewState.name,
+      filePreviewPath: this.filePreviewState.path,
+      filePreviewMode: this.filePreviewState.mode,
+      filePreviewTextContent: this.filePreviewState.textContent,
+      filePreviewObjectUrl: this.filePreviewState.objectUrl,
       sessionsResult: this.sessionsResult,
       chatMessages: activeRuntime?.chatMessages ?? [],
       chatMessage: this.chatMessage,
@@ -2928,6 +3168,18 @@ export class OpenClawPowerApp extends LitElement {
       },
       onDownloadProjectFile: (agentId, path) => {
         void this.downloadProjectFile(agentId, path);
+      },
+      onPreviewProjectFile: (agentId, entry) => {
+        void this.previewProjectFile(agentId, entry);
+      },
+      onSelectProjectEntry: (path) => {
+        this.setSelectedProjectEntry(path);
+      },
+      onClearProjectEntrySelection: () => {
+        this.setSelectedProjectEntry(null);
+      },
+      onCloseFilePreview: () => {
+        this.closeFilePreview();
       },
       onDeleteProjectEntry: (agentId, path) => {
         void this.deleteProjectEntry(agentId, path);

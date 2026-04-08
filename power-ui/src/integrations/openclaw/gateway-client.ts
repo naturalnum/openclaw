@@ -114,6 +114,29 @@ export class PowerGatewayClient {
     }, 1000);
   }
 
+  async fetchHttpBlob(params: {
+    routePath: string;
+    fields: Record<string, string | null | undefined>;
+  }): Promise<Blob> {
+    await this.ensureConnected();
+    const settings = this.getSettings();
+    const token = settings.token?.trim() || "";
+    const query: Record<string, string | null | undefined> = { ...params.fields };
+    if (!("token" in query) && token) {
+      query.token = token;
+    }
+    const url = buildHttpRouteUrl(settings.gatewayUrl, params.routePath, query);
+    const response = await fetch(url, {
+      method: "GET",
+      credentials: "omit",
+    });
+    if (!response.ok) {
+      const message = (await response.text().catch(() => "")).trim();
+      throw new Error(message || `HTTP ${response.status}`);
+    }
+    return await response.blob();
+  }
+
   async ensureConnected(): Promise<GatewayBrowserClient> {
     const settings = this.getSettings();
     const key = `${settings.gatewayUrl.trim()}::${settings.token?.trim() ?? ""}`;

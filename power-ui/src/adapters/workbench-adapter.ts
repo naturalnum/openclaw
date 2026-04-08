@@ -51,6 +51,18 @@ export type WorkbenchUploadedFile = {
   file: File;
 };
 
+export type WorkbenchFilePreviewMode = "text" | "image" | "pdf";
+
+export type WorkbenchFilePreviewResult =
+  | {
+      mode: "text";
+      content: string;
+    }
+  | {
+      mode: "image" | "pdf";
+      blob: Blob;
+    };
+
 export type WorkbenchWorkspaceValidationResult = {
   ok: boolean;
   path: string;
@@ -109,6 +121,11 @@ export interface WorkbenchAdapter {
     path: string | null,
     files: WorkbenchUploadedFile[],
   ): Promise<WorkbenchFileEntry[]>;
+  previewProjectFile(
+    agentId: string,
+    path: string,
+    mode: WorkbenchFilePreviewMode,
+  ): Promise<WorkbenchFilePreviewResult>;
   downloadProjectFile(agentId: string, path: string): Promise<void>;
   deleteProjectEntry(agentId: string, path: string): Promise<void>;
   renameProject(projectId: string, name: string): Promise<void>;
