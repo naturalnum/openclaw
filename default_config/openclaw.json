@@ -1,0 +1,116 @@
+{
+  "meta": {
+    "lastTouchedVersion": "2026.3.14"
+  },
+  "agents": {
+    "defaults": {
+      "workspace": "/home/node/.openclaw/workspace",
+      "compaction": {
+        "mode": "safeguard"
+      },
+      "maxConcurrent": 4,
+      "subagents": {
+        "maxConcurrent": 8
+      }
+    }
+  },
+  "tools": {
+    "profile": "coding"
+  },
+  "commands": {
+    "native": "auto",
+    "nativeSkills": "auto",
+    "restart": true,
+    "ownerDisplay": "raw"
+  },
+  "messages": {
+    "ackReactionScope": "group-mentions"
+  },
+  "session": {
+    "dmScope": "per-channel-peer"
+  },
+  "gateway": {
+    "port": 18789,
+    "mode": "local",
+    "bind": "lan",
+    "auth": {
+      "mode": "token",
+      "token": "openclaw-local-token"
+    },
+    "controlUi": {
+      "root": "/app/dist/power-ui",
+      "allowedOrigins": ["*"],
+      "dangerouslyAllowHostHeaderOriginFallback": true,
+      "allowInsecureAuth": true,
+      "dangerouslyDisableDeviceAuth": true
+    },
+    "tailscale": {
+      "mode": "off",
+      "resetOnExit": false
+    }
+  },
+  "plugins": {
+    "allow": [
+      "power-backend",
+      "network-guard-plugin",
+      "workspace-guard-plugin",
+      "high-risk-command-guard-plugin"
+    ],
+    "entries": {
+      "power-backend": {
+        "enabled": true,
+        "config": {
+          "roots": ["/home/node/.openclaw/workspace"]
+        }
+      },
+      "workspace-guard-plugin": {
+        "enabled": true,
+        "config": {
+          "readonlyPaths": []
+        }
+      },
+      "network-guard-plugin": {
+        "enabled": true,
+        "config": {
+          "blockedHosts": [],
+          "blockedUrlPrefixes": [],
+          "blockedCommands": ["curl", "wget", "ssh", "scp", "sftp", "nc", "ncat", "telnet"]
+        }
+      },
+      "high-risk-command-guard-plugin": {
+        "enabled": true,
+        "config": {
+          "blockedCommands": [
+            "chmod",
+            "chown",
+            "chattr",
+            "setfacl",
+            "passwd",
+            "iptables",
+            "nft",
+            "ip",
+            "ifconfig",
+            "route",
+            "systemctl",
+            "service",
+            "shutdown",
+            "reboot",
+            "poweroff",
+            "halt",
+            "kill",
+            "killall",
+            "pkill"
+          ],
+          "blockedSubstrings": ["rm -rf *"]
+        }
+      }
+    }
+  },
+  "skills": {
+    "registry": {
+      "enabled": true,
+      "baseUrl": "http://127.0.0.1:3000",
+      "timeoutMs": 10000
+    }
+  }
+}
