@@ -17,7 +17,9 @@
 set -euo pipefail
 
 IMAGE_TAG="${1:-openclaw:local}"
-NODE_IMAGE="${2:-hub.rat.dev/node:24-bookworm-slim}"
+# default to arm64 for now  | linux/amd64 for now
+PLATFORM="${2:-linux/arm64}"
+NODE_IMAGE="${3:-hub.rat.dev/node:24-bookworm-slim}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CTX_DIR="$(mktemp -d /tmp/openclaw-docker-ctx.XXXXXX)"
@@ -33,6 +35,7 @@ echo "  OpenClaw local Docker image builder"
 echo "========================================"
 echo "  Image tag : $IMAGE_TAG"
 echo "  Node image : $NODE_IMAGE"
+echo "  Platform   : $PLATFORM"
 echo "  Repo root  : $REPO_ROOT"
 echo "========================================"
 echo ""
@@ -115,9 +118,9 @@ find "$CTX_DIR/dist" -type f \( -name '*.d.ts' -o -name '*.d.mts' -o -name '*.d.
 spinner $! "Stripping .d.ts / .map files"
 
 # ── 3. Build image ───────────────────────────────────────────────────────────
-echo "→ Building Docker image: $IMAGE_TAG (linux/amd64) ..."
+echo "→ Building Docker image: $IMAGE_TAG ($PLATFORM) ..."
 docker build \
-  --platform linux/amd64 \
+  --platform "$PLATFORM" \
   --build-arg NODE_IMAGE="$NODE_IMAGE" \
   -t "$IMAGE_TAG" \
   "$CTX_DIR"

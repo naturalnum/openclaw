@@ -25,7 +25,7 @@
         "primary": "minmax/MinMax-2.5"
       },
       "models": {
-        "deepseek/deepseek-chat": {}
+        "minmax/MinMax-2.5": {}
       },
       "workspace": "/root/.openclaw/workspace",
       "compaction": {
