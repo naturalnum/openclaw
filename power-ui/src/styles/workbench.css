@@ -2674,7 +2674,7 @@
 .workbench-dialog--settings {
   display: flex;
   flex-direction: column;
-  width: min(1040px, calc(100vw - 28px));
+  width: min(1380px, calc(100vw - 28px));
   max-height: min(760px, calc(100vh - 24px));
   min-height: min(520px, calc(100vh - 24px));
   overflow: hidden;
@@ -3574,7 +3574,7 @@
 
 .workbench-settings-layout {
   display: grid;
-  grid-template-columns: 176px minmax(0, 1fr);
+  grid-template-columns: 156px minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   gap: 0;
   padding: 0;
@@ -3606,6 +3606,10 @@
   font-weight: 700;
   letter-spacing: -0.02em;
   color: #18181b;
+}
+
+.workbench-dialog--settings .cron-workspace {
+  grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
 }
 
 .workbench-settings-nav__icon {

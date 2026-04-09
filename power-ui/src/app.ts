@@ -943,6 +943,7 @@ export class OpenClawPowerApp extends LitElement {
       window.clearTimeout(existing);
     }
     if (key === "settings") {
+      this.stopLogsAutoRefresh();
       this.workbenchSettingsOpen = false;
     } else if (key === "projectDirectory") {
       this.projectDirectoryDialogOpen = false;
@@ -1674,10 +1675,20 @@ export class OpenClawPowerApp extends LitElement {
     }
   }
 
-  private openSettingsDialog() {
+  private openSettingsDialog(tab?: WorkbenchSettingsTab) {
+    if (tab) {
+      this.workbenchSettingsTab = tab;
+    }
     this.openModal("settings");
     if (this.workbenchSettingsTab === "statistics") {
       void this.loadStatistics();
+    } else if (this.workbenchSettingsTab === "automations") {
+      void this.loadAutomationsPage();
+    } else if (this.workbenchSettingsTab === "logs") {
+      void this.loadLogsPage(true);
+      this.startLogsAutoRefresh();
+    } else {
+      this.stopLogsAutoRefresh();
     }
   }
 
@@ -1685,6 +1696,15 @@ export class OpenClawPowerApp extends LitElement {
     this.workbenchSettingsTab = value;
     if (value === "statistics" && this.workbenchSettingsOpen) {
       void this.loadStatistics();
+      this.stopLogsAutoRefresh();
+    } else if (value === "automations" && this.workbenchSettingsOpen) {
+      void this.loadAutomationsPage();
+      this.stopLogsAutoRefresh();
+    } else if (value === "logs" && this.workbenchSettingsOpen) {
+      void this.loadLogsPage(true);
+      this.startLogsAutoRefresh();
+    } else {
+      this.stopLogsAutoRefresh();
     }
   }
 
@@ -1706,7 +1726,12 @@ export class OpenClawPowerApp extends LitElement {
       this.logsRefreshTimer = null;
     }
     this.logsRefreshTimer = window.setInterval(() => {
-      if (this.workbenchSection !== "logs" || !this.logsAutoFollow || !this.connected) {
+      if (
+        this.workbenchSettingsTab !== "logs" ||
+        !this.workbenchSettingsOpen ||
+        !this.logsAutoFollow ||
+        !this.connected
+      ) {
         return;
       }
       void this.loadLogsPage(false, true);
@@ -3220,12 +3245,11 @@ export class OpenClawPowerApp extends LitElement {
           }
           if (section === "automations") {
             this.stopLogsAutoRefresh();
-            await this.loadAutomationsPage();
+            this.openSettingsDialog("automations");
             return;
           }
           if (section === "logs") {
-            await this.loadLogsPage(true);
-            this.startLogsAutoRefresh();
+            this.openSettingsDialog("logs");
             return;
           }
           this.stopLogsAutoRefresh();

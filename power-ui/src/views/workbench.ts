@@ -21,7 +21,7 @@ import {
 import { renderPowerChatThread } from "../integrations/openclaw/chat/thread.ts";
 
 export type WorkbenchSection = "newTask" | "skills" | "files" | "automations" | "logs";
-export type WorkbenchSettingsTab = "general" | "models" | "statistics";
+export type WorkbenchSettingsTab = "general" | "models" | "statistics" | "automations" | "logs";
 
 export type WorkbenchModelConfig = {
   id: string;
@@ -386,22 +386,6 @@ export function renderWorkbench(props: WorkbenchProps) {
             props.sidebarCollapsed,
             () => props.onSectionChange("files"),
           )}
-          ${renderNavButton(
-            "automations",
-            tLocale(locale, "Scheduled Jobs", "定时任务"),
-            icons.loader,
-            props.section === "automations",
-            props.sidebarCollapsed,
-            () => props.onSectionChange("automations"),
-          )}
-          ${renderNavButton(
-            "logs",
-            tLocale(locale, "Logs", "日志"),
-            icons.terminal,
-            props.section === "logs",
-            props.sidebarCollapsed,
-            () => props.onSectionChange("logs"),
-          )}
         </nav>
 
         ${
@@ -482,13 +466,9 @@ export function renderWorkbench(props: WorkbenchProps) {
                 ? renderFilesPage(props, currentProject)
                 : props.section === "skills"
                   ? renderSkillsPage(props)
-                  : props.section === "automations"
-                    ? renderAutomationsPage(props, activeProject)
-                    : props.section === "logs"
-                      ? renderLogsPage(props)
-                      : activeSession
-                        ? renderSessionView(props, activeProject, activeSession)
-                        : renderNewTaskView(props, currentProject, projects)
+                  : activeSession
+                    ? renderSessionView(props, activeProject, activeSession)
+                    : renderNewTaskView(props, currentProject, projects)
             }
           </section>
 
@@ -1425,50 +1405,6 @@ function renderFilesPage(props: WorkbenchProps, project: WorkbenchProject | null
   `;
 }
 
-function renderAutomationsPage(props: WorkbenchProps, _currentProject: WorkbenchProject | null) {
-  const locale = props.settings.locale;
-  return html`
-    <section class="workbench-page-shell workbench-page-shell--scroll">
-      <header class="workbench-page-shell__header">
-        <div>
-          <p class="workbench-page-shell__eyebrow">${tLocale(locale, "Automation", "自动化")}</p>
-          <h2>${tLocale(locale, "Scheduled Jobs", "定时任务")}</h2>
-          <span>
-            ${tLocale(
-              locale,
-              "Create, schedule, and monitor recurring jobs.",
-              "创建、编排并监控周期执行的任务。",
-            )}
-          </span>
-        </div>
-      </header>
-      <div class="workbench-page-shell__body">${renderCron(props.automationsPage)}</div>
-    </section>
-  `;
-}
-
-function renderLogsPage(props: WorkbenchProps) {
-  const locale = props.settings.locale;
-  return html`
-    <section class="workbench-page-shell workbench-page-shell--scroll">
-      <header class="workbench-page-shell__header">
-        <div>
-          <p class="workbench-page-shell__eyebrow">${tLocale(locale, "System logs", "系统日志")}</p>
-          <h2>${tLocale(locale, "Logs", "日志")}</h2>
-          <span>
-            ${tLocale(
-              locale,
-              "Gateway file logs, with filtering and export.",
-              "查看 gateway 文件日志，支持筛选和导出。",
-            )}
-          </span>
-        </div>
-      </header>
-      <div class="workbench-page-shell__body">${renderLogs(props.logsPage)}</div>
-    </section>
-  `;
-}
-
 function renderSkillsPage(props: WorkbenchProps) {
   return html`
     <section class="workbench-page-shell workbench-page-shell--scroll">
@@ -1833,11 +1769,31 @@ function renderSettingsDialog(props: WorkbenchProps) {
               <span class="workbench-settings-nav__icon">${icons.barChart}</span>
               ${tLocale(locale, "Statistics", "统计")}
             </button>
+            <button
+              type="button"
+              class="${props.settingsTab === "automations" ? "is-active" : ""}"
+              @click=${() => props.onSettingsTabChange("automations")}
+            >
+              <span class="workbench-settings-nav__icon">${icons.loader}</span>
+              ${tLocale(locale, "Scheduled Jobs", "定时任务")}
+            </button>
+            <button
+              type="button"
+              class="${props.settingsTab === "logs" ? "is-active" : ""}"
+              @click=${() => props.onSettingsTabChange("logs")}
+            >
+              <span class="workbench-settings-nav__icon">${icons.terminal}</span>
+              ${tLocale(locale, "Logs", "日志")}
+            </button>
           </aside>
 
           <section
             class="workbench-settings-panel ${
-              props.settingsTab === "models" ? "workbench-settings-panel--models" : ""
+              props.settingsTab === "models" ||
+              props.settingsTab === "automations" ||
+              props.settingsTab === "logs"
+                ? "workbench-settings-panel--models"
+                : ""
             }"
           >
             <div class="workbench-settings-panel__header">
@@ -1848,7 +1804,11 @@ function renderSettingsDialog(props: WorkbenchProps) {
                       ? tLocale(locale, "General", "通用")
                       : props.settingsTab === "models"
                         ? tLocale(locale, "Model Settings", "模型设置")
-                        : tLocale(locale, "Statistics", "统计")
+                        : props.settingsTab === "statistics"
+                          ? tLocale(locale, "Statistics", "统计")
+                          : props.settingsTab === "automations"
+                            ? tLocale(locale, "Scheduled Jobs", "定时任务")
+                            : tLocale(locale, "Logs", "日志")
                   }
                 </h4>
                 ${
@@ -1862,8 +1822,18 @@ function renderSettingsDialog(props: WorkbenchProps) {
                         )}
                       </p>
                     `
-                    : props.settingsTab === "statistics"
+                    : props.settingsTab === "models"
                       ? html`
+                          <p>
+                            ${tLocale(
+                              locale,
+                              "Manage model providers, endpoints, and default selections.",
+                              "管理模型提供方、接口地址和默认选择。",
+                            )}
+                          </p>
+                        `
+                      : props.settingsTab === "statistics"
+                        ? html`
                         <p>
                           ${tLocale(
                             locale,
@@ -1872,7 +1842,27 @@ function renderSettingsDialog(props: WorkbenchProps) {
                           )}
                         </p>
                       `
-                      : nothing
+                        : props.settingsTab === "automations"
+                          ? html`
+                            <p>
+                              ${tLocale(
+                                locale,
+                                "Manage recurring jobs and delivery settings.",
+                                "管理周期任务和投递设置。",
+                              )}
+                            </p>
+                          `
+                          : props.settingsTab === "logs"
+                            ? html`
+                              <p>
+                                ${tLocale(
+                                  locale,
+                                  "Inspect gateway logs with filtering and export.",
+                                  "查看网关日志并进行筛选和导出。",
+                                )}
+                              </p>
+                            `
+                            : nothing
                 }
               </div>
               <button
@@ -1995,7 +1985,29 @@ function renderSettingsDialog(props: WorkbenchProps) {
                     </div>
                   </article>
                 `
-                  : html`
+                  : props.settingsTab === "automations"
+                    ? html`
+                        <article class="workbench-setting-card workbench-setting-card--models">
+                          <div class="workbench-settings-model-shell">
+                            <div class="workbench-settings-model-shell__head"></div>
+                            <div class="workbench-settings-model-shell__list">
+                              ${renderCron(props.automationsPage)}
+                            </div>
+                          </div>
+                        </article>
+                      `
+                    : props.settingsTab === "logs"
+                      ? html`
+                          <article class="workbench-setting-card workbench-setting-card--models">
+                            <div class="workbench-settings-model-shell">
+                              <div class="workbench-settings-model-shell__head"></div>
+                              <div class="workbench-settings-model-shell__list">
+                                ${renderLogs(props.logsPage)}
+                              </div>
+                            </div>
+                          </article>
+                        `
+                      : html`
                   <article class="workbench-setting-card">
                     ${renderStatisticsPanel(props)}
                   </article>
