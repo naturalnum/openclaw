@@ -86,8 +86,10 @@ export type WorkbenchProps = {
   newTaskProjectId: string | null;
   newTaskProjectMenuOpen: boolean;
   sidebarCollapsed: boolean;
+  sidebarNarrowScrollable: boolean;
   projectsCollapsed: boolean;
   rightRailCollapsed: boolean;
+  rightRailNarrowScrollable: boolean;
   expandedProjectIds: string[];
   priorityProjectIds: string[];
   agentsList: AgentsListResult | null;
@@ -198,6 +200,8 @@ export type WorkbenchProps = {
   fileSearchQuery: string;
   fileManagerCreateFolderOpen: boolean;
   fileManagerNewFolderName: string;
+  horizontalScrollbarVisible: boolean;
+  horizontalScrollbarContentWidth: number;
   onNavigateLegacy: () => void;
   onSectionChange: (section: WorkbenchSection) => void;
   onSelectProject: (projectId: string) => void;
@@ -221,6 +225,8 @@ export type WorkbenchProps = {
   onOpenSettings: () => void;
   onCloseSettings: () => void;
   onSettingsTabChange: (value: WorkbenchSettingsTab) => void;
+  onWorkbenchShellScroll: (event: Event) => void;
+  onWorkbenchScrollbarScroll: (event: Event) => void;
   onModelChange: (value: string) => void;
   onCreateProject: () => void;
   onCloseProjectDirectory: () => void;
@@ -318,12 +324,15 @@ export function renderWorkbench(props: WorkbenchProps) {
   const showRightRail = showContextBar && !props.rightRailCollapsed;
 
   return html`
-    <div
-      class="workbench ${
-        props.themeResolved.includes("light") ? "workbench--light" : ""
-      } ${props.sidebarCollapsed ? "workbench--sidebar-collapsed" : ""}"
-    >
-      <aside class="workbench-sidebar">
+    <div class="workbench-shell" data-workbench-shell @scroll=${props.onWorkbenchShellScroll}>
+      <div
+        class="workbench ${
+          props.themeResolved.includes("light") ? "workbench--light" : ""
+        } ${props.sidebarCollapsed ? "workbench--sidebar-collapsed" : ""} ${
+          props.sidebarNarrowScrollable ? "workbench--sidebar-narrow-scrollable" : ""
+        }"
+      >
+        <aside class="workbench-sidebar">
         <div class="workbench-brand">
           <div class="workbench-brand__expanded" aria-hidden=${props.sidebarCollapsed}>
             <div class="workbench-brand__left">
@@ -445,38 +454,43 @@ export function renderWorkbench(props: WorkbenchProps) {
             </span>
           </button>
         </div>
-      </aside>
+        </aside>
 
-      <div class="workbench-main">
-        ${
-          showContextBar && activeProject && activeSession
-            ? renderContextBar(props, activeProject, activeSession)
-            : nothing
-        }
-        <div
-          class="workbench-content ${showRightRail ? "workbench-content--rail" : ""} ${
-            props.section === "newTask" && !showRightRail
-              ? "workbench-content--session-centered"
-              : ""
-          }"
-        >
-          <section class="workbench-center">
-            ${
-              props.section === "files"
-                ? renderFilesPage(props, currentProject)
-                : props.section === "skills"
-                  ? renderSkillsPage(props)
-                  : activeSession
-                    ? renderSessionView(props, activeProject, activeSession)
-                    : renderNewTaskView(props, currentProject, projects)
-            }
-          </section>
-
+        <div class="workbench-main">
           ${
-            showRightRail && activeProject && activeSession
-              ? renderRightRail(props, activeProject)
+            showContextBar && activeProject && activeSession
+              ? renderContextBar(props, activeProject, activeSession)
               : nothing
           }
+          <div
+            class="workbench-content ${showRightRail ? "workbench-content--rail" : ""} ${
+              showRightRail && props.rightRailNarrowScrollable
+                ? "workbench-content--rail-scrollable"
+                : ""
+            } ${
+              props.section === "newTask" && !showRightRail
+                ? "workbench-content--session-centered"
+                : ""
+            }"
+          >
+            <section class="workbench-center">
+              ${
+                props.section === "files"
+                  ? renderFilesPage(props, currentProject)
+                  : props.section === "skills"
+                    ? renderSkillsPage(props)
+                    : activeSession
+                      ? renderSessionView(props, activeProject, activeSession)
+                      : renderNewTaskView(props, currentProject, projects)
+              }
+            </section>
+
+            ${
+              showRightRail && activeProject && activeSession
+                ? renderRightRail(props, activeProject)
+                : nothing
+            }
+          </div>
         </div>
       </div>
       ${props.settingsOpen || props.settingsClosing ? renderSettingsDialog(props) : nothing}
@@ -487,7 +501,23 @@ export function renderWorkbench(props: WorkbenchProps) {
       }
       ${props.filePreviewOpen || props.filePreviewClosing ? renderFilePreviewDialog(props) : nothing}
     </div>
-  `;
+    ${
+      props.horizontalScrollbarVisible
+        ? html`
+            <div
+              class="workbench-horizontal-scrollbar"
+              data-workbench-scrollbar
+              @scroll=${props.onWorkbenchScrollbarScroll}
+            >
+              <div
+                class="workbench-horizontal-scrollbar__spacer"
+                style=${`width: ${props.horizontalScrollbarContentWidth}px;`}
+              ></div>
+            </div>
+          `
+        : nothing
+    }
+    `;
 }
 
 function renderFilePreviewDialog(props: WorkbenchProps) {

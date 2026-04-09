@@ -2,5 +2,12 @@
 @import "./styles/workbench.css";
 
 body {
+  margin: 0;
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+openclaw-power-app {
+  display: block;
   min-height: 100vh;
 }

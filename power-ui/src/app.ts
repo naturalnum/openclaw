@@ -587,6 +587,8 @@ const TEXT_PREVIEW_EXTENSIONS = new Set([
   "csv",
 ]);
 const IMAGE_PREVIEW_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "gif", "svg", "bmp"]);
+const SIDEBAR_AUTO_COLLAPSE_WIDTH = 1180;
+const RIGHT_RAIL_AUTO_COLLAPSE_WIDTH = 1360;
 
 function resolveFileExtension(name: string): string {
   const dotIndex = name.lastIndexOf(".");
@@ -775,8 +777,12 @@ export class OpenClawPowerApp extends LitElement {
 
   @state() workbenchSection: WorkbenchSection = "newTask";
   @state() sidebarCollapsed = false;
+  @state() sidebarUserExpandedOnNarrow = false;
   @state() projectsCollapsed = false;
   @state() rightRailCollapsed = false;
+  @state() viewportWidth =
+    typeof window === "undefined" ? RIGHT_RAIL_AUTO_COLLAPSE_WIDTH : window.innerWidth;
+  @state() rightRailUserExpandedOnNarrow = false;
   @state() newTaskProjectMenuOpen = false;
   @state() treeMenuOpenKey: string | null = null;
   @state() expandedProjectIds: string[] = [];
@@ -855,6 +861,8 @@ export class OpenClawPowerApp extends LitElement {
   @state() chatDrafts: Record<string, ChatDraftState> = {};
   @state() chatModelCatalog: ModelCatalogEntry[] = [];
   @state() chatRuntimeVersion = 0;
+  @state() horizontalScrollbarVisible = false;
+  @state() horizontalScrollbarContentWidth = 0;
 
   constructor() {
     super();
@@ -873,10 +881,27 @@ export class OpenClawPowerApp extends LitElement {
   private modelConfigPersistInFlight = false;
   private modelConfigPersistQueued = false;
   private logsRefreshTimer: number | null = null;
+  private syncingWorkbenchShellScroll = false;
+  private syncingWorkbenchScrollbarScroll = false;
+  private readonly handleWindowResize = () => {
+    this.viewportWidth = window.innerWidth;
+    if (this.viewportWidth >= SIDEBAR_AUTO_COLLAPSE_WIDTH && this.sidebarUserExpandedOnNarrow) {
+      this.sidebarUserExpandedOnNarrow = false;
+    }
+    if (
+      this.viewportWidth >= RIGHT_RAIL_AUTO_COLLAPSE_WIDTH &&
+      this.rightRailUserExpandedOnNarrow
+    ) {
+      this.rightRailUserExpandedOnNarrow = false;
+    }
+    window.requestAnimationFrame(() => this.syncHorizontalScrollbar());
+  };
 
   connectedCallback() {
     super.connectedCallback();
     document.addEventListener("pointerdown", this.handleDocumentPointerDown, true);
+    window.addEventListener("resize", this.handleWindowResize);
+    this.handleWindowResize();
     this.adapterUnsubscribe = this.adapter.subscribe((event) => {
       this.handleAdapterEvent(event);
     });
@@ -889,6 +914,7 @@ export class OpenClawPowerApp extends LitElement {
     this.adapter.dispose?.();
     this.resetFilePreviewState();
     document.removeEventListener("pointerdown", this.handleDocumentPointerDown, true);
+    window.removeEventListener("resize", this.handleWindowResize);
     if (this.modelConfigPersistTimer != null) {
       window.clearTimeout(this.modelConfigPersistTimer);
       this.modelConfigPersistTimer = null;
@@ -903,6 +929,75 @@ export class OpenClawPowerApp extends LitElement {
     this.modalCloseTimers.clear();
     super.disconnectedCallback();
   }
+
+  protected override updated() {
+    window.requestAnimationFrame(() => this.syncHorizontalScrollbar());
+  }
+
+  private getWorkbenchShellElement() {
+    return this.querySelector<HTMLElement>("[data-workbench-shell]");
+  }
+
+  private getWorkbenchScrollbarElement() {
+    return this.querySelector<HTMLElement>("[data-workbench-scrollbar]");
+  }
+
+  private syncHorizontalScrollbar() {
+    const shell = this.getWorkbenchShellElement();
+    const scrollbar = this.getWorkbenchScrollbarElement();
+    if (!shell) {
+      this.horizontalScrollbarVisible = false;
+      this.horizontalScrollbarContentWidth = 0;
+      return;
+    }
+
+    const overflowAmount = shell.scrollWidth - shell.clientWidth;
+    const visible = overflowAmount > 1;
+    if (this.horizontalScrollbarVisible !== visible) {
+      this.horizontalScrollbarVisible = visible;
+    }
+    if (this.horizontalScrollbarContentWidth !== shell.scrollWidth) {
+      this.horizontalScrollbarContentWidth = shell.scrollWidth;
+    }
+    if (visible && scrollbar && Math.abs(scrollbar.scrollLeft - shell.scrollLeft) > 1) {
+      this.syncingWorkbenchShellScroll = true;
+      scrollbar.scrollLeft = shell.scrollLeft;
+      this.syncingWorkbenchShellScroll = false;
+    }
+  }
+
+  private readonly handleWorkbenchShellScroll = (event: Event) => {
+    if (this.syncingWorkbenchScrollbarScroll) {
+      return;
+    }
+    const shell = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+    const scrollbar = this.getWorkbenchScrollbarElement();
+    if (!shell) {
+      return;
+    }
+    if (scrollbar && Math.abs(scrollbar.scrollLeft - shell.scrollLeft) > 1) {
+      this.syncingWorkbenchShellScroll = true;
+      scrollbar.scrollLeft = shell.scrollLeft;
+      this.syncingWorkbenchShellScroll = false;
+    }
+    this.syncHorizontalScrollbar();
+  };
+
+  private readonly handleWorkbenchScrollbarScroll = (event: Event) => {
+    if (this.syncingWorkbenchShellScroll) {
+      return;
+    }
+    const scrollbar = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+    const shell = this.getWorkbenchShellElement();
+    if (!scrollbar || !shell) {
+      return;
+    }
+    if (Math.abs(shell.scrollLeft - scrollbar.scrollLeft) > 1) {
+      this.syncingWorkbenchScrollbarScroll = true;
+      shell.scrollLeft = scrollbar.scrollLeft;
+      this.syncingWorkbenchScrollbarScroll = false;
+    }
+  };
 
   private setModalClosingState(
     key: "settings" | "projectDirectory" | "filePreview",
@@ -1021,6 +1116,65 @@ export class OpenClawPowerApp extends LitElement {
       this.agentsList?.defaultId ??
       null
     );
+  }
+
+  private get isRightRailNarrowViewport() {
+    return this.viewportWidth < RIGHT_RAIL_AUTO_COLLAPSE_WIDTH;
+  }
+
+  private get isSidebarNarrowViewport() {
+    return this.viewportWidth < SIDEBAR_AUTO_COLLAPSE_WIDTH;
+  }
+
+  private get effectiveSidebarCollapsed() {
+    return (
+      this.sidebarCollapsed || (this.isSidebarNarrowViewport && !this.sidebarUserExpandedOnNarrow)
+    );
+  }
+
+  private get sidebarNarrowScrollable() {
+    return (
+      this.isSidebarNarrowViewport && this.sidebarUserExpandedOnNarrow && !this.sidebarCollapsed
+    );
+  }
+
+  private get effectiveRightRailCollapsed() {
+    return (
+      this.rightRailCollapsed ||
+      (this.isRightRailNarrowViewport && !this.rightRailUserExpandedOnNarrow)
+    );
+  }
+
+  private get rightRailNarrowScrollable() {
+    return (
+      this.isRightRailNarrowViewport &&
+      this.rightRailUserExpandedOnNarrow &&
+      !this.rightRailCollapsed
+    );
+  }
+
+  private setRightRailOpen(options?: { userInitiated?: boolean }) {
+    this.rightRailCollapsed = false;
+    this.rightRailUserExpandedOnNarrow = Boolean(
+      options?.userInitiated && this.isRightRailNarrowViewport,
+    );
+  }
+
+  private setRightRailCollapsedState() {
+    this.rightRailCollapsed = true;
+    this.rightRailUserExpandedOnNarrow = false;
+  }
+
+  private setSidebarOpen(options?: { userInitiated?: boolean }) {
+    this.sidebarCollapsed = false;
+    this.sidebarUserExpandedOnNarrow = Boolean(
+      options?.userInitiated && this.isSidebarNarrowViewport,
+    );
+  }
+
+  private setSidebarCollapsedState() {
+    this.sidebarCollapsed = true;
+    this.sidebarUserExpandedOnNarrow = false;
   }
 
   private buildChatDraftKey(
@@ -1894,7 +2048,7 @@ export class OpenClawPowerApp extends LitElement {
     this.workbenchSelectedSessionKey = sessionKey;
     this.clearSessionUnread(sessionKey);
     this.workbenchSelectedProjectId = projectId;
-    this.rightRailCollapsed = false;
+    this.setRightRailOpen();
     this.newTaskProjectMenuOpen = false;
     this.treeMenuOpenKey = null;
     this.resetSessionRuntimeViewState(sessionKey);
@@ -2174,7 +2328,7 @@ export class OpenClawPowerApp extends LitElement {
         this.workbenchSection = "newTask";
         this.workbenchSelectedProjectId = null;
         this.workbenchSelectedSessionKey = null;
-        this.rightRailCollapsed = false;
+        this.setRightRailOpen();
         this.persistSettings({
           sessionKey: "",
           lastActiveSessionKey: "",
@@ -2704,7 +2858,7 @@ export class OpenClawPowerApp extends LitElement {
       this.patchChatDraftState(() => nextDraft, this.buildChatDraftKey(sessionKey, projectId));
       this.clearChatDraftState(previousDraftKey);
       this.clearSessionUnread(sessionKey);
-      this.rightRailCollapsed = false;
+      this.setRightRailOpen();
       this.resetSessionRuntimeViewState(sessionKey);
       this.persistSettings({
         sessionKey,
@@ -2887,9 +3041,11 @@ export class OpenClawPowerApp extends LitElement {
       currentModelId: this.currentModelId,
       newTaskProjectId: this.workbenchSelectedProjectId,
       newTaskProjectMenuOpen: this.newTaskProjectMenuOpen,
-      sidebarCollapsed: this.sidebarCollapsed,
+      sidebarCollapsed: this.effectiveSidebarCollapsed,
+      sidebarNarrowScrollable: this.sidebarNarrowScrollable,
       projectsCollapsed: this.projectsCollapsed,
-      rightRailCollapsed: this.rightRailCollapsed,
+      rightRailCollapsed: this.effectiveRightRailCollapsed,
+      rightRailNarrowScrollable: this.rightRailNarrowScrollable,
       expandedProjectIds: this.expandedProjectIds,
       priorityProjectIds: this.priorityProjectIds,
       agentsList: this.agentsList,
@@ -3321,6 +3477,8 @@ export class OpenClawPowerApp extends LitElement {
       onSettingsTabChange: (value) => {
         this.changeSettingsTab(value);
       },
+      onWorkbenchShellScroll: this.handleWorkbenchShellScroll,
+      onWorkbenchScrollbarScroll: this.handleWorkbenchScrollbarScroll,
       onModelChange: (value) => {
         this.currentModelId = this.resolveAvailableModelRef(value);
         this.scheduleGlobalModelConfigPersist();
@@ -3360,6 +3518,8 @@ export class OpenClawPowerApp extends LitElement {
       fileSearchQuery: this.fileSearchQuery,
       fileManagerCreateFolderOpen: this.fileManagerCreateFolderOpen,
       fileManagerNewFolderName: this.fileManagerNewFolderName,
+      horizontalScrollbarVisible: this.horizontalScrollbarVisible,
+      horizontalScrollbarContentWidth: this.horizontalScrollbarContentWidth,
       onCloseProjectDirectory: () => {
         this.closeProjectDirectoryDialog();
       },
@@ -3436,13 +3596,21 @@ export class OpenClawPowerApp extends LitElement {
         void this.createFileManagerFolder();
       },
       onToggleSidebar: () => {
-        this.sidebarCollapsed = !this.sidebarCollapsed;
+        if (this.effectiveSidebarCollapsed) {
+          this.setSidebarOpen({ userInitiated: true });
+          return;
+        }
+        this.setSidebarCollapsedState();
       },
       onToggleProjects: () => {
         this.projectsCollapsed = !this.projectsCollapsed;
       },
       onToggleRightRail: () => {
-        this.rightRailCollapsed = !this.rightRailCollapsed;
+        if (this.effectiveRightRailCollapsed) {
+          this.setRightRailOpen({ userInitiated: true });
+          return;
+        }
+        this.setRightRailCollapsedState();
       },
       onToggleProject: (projectId) => {
         this.expandedProjectIds = this.expandedProjectIds.includes(projectId)
