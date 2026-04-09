@@ -132,7 +132,12 @@ export interface WorkbenchAdapter {
   renameProject(projectId: string, name: string): Promise<void>;
   deleteProject(projectId: string): Promise<void>;
   createProject(name: string, workspace: string): Promise<string | null>;
-  startTask(projectId: string, text: string, modelId: string): Promise<WorkbenchSendResult>;
+  startTask(
+    projectId: string,
+    text: string,
+    modelId: string,
+    options?: { label?: string | null },
+  ): Promise<WorkbenchSendResult>;
   renameSession(sessionKey: string, label: string): Promise<void>;
   deleteSession(sessionKey: string): Promise<void>;
   addUserMessage(sessionKey: string, text: string, modelId: string): Promise<WorkbenchSendResult>;

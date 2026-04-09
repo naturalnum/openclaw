@@ -428,9 +428,14 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
     return typeof created.agentId === "string" ? created.agentId : null;
   }
 
-  async startTask(projectId: string, text: string, modelId: string): Promise<WorkbenchSendResult> {
+  async startTask(
+    projectId: string,
+    text: string,
+    modelId: string,
+    options?: { label?: string | null },
+  ): Promise<WorkbenchSendResult> {
     const sessionKey = buildPowerSessionKey(projectId);
-    const label = buildSessionLabelFromPrompt(text);
+    const label = options?.label?.trim() || buildSessionLabelFromPrompt(text);
     void modelId;
     await this.gateway.request("sessions.patch", {
       key: sessionKey,

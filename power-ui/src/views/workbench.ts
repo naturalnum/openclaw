@@ -91,6 +91,7 @@ export type WorkbenchProps = {
   rightRailCollapsed: boolean;
   rightRailNarrowScrollable: boolean;
   expandedProjectIds: string[];
+  expandedProjectSessionIds: string[];
   priorityProjectIds: string[];
   agentsList: AgentsListResult | null;
   agentIdentityById: Record<string, AgentIdentityResult>;
@@ -220,6 +221,7 @@ export type WorkbenchProps = {
   onRemovePendingChatFile: (id: string) => void;
   onComposerChange: (value: string) => void;
   onComposerKeyDown: (event: KeyboardEvent) => void;
+  onComposerCompositionEnd: (event: CompositionEvent) => void;
   onChatScroll: (event: Event) => void;
   onSend: () => void;
   onAbort: () => void;
@@ -257,8 +259,11 @@ export type WorkbenchProps = {
   onToggleProjects: () => void;
   onToggleRightRail: () => void;
   onToggleProject: (projectId: string) => void;
+  onToggleProjectSessionsVisibility: (projectId: string) => void;
   onRefreshContext: () => void;
 };
+
+const PROJECT_SESSION_PREVIEW_LIMIT = 6;
 
 function isZhLocale(locale?: string): boolean {
   return typeof locale === "string" && locale.toLowerCase().startsWith("zh");
@@ -311,19 +316,34 @@ export function renderWorkbench(props: WorkbenchProps) {
     projects.find((project) => project.id === (props.newTaskProjectId ?? props.currentProjectId)) ??
     projects[0] ??
     null;
-  const activeSession =
+  const listedActiveSession =
     projects
       .flatMap((project) => project.sessions)
       .find((session) => session.key === props.currentSessionKey) ?? null;
+  const currentSessionProjectId = parseAgentSessionKey(props.currentSessionKey)?.agentId ?? null;
+  const activeSession =
+    listedActiveSession ??
+    (props.currentSessionKey
+      ? {
+          key: props.currentSessionKey,
+          label: tLocale(locale, "New conversation", "新会话"),
+          title: tLocale(locale, "New conversation", "新会话"),
+          updatedAt: null,
+          tokens: 0,
+        }
+      : null);
   const activeProject =
     (activeSession
-      ? (projects.find((project) =>
-          project.sessions.some((session) => session.key === activeSession.key),
+      ? (projects.find(
+          (project) =>
+            project.id === currentSessionProjectId ||
+            project.sessions.some((session) => session.key === activeSession.key),
         ) ?? null)
       : null) ?? currentProject;
   const showContextBar =
     props.section === "newTask" && Boolean(activeProject) && Boolean(activeSession);
   const showRightRail = showContextBar && !props.rightRailCollapsed;
+  const newTaskNavActive = props.section === "newTask" && !activeSession;
 
   return html`
     <div class="workbench-shell" data-workbench-shell @scroll=${props.onWorkbenchShellScroll}>
@@ -377,7 +397,7 @@ export function renderWorkbench(props: WorkbenchProps) {
             "newTask",
             tLocale(locale, "New task", "新任务"),
             icons.edit,
-            props.section === "newTask",
+            newTaskNavActive,
             props.sidebarCollapsed,
             () => props.onSectionChange("newTask"),
           )}
@@ -738,6 +758,7 @@ function renderNewTaskView(
             @input=${(event: Event) =>
               props.onComposerChange((event.target as HTMLTextAreaElement).value)}
             @keydown=${props.onComposerKeyDown}
+            @compositionend=${props.onComposerCompositionEnd}
           ></textarea>
           <div class="workbench-chat-composer__footer">
             <div class="workbench-chat-composer__controls">
@@ -1038,8 +1059,14 @@ function renderNavButton(
 }
 
 function renderProjectTreeRow(project: WorkbenchProject, props: WorkbenchProps) {
+  const locale = props.settings.locale;
   const selected = props.currentProjectId === project.id;
   const expanded = props.expandedProjectIds.includes(project.id);
+  const sessionsExpanded = props.expandedProjectSessionIds.includes(project.id);
+  const visibleSessions = sessionsExpanded
+    ? project.sessions
+    : project.sessions.slice(0, PROJECT_SESSION_PREVIEW_LIMIT);
+  const hasHiddenSessions = project.sessions.length > PROJECT_SESSION_PREVIEW_LIMIT;
   const projectMenuKey = `project:${project.id}`;
   const projectMenuOpen = isTreeMenuOpen(props, projectMenuKey);
   return html`
@@ -1048,22 +1075,33 @@ function renderProjectTreeRow(project: WorkbenchProject, props: WorkbenchProps) 
         <button
           type="button"
           class="workbench-tree-node__icon-toggle"
-          title=${expanded ? "Collapse project" : "Expand project"}
-          aria-label=${expanded ? "Collapse project" : "Expand project"}
+          title=${tLocale(
+            locale,
+            expanded ? "Collapse project" : "Expand project",
+            expanded ? "收起项目" : "展开项目",
+          )}
+          aria-label=${tLocale(
+            locale,
+            expanded ? "Collapse project" : "Expand project",
+            expanded ? "收起项目" : "展开项目",
+          )}
           @click=${() => props.onToggleProject(project.id)}
         >
-          <span class="workbench-tree-node__icon-state workbench-tree-node__icon-state--folder">
-            ${icons.folder}
-          </span>
-          <span class="workbench-tree-node__icon-state workbench-tree-node__icon-state--chevron">
-            ${expanded ? icons.chevronDown : icons.chevronRight}
-          </span>
+          ${expanded ? icons.folderOpen : icons.folder}
         </button>
         <button
           type="button"
           class="workbench-tree-node__main"
-          title=${expanded ? "Collapse project sessions" : "Expand project sessions"}
-          aria-label=${expanded ? "Collapse project sessions" : "Expand project sessions"}
+          title=${tLocale(
+            locale,
+            expanded ? "Collapse project sessions" : "Expand project sessions",
+            expanded ? "收起项目会话" : "展开项目会话",
+          )}
+          aria-label=${tLocale(
+            locale,
+            expanded ? "Collapse project sessions" : "Expand project sessions",
+            expanded ? "收起项目会话" : "展开项目会话",
+          )}
           @click=${() => props.onToggleProject(project.id)}
         >
           <span class="workbench-tree-node__label">${project.label}</span>
@@ -1072,7 +1110,7 @@ function renderProjectTreeRow(project: WorkbenchProject, props: WorkbenchProps) 
           <button
             type="button"
             class="workbench-tree-node__more ${projectMenuOpen ? "is-open" : ""}"
-            aria-label="Project actions"
+            aria-label=${tLocale(locale, "Project actions", "项目操作")}
             aria-haspopup="menu"
             aria-expanded=${projectMenuOpen}
             @click=${(event: Event) => {
@@ -1092,7 +1130,7 @@ function renderProjectTreeRow(project: WorkbenchProject, props: WorkbenchProps) 
                     role="menuitem"
                     @click=${() => props.onRenameProject(project.id)}
                   >
-                    Rename
+                    ${tLocale(locale, "Rename", "重命名")}
                   </button>
                   <button
                     type="button"
@@ -1100,7 +1138,7 @@ function renderProjectTreeRow(project: WorkbenchProject, props: WorkbenchProps) 
                     role="menuitem"
                     @click=${() => props.onDeleteProject(project.id)}
                   >
-                    Delete
+                    ${tLocale(locale, "Delete", "删除")}
                   </button>
                 </div>
               `
@@ -1117,15 +1155,18 @@ function renderProjectTreeRow(project: WorkbenchProject, props: WorkbenchProps) 
                 ? nothing
                 : project.sessions.length === 0
                   ? html`
-                      <div class="workbench-empty workbench-empty--tiny">No sessions yet.</div>
+                      <div class="workbench-empty workbench-empty--tiny">
+                        ${tLocale(locale, "No sessions yet.", "还没有会话。")}
+                      </div>
                     `
-                  : repeat(
-                      project.sessions.slice(0, 6),
-                      (session) => session.key,
-                      (session) => {
-                        const sessionMenuKey = `session:${session.key}`;
-                        const sessionMenuOpen = isTreeMenuOpen(props, sessionMenuKey);
-                        return html`
+                  : html`
+                      ${repeat(
+                        visibleSessions,
+                        (session) => session.key,
+                        (session) => {
+                          const sessionMenuKey = `session:${session.key}`;
+                          const sessionMenuOpen = isTreeMenuOpen(props, sessionMenuKey);
+                          return html`
                         <div
                           class="workbench-tree-session ${
                             props.currentSessionKey === session.key ? "is-active" : ""
@@ -1164,7 +1205,7 @@ function renderProjectTreeRow(project: WorkbenchProject, props: WorkbenchProps) 
                               class="workbench-tree-session__more ${
                                 sessionMenuOpen ? "is-open" : ""
                               }"
-                              aria-label="Session actions"
+                              aria-label=${tLocale(locale, "Session actions", "会话操作")}
                               aria-haspopup="menu"
                               aria-expanded=${sessionMenuOpen}
                               @click=${(event: Event) => {
@@ -1184,7 +1225,7 @@ function renderProjectTreeRow(project: WorkbenchProject, props: WorkbenchProps) 
                                       role="menuitem"
                                       @click=${() => props.onRenameSession(session.key)}
                                     >
-                                      Rename
+                                      ${tLocale(locale, "Rename", "重命名")}
                                     </button>
                                     <button
                                       type="button"
@@ -1192,7 +1233,7 @@ function renderProjectTreeRow(project: WorkbenchProject, props: WorkbenchProps) 
                                       role="menuitem"
                                       @click=${() => props.onDeleteSession(session.key)}
                                     >
-                                      Delete
+                                      ${tLocale(locale, "Delete", "删除")}
                                     </button>
                                   </div>
                                 `
@@ -1201,8 +1242,26 @@ function renderProjectTreeRow(project: WorkbenchProject, props: WorkbenchProps) 
                           </div>
                         </div>
                       `;
-                      },
-                    )
+                        },
+                      )}
+                      ${
+                        hasHiddenSessions
+                          ? html`
+                              <button
+                                type="button"
+                                class="workbench-tree-session-toggle"
+                                @click=${() => props.onToggleProjectSessionsVisibility(project.id)}
+                              >
+                                ${tLocale(
+                                  locale,
+                                  sessionsExpanded ? "Show less" : "Show all",
+                                  sessionsExpanded ? "收起显示" : "展开显示",
+                                )}
+                              </button>
+                            `
+                          : nothing
+                      }
+                    `
             }
           </div>
         </div>
@@ -1265,6 +1324,7 @@ function renderSessionView(
             @input=${(event: Event) =>
               props.onComposerChange((event.target as HTMLTextAreaElement).value)}
             @keydown=${props.onComposerKeyDown}
+            @compositionend=${props.onComposerCompositionEnd}
           ></textarea>
           <div class="workbench-chat-composer__footer">
             <div class="workbench-chat-composer__controls">

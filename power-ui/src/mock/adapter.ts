@@ -859,7 +859,12 @@ export class MockWorkbenchAdapter implements WorkbenchAdapter {
     return id;
   }
 
-  async startTask(projectId: string, text: string, _modelId: string): Promise<WorkbenchSendResult> {
+  async startTask(
+    projectId: string,
+    text: string,
+    _modelId: string,
+    options?: { label?: string | null },
+  ): Promise<WorkbenchSendResult> {
     const project = this.requireProject(projectId);
     const timestamp = Date.now();
     const sessionKey = `agent:${projectId}:task-${this.nextSessionNumber}`;
@@ -867,7 +872,7 @@ export class MockWorkbenchAdapter implements WorkbenchAdapter {
     const subject = text.trim() || "New project task";
     const session: MockSession = {
       key: sessionKey,
-      label: toSessionLabel(subject),
+      label: toSessionLabel(options?.label?.trim() || subject),
       subject,
       projectId,
       updatedAt: timestamp,

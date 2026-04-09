@@ -612,12 +612,21 @@
   gap: 8px;
   min-height: 36px;
   border-radius: 12px;
-  color: var(--text-strong);
+  color: var(--wb-text-soft);
   padding: 0 6px 0 12px;
+  transition:
+    background var(--duration-normal) var(--ease-out),
+    color var(--duration-fast) ease;
+}
+
+.workbench-tree-node:hover > .workbench-tree-node__row,
+.workbench-tree-node:focus-within > .workbench-tree-node__row {
+  background: color-mix(in srgb, var(--card) 54%, white 46%);
 }
 
 .workbench-tree-node.is-active > .workbench-tree-node__row {
-  background: color-mix(in srgb, var(--card) 76%, white 24%);
+  background: color-mix(in srgb, var(--card) 48%, white 52%);
+  color: color-mix(in srgb, var(--wb-text-soft) 82%, var(--text-strong) 18%);
 }
 
 .workbench-tree-node__icon-toggle,
@@ -641,7 +650,7 @@
 }
 
 .workbench-tree-node__icon-toggle {
-  position: relative;
+  color: color-mix(in srgb, var(--wb-text-soft) 84%, var(--text-strong) 16%);
 }
 
 .workbench-tree-node__more {
@@ -655,29 +664,6 @@
   display: inline-grid;
 }
 
-.workbench-tree-node__icon-state {
-  position: absolute;
-  inset: 0;
-  display: inline-grid;
-  place-items: center;
-  transition: opacity var(--duration-fast) ease;
-}
-
-.workbench-tree-node__icon-state--folder {
-  opacity: 1;
-}
-
-.workbench-tree-node__icon-state--chevron {
-  opacity: 0;
-}
-
-.workbench-tree-node:hover .workbench-tree-node__icon-state--folder,
-.workbench-tree-node:focus-within .workbench-tree-node__icon-state--folder {
-  opacity: 0;
-}
-
-.workbench-tree-node:hover .workbench-tree-node__icon-state--chevron,
-.workbench-tree-node:focus-within .workbench-tree-node__icon-state--chevron,
 .workbench-tree-node:hover .workbench-tree-node__more,
 .workbench-tree-node:focus-within .workbench-tree-node__more,
 .workbench-tree-node.is-active .workbench-tree-node__more,
@@ -692,6 +678,10 @@
   min-width: 0;
   text-align: left;
   padding: 8px 0 8px 2px;
+}
+
+.workbench-tree-node.is-active .workbench-tree-node__label {
+  color: color-mix(in srgb, var(--wb-text-soft) 74%, var(--text-strong) 26%);
 }
 
 .workbench-tree-node__icon,
@@ -731,7 +721,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .workbench-tree-node__children {
@@ -758,14 +748,6 @@
   gap: 4px;
 }
 
-.workbench-tree-node__icon-state--chevron svg {
-  transition: transform var(--duration-normal) var(--ease-out);
-}
-
-.workbench-tree-node.is-expanded .workbench-tree-node__icon-state--chevron svg {
-  transform: rotate(90deg);
-}
-
 .workbench-tree-session {
   position: relative;
   appearance: none;
@@ -777,19 +759,23 @@
   min-height: 34px;
   padding: 4px 6px 4px 10px;
   border-radius: 12px;
-  color: var(--text);
-  background: color-mix(in srgb, var(--card) 74%, white 26%);
+  color: var(--wb-text-soft);
+  background: transparent;
   box-shadow: none;
   outline: none;
+  transition:
+    background var(--duration-normal) var(--ease-out),
+    color var(--duration-fast) ease,
+    box-shadow var(--duration-fast) ease;
 }
 
 .workbench-tree-session:hover {
-  background: color-mix(in srgb, var(--card) 78%, white 22%);
+  background: color-mix(in srgb, var(--card) 56%, white 44%);
+  color: var(--text-strong);
 }
 
 .workbench-tree-session.is-active {
   background: color-mix(in srgb, var(--card) 78%, white 22%);
-  border-color: var(--wb-border);
   color: var(--text-strong);
   font-weight: 600;
   box-shadow: inset 0 0 0 1px var(--wb-border);
@@ -852,6 +838,24 @@
   flex: 1 1 auto;
 }
 
+.workbench-tree-session-toggle {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--wb-text-soft);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+  padding: 6px 0 4px 42px;
+}
+
+.workbench-tree-session-toggle:hover,
+.workbench-tree-session-toggle:focus-visible {
+  color: var(--text-strong);
+}
+
 .workbench-tree-session__unread-dot {
   width: 6px;
   height: 6px;
@@ -866,8 +870,8 @@
   top: calc(100% + 6px);
   right: 0;
   z-index: 20;
-  min-width: 132px;
-  padding: 6px;
+  min-width: 112px;
+  padding: 5px;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -885,7 +889,7 @@
   font: inherit;
   text-align: left;
   border-radius: 8px;
-  padding: 8px 10px;
+  padding: 7px 9px;
   cursor: pointer;
 }
 

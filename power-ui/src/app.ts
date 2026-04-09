@@ -90,6 +90,7 @@ import {
   type ToolStreamEntry,
   type UiSettings,
 } from "./compat/ui-core.ts";
+import { buildSessionLabelFromPrompt } from "./integrations/openclaw/session-keys.ts";
 import {
   renderWorkbench,
   type WorkbenchFileSortKey,
@@ -305,8 +306,30 @@ function createLocalId() {
   return `power-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function normalizeSessionLabelInput(value: string): string {
-  return value.trim().slice(0, SESSION_LABEL_MAX_LENGTH);
+function normalizeSessionLabelInput(value: string | null | undefined): string {
+  return typeof value === "string" ? value.trim().slice(0, SESSION_LABEL_MAX_LENGTH) : "";
+}
+
+function buildUniqueSessionLabel(
+  base: string,
+  existingLabels: Iterable<string | null | undefined>,
+): string {
+  const normalizedBase = normalizeSessionLabelInput(base) || "New task";
+  const taken = new Set(
+    Array.from(existingLabels, (label) => normalizeSessionLabelInput(label)).filter(Boolean),
+  );
+  if (!taken.has(normalizedBase)) {
+    return normalizedBase;
+  }
+  let suffix = 2;
+  while (suffix < 1000) {
+    const candidate = normalizeSessionLabelInput(`${normalizedBase} ${suffix}`);
+    if (candidate && !taken.has(candidate)) {
+      return candidate;
+    }
+    suffix += 1;
+  }
+  return normalizeSessionLabelInput(`${normalizedBase} ${Date.now().toString().slice(-4)}`);
 }
 
 function createEmptyModelConfig(): WorkbenchModelConfig {
@@ -770,6 +793,7 @@ export class OpenClawPowerApp extends LitElement {
     logsLimit: 500,
     logsMaxBytes: 250_000,
   };
+  private pendingComposerSendAfterComposition = false;
 
   createRenderRoot() {
     return this;
@@ -796,6 +820,7 @@ export class OpenClawPowerApp extends LitElement {
   @state() newTaskProjectMenuOpen = false;
   @state() treeMenuOpenKey: string | null = null;
   @state() expandedProjectIds: string[] = [];
+  @state() expandedProjectSessionIds: string[] = [];
   @state() priorityProjectIds: string[] = [];
   @state() workbenchSelectedProjectId: string | null = null;
   @state() workbenchSelectedSessionKey: string | null = null;
@@ -1125,6 +1150,7 @@ export class OpenClawPowerApp extends LitElement {
       this.workbenchSelectedProjectId ??
       parseAgentSessionKey(this.workbenchSelectedSessionKey ?? "")?.agentId ??
       this.agentsList?.defaultId ??
+      this.agentsList?.agents[0]?.id ??
       null
     );
   }
@@ -1254,6 +1280,12 @@ export class OpenClawPowerApp extends LitElement {
       return;
     }
     this.unreadSessionKeys = this.unreadSessionKeys.filter((entry) => entry !== key);
+  }
+
+  private toggleProjectSessionsVisibility(projectId: string) {
+    this.expandedProjectSessionIds = this.expandedProjectSessionIds.includes(projectId)
+      ? this.expandedProjectSessionIds.filter((id) => id !== projectId)
+      : [...this.expandedProjectSessionIds, projectId];
   }
 
   private pruneUnreadSessions(validSessionKeys: string[]) {
@@ -1584,14 +1616,23 @@ export class OpenClawPowerApp extends LitElement {
     if (snapshot.currentSessionKey) {
       const runtime = this.getOrCreateSessionRuntime(snapshot.currentSessionKey);
       if (runtime) {
-        runtime.chatMessages = snapshot.chatMessages;
-        runtime.chatThinkingLevel = null;
-        runtime.chatStream = null;
-        runtime.chatStreamStartedAt = null;
-        runtime.chatRunId = null;
-        runtime.chatSending = false;
-        runtime.lastError = null;
-        resetToolStream(runtime as unknown as Parameters<typeof resetToolStream>[0]);
+        const snapshotMessages = snapshot.chatMessages;
+        const shouldPreserveLocalChatState =
+          snapshotMessages.length === 0 &&
+          (runtime.chatMessages.length > 0 ||
+            runtime.chatSending ||
+            Boolean(runtime.chatRunId) ||
+            Boolean(runtime.chatStream?.trim()));
+        if (!shouldPreserveLocalChatState) {
+          runtime.chatMessages = snapshotMessages;
+          runtime.chatThinkingLevel = null;
+          runtime.chatStream = null;
+          runtime.chatStreamStartedAt = null;
+          runtime.chatRunId = null;
+          runtime.chatSending = false;
+          runtime.lastError = null;
+          resetToolStream(runtime as unknown as Parameters<typeof resetToolStream>[0]);
+        }
       }
     }
     this.clearSessionUnread(snapshot.currentSessionKey);
@@ -2809,13 +2850,32 @@ export class OpenClawPowerApp extends LitElement {
   }
 
   private handleComposerKeyDown(event: KeyboardEvent) {
+    if (event.key === "Enter" && !event.shiftKey && (event.isComposing || event.keyCode === 229)) {
+      this.pendingComposerSendAfterComposition = true;
+      return;
+    }
     if (event.isComposing) {
       return;
     }
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
+      this.pendingComposerSendAfterComposition = false;
       void this.sendCurrentMessage();
     }
+  }
+
+  private handleComposerCompositionEnd(_event: CompositionEvent) {
+    if (!this.pendingComposerSendAfterComposition) {
+      return;
+    }
+    this.pendingComposerSendAfterComposition = false;
+    window.setTimeout(() => {
+      const draft = this.activeChatDraft;
+      if (!draft.message.trim() && draft.files.length === 0) {
+        return;
+      }
+      void this.sendCurrentMessage();
+    }, 0);
   }
 
   private handleChatScrollEvent(event: Event) {
@@ -2883,7 +2943,12 @@ export class OpenClawPowerApp extends LitElement {
     }
     this.lastError = null;
     try {
-      const { sessionKey } = await this.adapter.startTask(projectId, prompt, this.currentModelId);
+      const requestedLabel = buildSessionLabelFromPrompt(prompt);
+      const existingLabels = (this.sessionsResult?.sessions ?? []).map((session) => session.label);
+      const uniqueLabel = buildUniqueSessionLabel(requestedLabel, existingLabels);
+      const { sessionKey } = await this.adapter.startTask(projectId, prompt, this.currentModelId, {
+        label: uniqueLabel,
+      });
       const nextDraft = this.getChatDraftState(previousDraftKey);
       this.workbenchSelectedProjectId = projectId;
       this.workbenchSelectedSessionKey = sessionKey;
@@ -2896,8 +2961,8 @@ export class OpenClawPowerApp extends LitElement {
         sessionKey,
         lastActiveSessionKey: sessionKey,
       });
-      await this.refreshSnapshot(sessionKey, projectId);
       await this.sendViaChatController();
+      await this.refreshSnapshot(sessionKey, projectId);
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : String(error);
     }
@@ -3177,6 +3242,7 @@ export class OpenClawPowerApp extends LitElement {
       rightRailCollapsed: this.effectiveRightRailCollapsed,
       rightRailNarrowScrollable: this.rightRailNarrowScrollable,
       expandedProjectIds: this.expandedProjectIds,
+      expandedProjectSessionIds: this.expandedProjectSessionIds,
       priorityProjectIds: this.priorityProjectIds,
       agentsList: this.agentsList,
       agentIdentityById: this.agentIdentityById,
@@ -3589,6 +3655,9 @@ export class OpenClawPowerApp extends LitElement {
       onComposerKeyDown: (event) => {
         this.handleComposerKeyDown(event);
       },
+      onComposerCompositionEnd: (event) => {
+        this.handleComposerCompositionEnd(event);
+      },
       onChatScroll: (event) => {
         this.handleChatScrollEvent(event);
       },
@@ -3751,6 +3820,9 @@ export class OpenClawPowerApp extends LitElement {
         this.expandedProjectIds = this.expandedProjectIds.includes(projectId)
           ? this.expandedProjectIds.filter((id) => id !== projectId)
           : [...this.expandedProjectIds, projectId];
+      },
+      onToggleProjectSessionsVisibility: (projectId) => {
+        this.toggleProjectSessionsVisibility(projectId);
       },
       onRefreshContext: () => {
         void this.refreshSnapshot();
