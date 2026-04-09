@@ -1,4 +1,4 @@
-import { LitElement, html } from "lit";
+import { LitElement, html, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { parseAgentSessionKey } from "../../src/routing/session-key.ts";
 import { GatewayWorkbenchAdapter } from "./adapters/gateway-workbench-adapter.ts";
@@ -74,6 +74,7 @@ import {
   flushToolStreamSync,
   handleAgentEvent,
   handleChatScroll,
+  icons,
   inferBasePathFromPathname,
   loadSettings,
   normalizeBasePath,
@@ -654,7 +655,7 @@ export class OpenClawPowerApp extends LitElement {
   });
   private adapterUnsubscribe: (() => void) | null = null;
   private readonly handleDocumentPointerDown = (event: PointerEvent) => {
-    if (!this.newTaskProjectMenuOpen && !this.treeMenuOpenKey) {
+    if (!this.newTaskProjectMenuOpen && !this.treeMenuOpenKey && !this.fileSortMenuOpen) {
       return;
     }
     const path = event.composedPath();
@@ -668,11 +669,18 @@ export class OpenClawPowerApp extends LitElement {
     const clickedInsideSessionMenu = path.some(
       (node) => node instanceof HTMLElement && node.closest(".workbench-tree-session__menu-anchor"),
     );
+    const clickedInsideFileSortMenu = path.some(
+      (node) =>
+        node instanceof HTMLElement && node.closest(".workbench-sidecard__sort-menu-anchor"),
+    );
     if (!clickedInsidePicker) {
       this.newTaskProjectMenuOpen = false;
     }
     if (!clickedInsideTreeMenu && !clickedInsideSessionMenu) {
       this.treeMenuOpenKey = null;
+    }
+    if (!clickedInsideFileSortMenu) {
+      this.fileSortMenuOpen = false;
     }
   };
   basePath = resolveBasePath();
@@ -769,6 +777,8 @@ export class OpenClawPowerApp extends LitElement {
 
   @state() ready = false;
   @state() connected = false;
+  @state() connectingGateway = false;
+  @state() showGatewayToken = false;
   @state() settings: UiSettings = INITIAL_SETTINGS.settings;
   @state() themeResolved = applyTheme(this.settings);
   @state() assistantName = "Power UI Prototype";
@@ -821,6 +831,7 @@ export class OpenClawPowerApp extends LitElement {
   @state() fileManagerParentPath: string | null = null;
   @state() fileManagerEntries: WorkbenchFileEntry[] = [];
   @state() fileSortKey: WorkbenchFileSortKey = "name";
+  @state() fileSortMenuOpen = false;
   @state() fileSearchQuery = "";
   @state() selectedProjectEntryPath: string | null = null;
   @state() fileManagerBusyPath: string | null = null;
@@ -1499,30 +1510,34 @@ export class OpenClawPowerApp extends LitElement {
     );
   }
 
+  private async initializeGatewaySession() {
+    const initialSessionKey = this.initialSessionKeyFromUrl?.trim() || null;
+    const initialProjectId = initialSessionKey
+      ? (parseAgentSessionKey(initialSessionKey)?.agentId ?? null)
+      : null;
+    const selection = initialSessionKey
+      ? { projectId: initialProjectId, sessionKey: initialSessionKey }
+      : this.adapter.getDefaultSelection();
+    const [snapshot, configSnapshot] = await Promise.all([
+      this.adapter.snapshot(selection),
+      this.loadGlobalModelSettings(),
+    ]);
+    this.applyGlobalModelSettings(configSnapshot);
+    this.applySnapshot(snapshot);
+    await this.refreshProjectFiles(selection.projectId);
+    this.connected = true;
+    this.logsState.connected = true;
+    this.logsState.client = this.controllerClient;
+    for (const runtime of this.chatRuntimeBySessionKey.values()) {
+      runtime.connected = true;
+      runtime.client = this.controllerClient;
+    }
+    this.lastError = null;
+  }
+
   private async bootstrap() {
     try {
-      const initialSessionKey = this.initialSessionKeyFromUrl?.trim() || null;
-      const initialProjectId = initialSessionKey
-        ? (parseAgentSessionKey(initialSessionKey)?.agentId ?? null)
-        : null;
-      const selection = initialSessionKey
-        ? { projectId: initialProjectId, sessionKey: initialSessionKey }
-        : this.adapter.getDefaultSelection();
-      const [snapshot, configSnapshot] = await Promise.all([
-        this.adapter.snapshot(selection),
-        this.loadGlobalModelSettings(),
-      ]);
-      this.applyGlobalModelSettings(configSnapshot);
-      this.applySnapshot(snapshot);
-      await this.refreshProjectFiles(selection.projectId);
-      this.connected = true;
-      this.logsState.connected = true;
-      this.logsState.client = this.controllerClient;
-      for (const runtime of this.chatRuntimeBySessionKey.values()) {
-        runtime.connected = true;
-        runtime.client = this.controllerClient;
-      }
-      this.lastError = null;
+      await this.initializeGatewaySession();
     } catch (error) {
       this.connected = false;
       this.logsState.connected = false;
@@ -1532,6 +1547,23 @@ export class OpenClawPowerApp extends LitElement {
       this.lastError = error instanceof Error ? error.message : String(error);
     }
     this.ready = true;
+  }
+
+  private async connectGateway() {
+    this.connectingGateway = true;
+    this.lastError = null;
+    try {
+      await this.initializeGatewaySession();
+    } catch (error) {
+      this.connected = false;
+      this.logsState.connected = false;
+      for (const runtime of this.chatRuntimeBySessionKey.values()) {
+        runtime.connected = false;
+      }
+      this.lastError = error instanceof Error ? error.message : String(error);
+    } finally {
+      this.connectingGateway = false;
+    }
   }
 
   private applySnapshot(snapshot: WorkbenchSnapshot) {
@@ -3014,6 +3046,104 @@ export class OpenClawPowerApp extends LitElement {
       `;
     }
 
+    if (!this.connected) {
+      const basePath = this.basePath || "";
+      const logoSrc = `${basePath}/favicon-32.png?v=lobster-3`;
+      return html`
+        <div class="power-login-gate">
+          <section class="power-login-gate__card">
+            <header class="power-login-gate__header">
+              <img class="power-login-gate__logo" src=${logoSrc} alt="OpenClaw" />
+              <h1 class="power-login-gate__title">OpenClaw</h1>
+              <p class="power-login-gate__subtitle">连接到网关后继续使用 Power UI。</p>
+            </header>
+
+            <div class="power-login-gate__form">
+              <label class="power-login-gate__field">
+                <span>网关地址</span>
+                <input
+                  .value=${this.settings.gatewayUrl}
+                  placeholder="ws://127.0.0.1:18789"
+                  @input=${(event: Event) => {
+                    this.persistSettings({
+                      gatewayUrl: (event.currentTarget as HTMLInputElement).value,
+                    });
+                  }}
+                  @keydown=${(event: KeyboardEvent) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void this.connectGateway();
+                    }
+                  }}
+                />
+              </label>
+
+              <label class="power-login-gate__field">
+                <span>访问令牌</span>
+                <div class="power-login-gate__secret-row">
+                  <input
+                    type=${this.showGatewayToken ? "text" : "password"}
+                    autocomplete="off"
+                    spellcheck="false"
+                    .value=${this.settings.token}
+                    placeholder="OPENCLAW_GATEWAY_TOKEN"
+                    @input=${(event: Event) => {
+                      this.persistSettings({
+                        token: (event.currentTarget as HTMLInputElement).value,
+                      });
+                    }}
+                    @keydown=${(event: KeyboardEvent) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void this.connectGateway();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    class="power-login-gate__token-toggle"
+                    title=${this.showGatewayToken ? "隐藏令牌" : "显示令牌"}
+                    aria-label=${this.showGatewayToken ? "隐藏令牌" : "显示令牌"}
+                    @click=${() => {
+                      this.showGatewayToken = !this.showGatewayToken;
+                    }}
+                  >
+                    ${this.showGatewayToken ? icons.eye : icons.eyeOff}
+                  </button>
+                </div>
+              </label>
+
+              <button
+                type="button"
+                class="power-login-gate__connect"
+                ?disabled=${this.connectingGateway || !this.settings.gatewayUrl.trim()}
+                @click=${() => {
+                  void this.connectGateway();
+                }}
+              >
+                ${this.connectingGateway ? "连接中..." : "连接"}
+              </button>
+            </div>
+
+            ${
+              this.lastError
+                ? html`<div class="power-login-gate__error">${this.lastError}</div>`
+                : nothing
+            }
+
+            <div class="power-login-gate__help">
+              <div class="power-login-gate__help-title">连接方式</div>
+              <ol class="power-login-gate__steps">
+                <li>启动网关：<code>openclaw gateway run</code></li>
+                <li>生成带 token 的地址：<code>openclaw dashboard --no-open</code></li>
+                <li>将网关地址和 token 填到上面后点击连接</li>
+              </ol>
+            </div>
+          </section>
+        </div>
+      `;
+    }
+
     const visibleCronJobs = getVisibleCronJobs(this.cronState);
     const activeRuntime = this.activeSessionRuntime;
     const activeDraft = this.activeChatDraft;
@@ -3515,6 +3645,7 @@ export class OpenClawPowerApp extends LitElement {
       fileManagerEntries: this.fileManagerEntries,
       fileManagerBusyPath: this.fileManagerBusyPath,
       fileSortKey: this.fileSortKey,
+      fileSortMenuOpen: this.fileSortMenuOpen,
       fileSearchQuery: this.fileSearchQuery,
       fileManagerCreateFolderOpen: this.fileManagerCreateFolderOpen,
       fileManagerNewFolderName: this.fileManagerNewFolderName,
@@ -3552,6 +3683,10 @@ export class OpenClawPowerApp extends LitElement {
       },
       onFileSortChange: (value) => {
         this.fileSortKey = value;
+        this.fileSortMenuOpen = false;
+      },
+      onToggleFileSortMenu: () => {
+        this.fileSortMenuOpen = !this.fileSortMenuOpen;
       },
       onFileSearchChange: (value) => {
         this.fileSearchQuery = value;

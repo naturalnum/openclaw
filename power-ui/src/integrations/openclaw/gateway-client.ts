@@ -44,11 +44,28 @@ function formatGatewayCloseError(params: {
   reason: string;
   error?: { message?: string } | undefined;
 }) {
-  if (params.error?.message) {
-    return params.error.message;
+  const rawMessage = params.error?.message?.trim() || params.reason.trim();
+  const normalized = rawMessage.toLowerCase();
+  if (normalized.includes("gateway token mismatch") || normalized.includes("auth_token_mismatch")) {
+    return "gateway token mismatch";
   }
-  if (params.reason.trim()) {
-    return `gateway closed (${params.code}): ${params.reason}`;
+  if (normalized.includes("gateway token missing") || normalized.includes("auth_token_missing")) {
+    return "gateway token missing";
+  }
+  if (normalized.includes("pairing required")) {
+    return "gateway pairing required";
+  }
+  if (normalized.includes("origin not allowed")) {
+    return "origin not allowed";
+  }
+  if (normalized.includes("device identity required")) {
+    return "device identity required";
+  }
+  if (normalized.includes("auth failed") || normalized.includes("unauthorized")) {
+    return "gateway auth failed";
+  }
+  if (rawMessage) {
+    return rawMessage;
   }
   return `gateway closed (${params.code})`;
 }

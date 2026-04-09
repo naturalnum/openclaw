@@ -197,6 +197,7 @@ export type WorkbenchProps = {
   fileManagerEntries: WorkbenchFileEntry[];
   fileManagerBusyPath: string | null;
   fileSortKey: WorkbenchFileSortKey;
+  fileSortMenuOpen: boolean;
   fileSearchQuery: string;
   fileManagerCreateFolderOpen: boolean;
   fileManagerNewFolderName: string;
@@ -240,6 +241,7 @@ export type WorkbenchProps = {
   onNavigateFileManager: (path: string | null) => void;
   onRefreshFileManager: () => void;
   onFileSortChange: (value: WorkbenchFileSortKey) => void;
+  onToggleFileSortMenu: () => void;
   onFileSearchChange: (value: string) => void;
   onOpenProjectFilePicker: (agentId: string, path: string | null) => void;
   onDownloadProjectFile: (agentId: string, path: string) => void;
@@ -1490,6 +1492,12 @@ function renderProjectFilesBrowser(
   const cardClass = options.fullPage
     ? "workbench-sidecard workbench-sidecard--files workbench-sidecard--files-page"
     : "workbench-sidecard workbench-sidecard--files";
+  const sortOptions: Array<{ key: WorkbenchFileSortKey; label: string }> = [
+    { key: "name", label: tLocale(locale, "Name", "名称") },
+    { key: "size", label: tLocale(locale, "Size", "大小") },
+    { key: "updatedAt", label: tLocale(locale, "Time", "时间") },
+    { key: "kind", label: tLocale(locale, "Type", "类型") },
+  ];
 
   return html`
       <section
@@ -1542,7 +1550,59 @@ function renderProjectFilesBrowser(
                     <span class="workbench-sidecard__sort-select-chevron">${icons.chevronDown}</span>
                   </label>
                 `
-                : nothing
+                : html`
+                    <div class="workbench-sidecard__sort-menu-anchor">
+                      <button
+                        type="button"
+                        class="workbench-icon-button workbench-sidecard__toolbar-icon"
+                        title=${tLocale(locale, "Sort files", "文件排序")}
+                        aria-label=${tLocale(locale, "Sort files", "文件排序")}
+                        aria-expanded=${String(props.fileSortMenuOpen)}
+                        @click=${(event: Event) => {
+                          event.stopPropagation();
+                          props.onToggleFileSortMenu();
+                        }}
+                      >
+                        ${icons.arrowUpDown}
+                      </button>
+                      ${
+                        props.fileSortMenuOpen
+                          ? html`
+                              <div class="workbench-sidecard__sort-menu" role="menu">
+                                <div class="workbench-sidecard__sort-menu-title">
+                                  ${tLocale(locale, "Sort by", "排序条件")}
+                                </div>
+                                ${sortOptions.map(
+                                  (option) => html`
+                                    <button
+                                      type="button"
+                                      class="workbench-sidecard__sort-menu-item ${
+                                        props.fileSortKey === option.key ? "is-active" : ""
+                                      }"
+                                      role="menuitemradio"
+                                      aria-checked=${String(props.fileSortKey === option.key)}
+                                      @click=${(event: Event) => {
+                                        event.stopPropagation();
+                                        props.onFileSortChange(option.key);
+                                      }}
+                                    >
+                                      <span>${option.label}</span>
+                                      ${
+                                        props.fileSortKey === option.key
+                                          ? html`
+                                              <span class="workbench-sidecard__sort-menu-check">✓</span>
+                                            `
+                                          : nothing
+                                      }
+                                    </button>
+                                  `,
+                                )}
+                              </div>
+                            `
+                          : nothing
+                      }
+                    </div>
+                  `
             }
             <button
               type="button"
