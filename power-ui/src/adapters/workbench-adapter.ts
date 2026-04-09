@@ -49,6 +49,7 @@ export type WorkbenchFileListResult = {
 export type WorkbenchUploadedFile = {
   name: string;
   file: File;
+  onProgress?: (progress: { loaded: number; total: number | null }) => void;
 };
 
 export type WorkbenchFilePreviewMode = "text" | "image" | "pdf";

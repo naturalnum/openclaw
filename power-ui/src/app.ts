@@ -91,6 +91,7 @@ import {
 } from "./compat/ui-core.ts";
 import {
   renderWorkbench,
+  type WorkbenchFileSortKey,
   type WorkbenchModelConfig,
   type WorkbenchSection,
   type WorkbenchStatisticsRange,
@@ -305,18 +306,6 @@ function createLocalId() {
 
 function normalizeSessionLabelInput(value: string): string {
   return value.trim().slice(0, SESSION_LABEL_MAX_LENGTH);
-}
-
-async function readBrowserFileAsBase64(file: File): Promise<string> {
-  const arrayBuffer = await file.arrayBuffer();
-  let binary = "";
-  const bytes = new Uint8Array(arrayBuffer);
-  const chunkSize = 0x8000;
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    const chunk = bytes.subarray(index, index + chunkSize);
-    binary += String.fromCharCode(...chunk);
-  }
-  return btoa(binary);
 }
 
 function createEmptyModelConfig(): WorkbenchModelConfig {
@@ -543,6 +532,15 @@ type SessionRuntimeState = ChatState & {
 type PendingChatFile = {
   id: string;
   file: File;
+  status: "pending" | "uploading" | "uploaded" | "failed";
+  progress: number | null;
+  error: string | null;
+  uploadedEntry: WorkbenchFileEntry | null;
+};
+
+type ChatDraftState = {
+  message: string;
+  files: PendingChatFile[];
 };
 
 type StatisticsState = {
@@ -816,6 +814,8 @@ export class OpenClawPowerApp extends LitElement {
   @state() fileManagerCurrentName: string | null = null;
   @state() fileManagerParentPath: string | null = null;
   @state() fileManagerEntries: WorkbenchFileEntry[] = [];
+  @state() fileSortKey: WorkbenchFileSortKey = "name";
+  @state() fileSearchQuery = "";
   @state() selectedProjectEntryPath: string | null = null;
   @state() fileManagerBusyPath: string | null = null;
   @state() fileManagerCreateFolderOpen = false;
@@ -852,8 +852,7 @@ export class OpenClawPowerApp extends LitElement {
   @state() agentIdentityById: Record<string, AgentIdentityResult> = {};
   @state() agentFilesList: AgentsFilesListResult | null = null;
   @state() sessionsResult: SessionsListResult | null = null;
-  @state() chatMessage = "";
-  @state() pendingChatFiles: PendingChatFile[] = [];
+  @state() chatDrafts: Record<string, ChatDraftState> = {};
   @state() chatModelCatalog: ModelCatalogEntry[] = [];
   @state() chatRuntimeVersion = 0;
 
@@ -865,6 +864,7 @@ export class OpenClawPowerApp extends LitElement {
     }
   }
   private readonly chatRuntimeBySessionKey = new Map<string, SessionRuntimeState>();
+  private readonly chatUploadTasks = new Map<string, Promise<void>>();
   private readonly initialSessionKeyFromUrl = INITIAL_SETTINGS.urlSessionKey;
   private pendingProjectFileUploadAgentId: string | null = null;
   private pendingProjectFileUploadPath: string | null = null;
@@ -1022,6 +1022,58 @@ export class OpenClawPowerApp extends LitElement {
     );
   }
 
+  private buildChatDraftKey(
+    sessionKey = this.workbenchSelectedSessionKey,
+    projectId?: string | null,
+  ) {
+    const normalizedSessionKey = sessionKey?.trim() || "";
+    if (normalizedSessionKey) {
+      return `session:${normalizedSessionKey}`;
+    }
+    const normalizedProjectId = projectId ?? this.activeChatAgentId;
+    return normalizedProjectId ? `project:${normalizedProjectId}:new` : "project:global:new";
+  }
+
+  private getChatDraftState(draftKey = this.buildChatDraftKey()): ChatDraftState {
+    return this.chatDrafts[draftKey] ?? { message: "", files: [] };
+  }
+
+  private patchChatDraftState(
+    updater: (draft: ChatDraftState) => ChatDraftState,
+    draftKey = this.buildChatDraftKey(),
+  ) {
+    const nextDraft = updater(this.getChatDraftState(draftKey));
+    this.chatDrafts = {
+      ...this.chatDrafts,
+      [draftKey]: nextDraft,
+    };
+  }
+
+  private clearChatDraftState(draftKey = this.buildChatDraftKey()) {
+    const nextDrafts = { ...this.chatDrafts };
+    delete nextDrafts[draftKey];
+    this.chatDrafts = nextDrafts;
+  }
+
+  private get activeChatDraft() {
+    return this.getChatDraftState();
+  }
+
+  private resolveWorkspaceForAgent(agentId: string | null): string | null {
+    if (!agentId) {
+      return null;
+    }
+    if (this.projectFilesAgentId === agentId && this.projectFilesWorkspace?.trim()) {
+      return this.projectFilesWorkspace.trim();
+    }
+    const matching = this.agentsList?.agents.find((agent) => agent.id === agentId) as
+      | ({ workspace?: string } & { id: string })
+      | undefined;
+    return typeof matching?.workspace === "string" && matching.workspace.trim()
+      ? matching.workspace.trim()
+      : null;
+  }
+
   private markSessionUnread(sessionKey: string | null) {
     const key = sessionKey?.trim() ?? "";
     if (!key || this.workbenchSelectedSessionKey === key || this.unreadSessionKeys.includes(key)) {
@@ -1046,8 +1098,8 @@ export class OpenClawPowerApp extends LitElement {
     }
   }
 
-  private clearPendingChatFiles() {
-    this.pendingChatFiles = [];
+  private clearPendingChatFiles(draftKey = this.buildChatDraftKey()) {
+    this.patchChatDraftState((draft) => ({ ...draft, files: [] }), draftKey);
   }
 
   private buildPendingChatFileId(file: File) {
@@ -1080,18 +1132,133 @@ export class OpenClawPowerApp extends LitElement {
     return suffix ? `./${suffix}` : ".";
   }
 
-  private async uploadPendingChatFiles(agentId: string) {
-    if (this.pendingChatFiles.length === 0) {
+  private async uploadPendingChatFiles(agentId: string, draftKey = this.buildChatDraftKey()) {
+    const draft = this.getChatDraftState(draftKey);
+    if (draft.files.length === 0) {
       return [];
     }
-    const files = this.pendingChatFiles.map((entry) => entry.file);
-    const payloads: WorkbenchUploadedFile[] = await Promise.all(
-      files.map(async (file) => ({
-        name: file.name,
-        contentBase64: await readBrowserFileAsBase64(file),
-      })),
-    );
-    return await this.adapter.uploadProjectFiles(agentId, null, payloads);
+    const uploaded: WorkbenchFileEntry[] = [];
+    for (const pendingFile of draft.files) {
+      if (pendingFile.status === "uploaded" && pendingFile.uploadedEntry) {
+        uploaded.push(pendingFile.uploadedEntry);
+        continue;
+      }
+      this.patchChatDraftState(
+        (currentDraft) => ({
+          ...currentDraft,
+          files: currentDraft.files.map((entry) =>
+            entry.id === pendingFile.id
+              ? {
+                  ...entry,
+                  status: "uploading",
+                  progress: null,
+                  error: null,
+                }
+              : entry,
+          ),
+        }),
+        draftKey,
+      );
+      try {
+        const [entry] = await this.adapter.uploadProjectFiles(agentId, null, [
+          {
+            name: pendingFile.file.name,
+            file: pendingFile.file,
+            onProgress: ({ loaded, total }) => {
+              const progress =
+                total && total > 0
+                  ? Math.max(0, Math.min(100, Math.round((loaded / total) * 100)))
+                  : null;
+              this.patchChatDraftState(
+                (currentDraft) => ({
+                  ...currentDraft,
+                  files: currentDraft.files.map((currentFile) =>
+                    currentFile.id === pendingFile.id
+                      ? {
+                          ...currentFile,
+                          status: "uploading",
+                          progress,
+                        }
+                      : currentFile,
+                  ),
+                }),
+                draftKey,
+              );
+            },
+          },
+        ]);
+        if (!entry) {
+          throw new Error(`Upload returned no file entry for ${pendingFile.file.name}`);
+        }
+        uploaded.push(entry);
+        this.patchChatDraftState(
+          (currentDraft) => ({
+            ...currentDraft,
+            files: currentDraft.files.map((currentFile) =>
+              currentFile.id === pendingFile.id
+                ? {
+                    ...currentFile,
+                    status: "uploaded",
+                    progress: 100,
+                    error: null,
+                    uploadedEntry: entry,
+                  }
+                : currentFile,
+            ),
+          }),
+          draftKey,
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.patchChatDraftState(
+          (currentDraft) => ({
+            ...currentDraft,
+            files: currentDraft.files.map((currentFile) =>
+              currentFile.id === pendingFile.id
+                ? {
+                    ...currentFile,
+                    status: "failed",
+                    progress: null,
+                    error: message,
+                  }
+                : currentFile,
+            ),
+          }),
+          draftKey,
+        );
+        throw error;
+      }
+    }
+    return uploaded;
+  }
+
+  private async ensureChatDraftUploads(agentId: string, draftKey = this.buildChatDraftKey()) {
+    const existingTask = this.chatUploadTasks.get(draftKey);
+    if (existingTask) {
+      await existingTask;
+      if (this.getChatDraftState(draftKey).files.some((entry) => entry.status === "pending")) {
+        await this.ensureChatDraftUploads(agentId, draftKey);
+      }
+      return;
+    }
+    const task = (async () => {
+      await this.uploadPendingChatFiles(agentId, draftKey);
+      await this.refreshProjectFiles(agentId);
+    })()
+      .catch((error) => {
+        this.lastError = error instanceof Error ? error.message : String(error);
+        throw error;
+      })
+      .finally(() => {
+        if (this.chatUploadTasks.get(draftKey) === task) {
+          this.chatUploadTasks.delete(draftKey);
+        }
+      });
+    this.chatUploadTasks.set(draftKey, task);
+    await task;
+    if (this.getChatDraftState(draftKey).files.some((entry) => entry.status === "pending")) {
+      await this.ensureChatDraftUploads(agentId, draftKey);
+    }
   }
 
   private bumpChatRuntime() {
@@ -1665,7 +1832,6 @@ export class OpenClawPowerApp extends LitElement {
     this.workbenchSelectedSessionKey = null;
     this.newTaskProjectMenuOpen = false;
     this.treeMenuOpenKey = null;
-    this.clearPendingChatFiles();
     const projectId = this.workbenchSelectedProjectId ?? this.agentsList?.defaultId ?? null;
     this.persistSettings({
       sessionKey: "",
@@ -1682,7 +1848,6 @@ export class OpenClawPowerApp extends LitElement {
     this.workbenchSelectedSessionKey = null;
     this.newTaskProjectMenuOpen = false;
     this.treeMenuOpenKey = null;
-    this.clearPendingChatFiles();
     if (!this.expandedProjectIds.includes(projectId)) {
       this.expandedProjectIds = [...this.expandedProjectIds, projectId];
     }
@@ -1707,7 +1872,6 @@ export class OpenClawPowerApp extends LitElement {
     this.rightRailCollapsed = false;
     this.newTaskProjectMenuOpen = false;
     this.treeMenuOpenKey = null;
-    this.clearPendingChatFiles();
     this.resetSessionRuntimeViewState(sessionKey);
     if (projectId && !this.expandedProjectIds.includes(projectId)) {
       this.expandedProjectIds = [...this.expandedProjectIds, projectId];
@@ -1990,7 +2154,7 @@ export class OpenClawPowerApp extends LitElement {
           sessionKey: "",
           lastActiveSessionKey: "",
         });
-        this.clearPendingChatFiles();
+        this.clearChatDraftState();
       }
       this.expandedProjectIds = this.expandedProjectIds.filter((id) => id !== projectId);
       this.priorityProjectIds = this.priorityProjectIds.filter((id) => id !== projectId);
@@ -2047,7 +2211,7 @@ export class OpenClawPowerApp extends LitElement {
           sessionKey: "",
           lastActiveSessionKey: "",
         });
-        this.clearPendingChatFiles();
+        this.clearChatDraftState(this.buildChatDraftKey(sessionKey, projectId));
       }
       await this.refreshSnapshot(
         deletingCurrentSession ? null : this.workbenchSelectedSessionKey,
@@ -2382,7 +2546,10 @@ export class OpenClawPowerApp extends LitElement {
     const input = event.target as HTMLInputElement;
     const files = Array.from(input.files ?? []);
     if (files.length > 0) {
-      const seen = new Set(this.pendingChatFiles.map((entry) => entry.id));
+      const draftKey = this.buildChatDraftKey();
+      const agentId = this.activeChatAgentId;
+      const draft = this.getChatDraftState(draftKey);
+      const seen = new Set(draft.files.map((entry) => entry.id));
       const additions: PendingChatFile[] = [];
       for (const file of files) {
         const id = this.buildPendingChatFileId(file);
@@ -2390,10 +2557,26 @@ export class OpenClawPowerApp extends LitElement {
           continue;
         }
         seen.add(id);
-        additions.push({ id, file });
+        additions.push({
+          id,
+          file,
+          status: "pending",
+          progress: null,
+          error: null,
+          uploadedEntry: null,
+        });
       }
       if (additions.length > 0) {
-        this.pendingChatFiles = [...this.pendingChatFiles, ...additions];
+        this.patchChatDraftState(
+          (currentDraft) => ({
+            ...currentDraft,
+            files: [...currentDraft.files, ...additions],
+          }),
+          draftKey,
+        );
+        if (agentId) {
+          void this.ensureChatDraftUploads(agentId, draftKey);
+        }
       }
       this.lastError = null;
     }
@@ -2436,23 +2619,29 @@ export class OpenClawPowerApp extends LitElement {
   }
 
   private async sendViaChatController() {
-    const prompt = this.chatMessage.trim();
+    const draftKey = this.buildChatDraftKey();
+    const draft = this.getChatDraftState(draftKey);
+    const prompt = draft.message.trim();
     const runtime = this.activeSessionRuntime;
     const agentId = this.activeChatAgentId;
-    if ((!prompt && this.pendingChatFiles.length === 0) || !runtime || !agentId) {
+    if ((!prompt && draft.files.length === 0) || !runtime || !agentId) {
       return;
     }
     let outboundPrompt = prompt;
     try {
-      if (this.pendingChatFiles.length > 0) {
-        const uploadedEntries = await this.uploadPendingChatFiles(agentId);
+      if (draft.files.length > 0) {
+        await this.ensureChatDraftUploads(agentId, draftKey);
+        const uploadedEntries = this.getChatDraftState(draftKey)
+          .files.map((entry) => entry.uploadedEntry)
+          .filter((entry): entry is WorkbenchFileEntry => Boolean(entry));
         const relativePaths = uploadedEntries
-          .map((entry) => this.toWorkspaceRelativePath(entry.path, this.projectFilesWorkspace))
+          .map((entry) =>
+            this.toWorkspaceRelativePath(entry.path, this.resolveWorkspaceForAgent(agentId)),
+          )
           .filter(Boolean);
         if (relativePaths.length > 0) {
           outboundPrompt = this.formatChatMessageWithFileContext(prompt, relativePaths);
         }
-        await this.refreshProjectFiles(agentId);
       }
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : String(error);
@@ -2465,8 +2654,7 @@ export class OpenClawPowerApp extends LitElement {
       this.bumpChatRuntime();
       return;
     }
-    this.chatMessage = "";
-    this.clearPendingChatFiles();
+    this.clearChatDraftState(draftKey);
     this.persistSettings({
       sessionKey: this.workbenchSelectedSessionKey ?? "",
       lastActiveSessionKey: this.workbenchSelectedSessionKey ?? "",
@@ -2476,15 +2664,20 @@ export class OpenClawPowerApp extends LitElement {
   }
 
   private async startTask(projectId: string) {
-    const prompt = this.chatMessage.trim();
-    if (!prompt && this.pendingChatFiles.length === 0) {
+    const previousDraftKey = this.buildChatDraftKey(null, projectId);
+    const draft = this.activeChatDraft;
+    const prompt = draft.message.trim();
+    if (!prompt && draft.files.length === 0) {
       return;
     }
     this.lastError = null;
     try {
       const { sessionKey } = await this.adapter.startTask(projectId, prompt, this.currentModelId);
+      const nextDraft = this.getChatDraftState(previousDraftKey);
       this.workbenchSelectedProjectId = projectId;
       this.workbenchSelectedSessionKey = sessionKey;
+      this.patchChatDraftState(() => nextDraft, this.buildChatDraftKey(sessionKey, projectId));
+      this.clearChatDraftState(previousDraftKey);
       this.clearSessionUnread(sessionKey);
       this.rightRailCollapsed = false;
       this.resetSessionRuntimeViewState(sessionKey);
@@ -2500,8 +2693,9 @@ export class OpenClawPowerApp extends LitElement {
   }
 
   private async sendCurrentMessage() {
-    const prompt = this.chatMessage.trim();
-    if (!prompt && this.pendingChatFiles.length === 0) {
+    const draft = this.activeChatDraft;
+    const prompt = draft.message.trim();
+    if (!prompt && draft.files.length === 0) {
       return;
     }
     const projectId = this.activeChatAgentId;
@@ -2643,6 +2837,7 @@ export class OpenClawPowerApp extends LitElement {
 
     const visibleCronJobs = getVisibleCronJobs(this.cronState);
     const activeRuntime = this.activeSessionRuntime;
+    const activeDraft = this.activeChatDraft;
     const runningSessionKeys = Object.fromEntries(
       Array.from(this.chatRuntimeBySessionKey.entries()).flatMap(([sessionKey, runtime]) =>
         runtime.chatSending || Boolean(runtime.chatRunId) ? [[sessionKey, true] as const] : [],
@@ -2693,11 +2888,14 @@ export class OpenClawPowerApp extends LitElement {
       filePreviewObjectUrl: this.filePreviewState.objectUrl,
       sessionsResult: this.sessionsResult,
       chatMessages: activeRuntime?.chatMessages ?? [],
-      chatMessage: this.chatMessage,
-      pendingChatFiles: this.pendingChatFiles.map((entry) => ({
+      chatMessage: activeDraft.message,
+      pendingChatFiles: activeDraft.files.map((entry) => ({
         id: entry.id,
         name: entry.file.name,
         size: entry.file.size,
+        status: entry.status,
+        progress: entry.progress,
+        error: entry.error,
       })),
       chatSending: activeRuntime?.chatSending ?? false,
       chatRunId: activeRuntime?.chatRunId ?? null,
@@ -3070,10 +3268,13 @@ export class OpenClawPowerApp extends LitElement {
         this.openChatFilePicker();
       },
       onRemovePendingChatFile: (id) => {
-        this.pendingChatFiles = this.pendingChatFiles.filter((entry) => entry.id !== id);
+        this.patchChatDraftState((draft) => ({
+          ...draft,
+          files: draft.files.filter((entry) => entry.id !== id),
+        }));
       },
       onComposerChange: (value) => {
-        this.chatMessage = value;
+        this.patchChatDraftState((draft) => ({ ...draft, message: value }));
       },
       onComposerKeyDown: (event) => {
         this.handleComposerKeyDown(event);
@@ -3131,6 +3332,8 @@ export class OpenClawPowerApp extends LitElement {
       fileManagerParentPath: this.fileManagerParentPath,
       fileManagerEntries: this.fileManagerEntries,
       fileManagerBusyPath: this.fileManagerBusyPath,
+      fileSortKey: this.fileSortKey,
+      fileSearchQuery: this.fileSearchQuery,
       fileManagerCreateFolderOpen: this.fileManagerCreateFolderOpen,
       fileManagerNewFolderName: this.fileManagerNewFolderName,
       onCloseProjectDirectory: () => {
@@ -3162,6 +3365,12 @@ export class OpenClawPowerApp extends LitElement {
       },
       onRefreshFileManager: () => {
         void this.refreshFileManager();
+      },
+      onFileSortChange: (value) => {
+        this.fileSortKey = value;
+      },
+      onFileSearchChange: (value) => {
+        this.fileSearchQuery = value;
       },
       onOpenProjectFilePicker: (agentId, path) => {
         this.openProjectFilePicker(agentId, path);

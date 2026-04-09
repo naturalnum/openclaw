@@ -34,6 +34,7 @@ export type WorkbenchModelConfig = {
 };
 
 export type WorkbenchStatisticsRange = 1 | 7 | 30;
+export type WorkbenchFileSortKey = "name" | "updatedAt" | "size" | "kind";
 
 type WorkbenchDirectoryEntry = {
   name: string;
@@ -70,6 +71,9 @@ type PendingChatFileView = {
   id: string;
   name: string;
   size: number;
+  status: "pending" | "uploading" | "uploaded" | "failed";
+  progress: number | null;
+  error: string | null;
 };
 
 export type WorkbenchProps = {
@@ -190,6 +194,8 @@ export type WorkbenchProps = {
   fileManagerParentPath: string | null;
   fileManagerEntries: WorkbenchFileEntry[];
   fileManagerBusyPath: string | null;
+  fileSortKey: WorkbenchFileSortKey;
+  fileSearchQuery: string;
   fileManagerCreateFolderOpen: boolean;
   fileManagerNewFolderName: string;
   onNavigateLegacy: () => void;
@@ -227,6 +233,8 @@ export type WorkbenchProps = {
   onCreateProjectFromDirectory: (path: string | null) => void;
   onNavigateFileManager: (path: string | null) => void;
   onRefreshFileManager: () => void;
+  onFileSortChange: (value: WorkbenchFileSortKey) => void;
+  onFileSearchChange: (value: string) => void;
   onOpenProjectFilePicker: (agentId: string, path: string | null) => void;
   onDownloadProjectFile: (agentId: string, path: string) => void;
   onPreviewProjectFile: (agentId: string, entry: WorkbenchFileEntry) => void;
@@ -254,6 +262,34 @@ function tLocale(locale: string | undefined, en: string, zh: string): string {
 
 function dialogStateClass(isOpen: boolean, isClosing: boolean): string {
   return isClosing && !isOpen ? "is-closing" : isOpen ? "is-open" : "";
+}
+
+function compareFileEntries(
+  a: WorkbenchFileEntry,
+  b: WorkbenchFileEntry,
+  sortKey: WorkbenchFileSortKey,
+) {
+  if (sortKey !== "kind" && a.kind !== b.kind) {
+    return a.kind === "directory" ? -1 : 1;
+  }
+  if (sortKey === "updatedAt") {
+    const aTime = typeof a.updatedAtMs === "number" ? a.updatedAtMs : -1;
+    const bTime = typeof b.updatedAtMs === "number" ? b.updatedAtMs : -1;
+    if (aTime !== bTime) {
+      return bTime - aTime;
+    }
+  } else if (sortKey === "size") {
+    const aSize = typeof a.size === "number" ? a.size : -1;
+    const bSize = typeof b.size === "number" ? b.size : -1;
+    if (aSize !== bSize) {
+      return bSize - aSize;
+    }
+  } else if (sortKey === "kind") {
+    if (a.kind !== b.kind) {
+      return a.kind.localeCompare(b.kind);
+    }
+  }
+  return a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true });
 }
 
 function isTreeMenuOpen(props: WorkbenchProps, key: string): boolean {
@@ -689,6 +725,7 @@ function renderNewTaskView(
             )}
             @input=${(event: Event) =>
               props.onComposerChange((event.target as HTMLTextAreaElement).value)}
+            @keydown=${props.onComposerKeyDown}
           ></textarea>
           <div class="workbench-chat-composer__footer">
             <div class="workbench-chat-composer__controls">
@@ -1291,7 +1328,42 @@ function renderPendingChatFiles(props: WorkbenchProps) {
             <span class="workbench-chat-file-chip__icon">${icons.fileText}</span>
             <span class="workbench-chat-file-chip__body">
               <span class="workbench-chat-file-chip__name" title=${entry.name}>${entry.name}</span>
-              <span class="workbench-chat-file-chip__meta">${formatBytes(entry.size)}</span>
+              <span class="workbench-chat-file-chip__meta"
+                >${formatBytes(entry.size)} · ${
+                  entry.status === "uploading"
+                    ? entry.progress != null
+                      ? `${entry.progress}%`
+                      : "Uploading"
+                    : entry.status === "uploaded"
+                      ? "Uploaded"
+                      : entry.status === "failed"
+                        ? entry.error || "Upload failed"
+                        : "Pending"
+                }</span
+              >
+              ${
+                entry.status === "uploading" || entry.status === "failed"
+                  ? html`
+                    <span
+                      class="workbench-chat-file-chip__progress ${
+                        entry.status === "failed"
+                          ? "is-failed"
+                          : entry.progress == null
+                            ? "is-indeterminate"
+                            : ""
+                      }"
+                      aria-hidden="true"
+                    >
+                      <span
+                        class="workbench-chat-file-chip__progress-bar"
+                        style=${`width: ${
+                          entry.status === "uploading" ? (entry.progress ?? 100) : 100
+                        }%`}
+                      ></span>
+                    </span>
+                  `
+                  : nothing
+              }
             </span>
             <button
               type="button"
@@ -1435,11 +1507,18 @@ function renderProjectFilesBrowser(
   const currentPath = isActiveBrowser ? props.fileManagerCurrentPath : workspacePath;
   const parentPath = isActiveBrowser ? props.fileManagerParentPath : null;
   const entries = isActiveBrowser ? props.fileManagerEntries : props.projectFilesEntries;
+  const sortedEntries = [...entries].toSorted((a, b) =>
+    compareFileEntries(a, b, props.fileSortKey),
+  );
+  const searchQuery = props.fileSearchQuery.trim().toLowerCase();
+  const visibleEntries = searchQuery
+    ? sortedEntries.filter((entry) => entry.name.toLowerCase().includes(searchQuery))
+    : sortedEntries;
   const loading = isActiveBrowser ? props.fileManagerLoading : props.projectFilesLoading;
   const error = isActiveBrowser ? props.fileManagerError : props.projectFilesError;
   const busyPath = props.fileManagerBusyPath;
-  const folderCount = entries.filter((entry) => entry.kind === "directory").length;
-  const fileCount = entries.filter((entry) => entry.kind === "file").length;
+  const folderCount = visibleEntries.filter((entry) => entry.kind === "directory").length;
+  const fileCount = visibleEntries.filter((entry) => entry.kind === "file").length;
   const canCreate = Boolean(currentPath && !loading);
   const pathLabel = formatWorkspaceRelativePath(workspacePath, currentPath);
   const cardClass = options.fullPage
@@ -1447,10 +1526,58 @@ function renderProjectFilesBrowser(
     : "workbench-sidecard workbench-sidecard--files";
 
   return html`
-      <section class=${cardClass}>
+      <section
+        class=${cardClass}
+        @click=${(event: Event) => {
+          const target = event.target;
+          if (!(target instanceof Element)) {
+            return;
+          }
+          if (!target.closest(".workbench-mini-row--file")) {
+            props.onClearProjectEntrySelection();
+          }
+        }}
+      >
         <div class="workbench-sidecard__header">
           <h4>${tLocale(locale, "Project Files", "项目文件")}</h4>
           <div class="workbench-sidecard__actions">
+            ${
+              options.fullPage
+                ? html`
+                  <label
+                    class="workbench-search-field workbench-sidecard__search-field"
+                    aria-label=${tLocale(locale, "Search files", "搜索文件")}
+                  >
+                    ${icons.search}
+                    <input
+                      type="text"
+                      .value=${props.fileSearchQuery}
+                      placeholder=${tLocale(locale, "Search by file name...", "按文件名搜索...")}
+                      @input=${(event: Event) =>
+                        props.onFileSearchChange((event.currentTarget as HTMLInputElement).value)}
+                    />
+                  </label>
+                  <label
+                    class="workbench-sidecard__sort-select"
+                    aria-label=${tLocale(locale, "Sort files", "文件排序")}
+                  >
+                    <select
+                      .value=${props.fileSortKey}
+                      @change=${(event: Event) =>
+                        props.onFileSortChange(
+                          (event.currentTarget as HTMLSelectElement).value as WorkbenchFileSortKey,
+                        )}
+                    >
+                      <option value="name">${tLocale(locale, "Name", "名称")}</option>
+                      <option value="updatedAt">${tLocale(locale, "Modified", "修改时间")}</option>
+                      <option value="size">${tLocale(locale, "Size", "大小")}</option>
+                      <option value="kind">${tLocale(locale, "Kind", "种类")}</option>
+                    </select>
+                    <span class="workbench-sidecard__sort-select-chevron">${icons.chevronDown}</span>
+                  </label>
+                `
+                : nothing
+            }
             <button
               type="button"
               class="workbench-icon-button workbench-sidecard__toolbar-icon"
@@ -1555,11 +1682,6 @@ function renderProjectFilesBrowser(
               ? "workbench-sidecard__body workbench-sidecard__body--scroll workbench-sidecard__body--fill"
               : "workbench-sidecard__body workbench-sidecard__body--scroll"
           }
-          @click=${(event: Event) => {
-            if (event.target === event.currentTarget) {
-              props.onClearProjectEntrySelection();
-            }
-          }}
         >
           ${
             error
@@ -1573,14 +1695,18 @@ function renderProjectFilesBrowser(
                     ${tLocale(locale, "Loading files...", "正在加载文件...")}
                   </div>
                 `
-              : entries.length === 0
+              : visibleEntries.length === 0
                 ? html`
                     <div class="workbench-empty workbench-empty--tiny">
-                      ${tLocale(locale, "This folder is empty.", "当前目录为空。")}
+                      ${
+                        searchQuery
+                          ? tLocale(locale, "No matching files found.", "没有找到匹配的文件。")
+                          : tLocale(locale, "This folder is empty.", "当前目录为空。")
+                      }
                     </div>
                   `
                 : repeat(
-                    entries,
+                    visibleEntries,
                     (entry) => entry.path,
                     (entry) => html`
                     <div

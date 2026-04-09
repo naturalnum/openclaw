@@ -770,6 +770,7 @@ export class MockWorkbenchAdapter implements WorkbenchAdapter {
     const currentPath = path?.trim() || project.workspace;
     const uploaded: WorkbenchFileEntry[] = [];
     for (const file of files) {
+      file.onProgress?.({ loaded: file.file.size, total: file.file.size });
       const size = file.file.size;
       const entryPath = `${currentPath}/${file.name}`.replace(/\/+/g, "/");
       project.files.unshift({

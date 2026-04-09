@@ -315,8 +315,9 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
     path: string | null,
     files: WorkbenchUploadedFile[],
   ): Promise<WorkbenchFileEntry[]> {
+    const uploaded: WorkbenchFileEntry[] = [];
     for (const file of files) {
-      await this.gateway.uploadHttpFile({
+      const result = await this.gateway.uploadHttpFile<{ entry?: WorkbenchFileEntry }>({
         routePath: "/plugins/power-backend/fs/upload",
         query: {
           agentId,
@@ -324,9 +325,14 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
           name: file.name,
         },
         file: file.file,
+        onProgress: file.onProgress,
       });
+      const entry = result?.entry;
+      if (entry) {
+        uploaded.push(entry);
+      }
     }
-    return [];
+    return uploaded;
   }
 
   private async createPowerFsTicket(agentId: string, path: string) {

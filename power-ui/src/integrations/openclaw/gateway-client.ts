@@ -82,14 +82,55 @@ export class PowerGatewayClient {
     return await client.request<T>(method, params);
   }
 
-  async uploadHttpFile(params: {
+  async uploadHttpFile<T = unknown>(params: {
     routePath: string;
     query?: Record<string, string | null | undefined>;
     file: File;
     onProgress?: (progress: { loaded: number; total: number | null }) => void;
-  }): Promise<void> {
-    const client = await this.ensureConnected();
-    await client.uploadHttpFile(params);
+  }): Promise<T | null> {
+    await this.ensureConnected();
+    const settings = this.getSettings();
+    const token = settings.token?.trim() || "";
+    const query: Record<string, string | null | undefined> = { ...params.query };
+    if (!("token" in query) && token) {
+      query.token = token;
+    }
+    const url = buildHttpRouteUrl(settings.gatewayUrl, params.routePath, query);
+    return await new Promise<T | null>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", url, true);
+      if (params.file.type) {
+        xhr.setRequestHeader("Content-Type", params.file.type);
+      }
+      if (token) {
+        xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      }
+      xhr.upload.addEventListener("progress", (event) => {
+        params.onProgress?.({
+          loaded: event.loaded,
+          total: event.lengthComputable ? event.total : null,
+        });
+      });
+      xhr.addEventListener("error", () => reject(new Error("upload failed")));
+      xhr.addEventListener("abort", () => reject(new Error("upload aborted")));
+      xhr.addEventListener("load", () => {
+        if (xhr.status < 200 || xhr.status >= 300) {
+          reject(new Error(xhr.responseText?.trim() || `HTTP ${xhr.status}`));
+          return;
+        }
+        const text = xhr.responseText?.trim();
+        if (!text) {
+          resolve(null);
+          return;
+        }
+        try {
+          resolve(JSON.parse(text) as T);
+        } catch {
+          resolve(null);
+        }
+      });
+      xhr.send(params.file);
+    });
   }
 
   async submitHttpDownload(params: {
