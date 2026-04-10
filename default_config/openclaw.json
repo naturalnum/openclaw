@@ -29,7 +29,12 @@
       },
       "workspace": "/root/.openclaw/workspace",
       "compaction": {
-        "mode": "safeguard"
+        "mode": "safeguard",
+        "reserveTokensFloor": 30000,
+        "maxHistoryShare": 0.25,
+        "memoryFlush": {
+          "enabled": true
+        }
       },
       "maxConcurrent": 4,
       "subagents": {
