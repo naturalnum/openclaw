@@ -1,15 +1,15 @@
 import { html, nothing } from "lit";
-import { formatRelativeTimestamp } from "../format.ts";
+import { formatRelativeTimestamp } from "../../../src/infra/format-time/format-relative.ts";
+import type { SkillMessageMap } from "../compat/controllers.ts";
 import type {
   SkillsRegistryCatalogItem,
   SkillsRegistryCategory,
   SkillsRegistryInstallFilter,
   SkillsRegistryPagination,
   SkillsRegistrySortBy,
-} from "../types.ts";
-import type { SkillMessageMap } from "./controller.ts";
+} from "../compat/types.ts";
 
-export type SkillsMarketProps = {
+export type SkillsProps = {
   connected: boolean;
   loading: boolean;
   archiveBusy: boolean;
@@ -85,7 +85,7 @@ function renderInstallFilterButton(params: {
   `;
 }
 
-function renderPagination(props: SkillsMarketProps) {
+function renderPagination(props: SkillsProps) {
   if (props.pagination.totalPages <= 1) {
     return nothing;
   }
@@ -127,7 +127,7 @@ function renderPagination(props: SkillsMarketProps) {
   `;
 }
 
-function renderInstallToggle(props: SkillsMarketProps, item: SkillsRegistryCatalogItem) {
+function renderInstallToggle(props: SkillsProps, item: SkillsRegistryCatalogItem) {
   const busy = props.busyKey === item.slug;
   const installed = item.installState.installed;
   const isLocalInstall = installed && item.installState.source === "directory";
@@ -231,14 +231,8 @@ function renderInlineMetaItem(params: {
   title: string;
 }) {
   return html`
-    <div
-      title=${params.title}
-      style="display: inline-flex; align-items: center; gap: 6px; color: rgba(71, 85, 105, 0.92);"
-    >
-      <span
-        aria-hidden="true"
-        style="display: inline-flex; align-items: center; justify-content: center; color: rgba(100, 116, 139, 0.95);"
-      >
+    <div title=${params.title} style="display: inline-flex; align-items: center; gap: 6px; color: rgba(71, 85, 105, 0.92);">
+      <span aria-hidden="true" style="display: inline-flex; align-items: center; justify-content: center; color: rgba(100, 116, 139, 0.95);">
         ${renderMetaIcon(params.kind)}
       </span>
       <span style="font-size: 13px; font-weight: 500; color: inherit;">${params.value}</span>
@@ -248,10 +242,7 @@ function renderInlineMetaItem(params: {
 
 function renderMetaRow(item: SkillsRegistryCatalogItem) {
   return html`
-    <div
-      class="muted"
-      style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 13px;"
-    >
+    <div class="muted" style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 13px;">
       ${renderInlineMetaItem({
         kind: "downloads",
         value: formatCompactNumber(item.downloads),
@@ -270,10 +261,7 @@ function renderMetaRow(item: SkillsRegistryCatalogItem) {
       ${
         item.installState.installedVersion && item.installState.installedVersion !== item.version
           ? html`
-              <span
-                class="pill pill--sm pill--ok"
-                style="font-size: 11px; letter-spacing: 0.02em;"
-              >
+              <span class="pill pill--sm pill--ok" style="font-size: 11px; letter-spacing: 0.02em;">
                 Installed ${item.installState.installedVersion}
               </span>
             `
@@ -289,26 +277,16 @@ function renderDismissibleCallout(params: {
   onClose: () => void;
 }) {
   return html`
-    <div
-      class="callout ${params.tone}"
-      style="display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;"
-    >
+    <div class="callout ${params.tone}" style="display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;">
       <div style="min-width: 0; flex: 1;">${params.message}</div>
-      <button
-        class="btn"
-        type="button"
-        aria-label="关闭提示"
-        title="关闭"
-        style="padding: 2px 10px; min-height: 28px; border-radius: 999px;"
-        @click=${params.onClose}
-      >
+      <button class="btn" type="button" aria-label="关闭提示" title="关闭" style="padding: 2px 10px; min-height: 28px; border-radius: 999px;" @click=${params.onClose}>
         关闭
       </button>
     </div>
   `;
 }
 
-function renderCard(props: SkillsMarketProps, item: SkillsRegistryCatalogItem) {
+function renderCard(props: SkillsProps, item: SkillsRegistryCatalogItem) {
   const message = props.messages[item.slug] ?? null;
   const category = props.categories.find((entry) => entry.id === item.category) ?? null;
   const authorLabel = item.author ? `by ${item.author}` : "Registry skill";
@@ -316,10 +294,7 @@ function renderCard(props: SkillsMarketProps, item: SkillsRegistryCatalogItem) {
     ? `Updated ${formatRelativeTimestamp(item.updatedAt)}`
     : "Updated recently";
   return html`
-    <article
-      class="card"
-      style="padding: 18px; border-radius: 20px; display: flex; flex-direction: column; gap: 12px; min-height: 280px;"
-    >
+    <article class="card" style="padding: 18px; border-radius: 20px; display: flex; flex-direction: column; gap: 12px; min-height: 280px;">
       <div class="row" style="justify-content: space-between; align-items: center; gap: 16px; flex-wrap: nowrap;">
         <div style="min-width: 0; flex: 1;">
           ${
@@ -364,11 +339,7 @@ function renderCard(props: SkillsMarketProps, item: SkillsRegistryCatalogItem) {
               <div class="row" style="gap: 8px; flex-wrap: wrap;">
                 ${item.tags.slice(0, 4).map(
                   (tag) => html`
-                    <span
-                      class="pill pill--sm"
-                      title=${tag}
-                      style="max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
-                    >
+                    <span class="pill pill--sm" title=${tag} style="max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                       ${tag}
                     </span>
                   `,
@@ -380,10 +351,7 @@ function renderCard(props: SkillsMarketProps, item: SkillsRegistryCatalogItem) {
 
       <div style="margin-top: auto; display: flex; flex-direction: column; gap: 8px;">
         <div class="muted" style="display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
-          <span
-            title=${authorLabel}
-            style="min-width: 0; flex: 1 1 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
-          >
+          <span title=${authorLabel} style="min-width: 0; flex: 1 1 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
             ${authorLabel}
           </span>
           <span title=${updatedLabel} style="white-space: nowrap;">${updatedLabel}</span>
@@ -410,15 +378,13 @@ function renderCard(props: SkillsMarketProps, item: SkillsRegistryCatalogItem) {
   `;
 }
 
-export function renderSkillsMarket(props: SkillsMarketProps) {
+export function renderSkills(props: SkillsProps) {
   const selectedCategory =
     props.categories.find((entry) => entry.id === props.selectedCategory) ?? null;
   return html`
     <section class="card" style="padding: 24px;">
       <div style="display: flex; flex-direction: column; gap: 18px;">
-        <div
-          style="display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; flex-wrap: wrap;"
-        >
+        <div style="display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; flex-wrap: wrap;">
           <div style="max-width: 760px;">
             <div class="card-title" style="font-size: 28px; line-height: 1.1;">探索技能</div>
           </div>
@@ -448,12 +414,7 @@ export function renderSkillsMarket(props: SkillsMarketProps) {
             ${
               props.registryBaseUrl
                 ? html`
-                    <a
-                      class="btn"
-                      href=${props.registryBaseUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
+                    <a class="btn" href=${props.registryBaseUrl} target="_blank" rel="noreferrer">
                       打开技能中心
                     </a>
                   `
@@ -488,10 +449,7 @@ export function renderSkillsMarket(props: SkillsMarketProps) {
             : nothing
         }
 
-        <div
-          class="filters"
-          style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 4px;"
-        >
+        <div class="filters" style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 4px;">
           <label class="field" style="flex: 1; min-width: 240px;">
             <input
               .value=${props.filter}
@@ -528,8 +486,8 @@ export function renderSkillsMarket(props: SkillsMarketProps) {
               onSelect: props.onInstallFilterChange,
             })}
             ${renderInstallFilterButton({
-              value: "not_installed",
-              active: props.installFilter === "not_installed",
+              value: "not-installed",
+              active: props.installFilter === "not-installed",
               label: "未安装",
               onSelect: props.onInstallFilterChange,
             })}
@@ -556,28 +514,30 @@ export function renderSkillsMarket(props: SkillsMarketProps) {
             : nothing
         }
 
+        <div class="muted" style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
+          <span>共 ${formatTotal(props.pagination.total)} 个技能</span>
+          <span>第 ${props.pagination.page} / ${props.pagination.totalPages || 1} 页</span>
+        </div>
+
         ${
-          props.items.length === 0
+          props.loading && props.items.length === 0
             ? html`
-                <div class="muted" style="padding: 36px 0; text-align: center;">
-                  ${
-                    !props.connected
-                      ? "未连接到网关。"
-                      : props.loading
-                        ? "正在加载技能…"
-                        : "当前筛选条件下没有匹配的技能。"
-                  }
-                </div>
+                <div class="muted" style="padding: 28px 0; text-align: center">正在加载技能列表…</div>
               `
-            : html`
-                <div
-                  style="display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 364px), 1fr)); gap: 18px;"
-                >
-                  ${props.items.map((item) => renderCard(props, item))}
-                </div>
-                ${renderPagination(props)}
-              `
+            : props.items.length === 0
+              ? html`
+                  <div class="muted" style="padding: 28px 0; text-align: center">没有找到匹配的技能。</div>
+                `
+              : html`
+                  <div
+                    style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px;"
+                  >
+                    ${props.items.map((item) => renderCard(props, item))}
+                  </div>
+                `
         }
+
+        ${renderPagination(props)}
       </div>
     </section>
   `;

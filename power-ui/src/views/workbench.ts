@@ -10,15 +10,14 @@ import type {
   SessionsListResult,
 } from "../compat/types.ts";
 import { icons, normalizeAgentLabel, resolveAgentAvatarUrl } from "../compat/ui-core.ts";
-import {
-  renderCron,
-  renderLogs,
-  renderSkills,
-  type CronProps,
-  type LogsProps,
-  type SkillsProps,
-} from "../compat/views.ts";
+import { renderCron, renderLogs, type CronProps, type LogsProps } from "../compat/views.ts";
 import { renderPowerChatThread } from "../integrations/openclaw/chat/thread.ts";
+import {
+  isGeneratedUntitledSessionLabel,
+  isProtectedMainSessionKey,
+  looksLikeOpaqueSessionId,
+} from "../integrations/openclaw/session-keys.ts";
+import { renderSkills, type SkillsProps } from "./skills.ts";
 
 export type WorkbenchSection = "newTask" | "skills" | "files" | "automations" | "logs";
 export type WorkbenchSettingsTab = "general" | "models" | "statistics" | "automations" | "logs";
@@ -35,6 +34,20 @@ export type WorkbenchModelConfig = {
 
 export type WorkbenchStatisticsRange = 1 | 7 | 30;
 export type WorkbenchFileSortKey = "name" | "updatedAt" | "size" | "kind";
+
+const AGENT_MANAGED_PROJECT_FILE_NAMES = new Set([
+  ".git",
+  ".openclaw",
+  "AGENTS.md",
+  "BOOTSTRAP.md",
+  "HEARTBEAT.md",
+  "IDENTITY.md",
+  "memory",
+  "SOUL.md",
+  "skills",
+  "TOOLS.md",
+  "USER.md",
+]);
 
 type WorkbenchDirectoryEntry = {
   name: string;
@@ -80,6 +93,7 @@ export type WorkbenchProps = {
   basePath: string;
   assistantName: string;
   currentProjectId: string | null;
+  filesPageProjectId: string | null;
   currentSessionKey: string;
   treeMenuOpenKey: string | null;
   currentModelId: string;
@@ -199,6 +213,8 @@ export type WorkbenchProps = {
   fileManagerBusyPath: string | null;
   fileSortKey: WorkbenchFileSortKey;
   fileSortMenuOpen: boolean;
+  showAgentFiles: boolean;
+  fileVisibilityMenuOpen: boolean;
   fileSearchQuery: string;
   fileManagerCreateFolderOpen: boolean;
   fileManagerNewFolderName: string;
@@ -244,6 +260,8 @@ export type WorkbenchProps = {
   onRefreshFileManager: () => void;
   onFileSortChange: (value: WorkbenchFileSortKey) => void;
   onToggleFileSortMenu: () => void;
+  onToggleAgentFilesVisibility: () => void;
+  onToggleFileVisibilityMenu: () => void;
   onFileSearchChange: (value: string) => void;
   onOpenProjectFilePicker: (agentId: string, path: string | null) => void;
   onDownloadProjectFile: (agentId: string, path: string) => void;
@@ -305,6 +323,10 @@ function compareFileEntries(
   return a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true });
 }
 
+function isAgentManagedProjectFile(entry: WorkbenchFileEntry) {
+  return AGENT_MANAGED_PROJECT_FILE_NAMES.has(entry.name.trim());
+}
+
 function isTreeMenuOpen(props: WorkbenchProps, key: string): boolean {
   return props.treeMenuOpenKey === key;
 }
@@ -316,6 +338,8 @@ export function renderWorkbench(props: WorkbenchProps) {
     projects.find((project) => project.id === (props.newTaskProjectId ?? props.currentProjectId)) ??
     projects[0] ??
     null;
+  const filesPageProject =
+    projects.find((project) => project.id === props.filesPageProjectId) ?? null;
   const listedActiveSession =
     projects
       .flatMap((project) => project.sessions)
@@ -498,7 +522,7 @@ export function renderWorkbench(props: WorkbenchProps) {
             <section class="workbench-center">
               ${
                 props.section === "files"
-                  ? renderFilesPage(props, currentProject)
+                  ? renderFilesPage(props, filesPageProject)
                   : props.section === "skills"
                     ? renderSkillsPage(props)
                     : activeSession
@@ -961,6 +985,7 @@ function renderProjectDirectoryDialog(props: WorkbenchProps) {
                     <span class="workbench-directory-create__icon">${icons.folderPlus}</span>
                     <input
                       class="workbench-directory-create__input"
+                      data-project-directory-folder-input
                       .value=${props.projectDirectoryCreateFolderName}
                       placeholder=${tLocale(locale, "Enter folder name...", "输入文件夹名称...")}
                       @input=${(event: Event) =>
@@ -1166,6 +1191,7 @@ function renderProjectTreeRow(project: WorkbenchProject, props: WorkbenchProps) 
                         (session) => {
                           const sessionMenuKey = `session:${session.key}`;
                           const sessionMenuOpen = isTreeMenuOpen(props, sessionMenuKey);
+                          const sessionDeleteDisabled = isProtectedMainSessionKey(session.key);
                           return html`
                         <div
                           class="workbench-tree-session ${
@@ -1229,11 +1255,31 @@ function renderProjectTreeRow(project: WorkbenchProject, props: WorkbenchProps) 
                                     </button>
                                     <button
                                       type="button"
-                                      class="workbench-tree-menu__item workbench-tree-menu__item--danger"
+                                      class="workbench-tree-menu__item workbench-tree-menu__item--danger ${
+                                        sessionDeleteDisabled ? "is-disabled" : ""
+                                      }"
                                       role="menuitem"
+                                      ?disabled=${sessionDeleteDisabled}
+                                      title=${
+                                        sessionDeleteDisabled
+                                          ? tLocale(
+                                              locale,
+                                              "The default main session cannot be deleted",
+                                              "默认主会话不可删除",
+                                            )
+                                          : ""
+                                      }
                                       @click=${() => props.onDeleteSession(session.key)}
                                     >
-                                      ${tLocale(locale, "Delete", "删除")}
+                                      ${
+                                        sessionDeleteDisabled
+                                          ? tLocale(
+                                              locale,
+                                              "Default session cannot be deleted",
+                                              "默认会话不可删除",
+                                            )
+                                          : tLocale(locale, "Delete", "删除")
+                                      }
                                     </button>
                                   </div>
                                 `
@@ -1460,12 +1506,12 @@ function renderFilesPage(props: WorkbenchProps, project: WorkbenchProject | null
       <section class="workbench-page-shell workbench-page-shell--scroll">
         <div class="workbench-page-shell__body">
           <div class="workbench-empty workbench-empty--chat">
-            <h4>${tLocale(locale, "No project selected", "尚未选择项目")}</h4>
+            <h4>${tLocale(locale, "No default workspace available", "默认工作目录不可用")}</h4>
             <p>
               ${tLocale(
                 locale,
-                "Choose a project from the sidebar to browse workspace files.",
-                "从左侧选择项目后即可浏览工作区文件。",
+                "Configure or enable a default agent first, then open Files again.",
+                "请先配置并启用默认 agent，然后再打开文件页面。",
               )}
             </p>
           </div>
@@ -1538,10 +1584,14 @@ function renderProjectFilesBrowser(
   const sortedEntries = [...entries].toSorted((a, b) =>
     compareFileEntries(a, b, props.fileSortKey),
   );
+  const filteredEntries = props.showAgentFiles
+    ? sortedEntries
+    : sortedEntries.filter((entry) => !isAgentManagedProjectFile(entry));
+  const hiddenAgentFileCount = sortedEntries.length - filteredEntries.length;
   const searchQuery = props.fileSearchQuery.trim().toLowerCase();
   const visibleEntries = searchQuery
-    ? sortedEntries.filter((entry) => entry.name.toLowerCase().includes(searchQuery))
-    : sortedEntries;
+    ? filteredEntries.filter((entry) => entry.name.toLowerCase().includes(searchQuery))
+    : filteredEntries;
   const loading = isActiveBrowser ? props.fileManagerLoading : props.projectFilesLoading;
   const error = isActiveBrowser ? props.fileManagerError : props.projectFilesError;
   const busyPath = props.fileManagerBusyPath;
@@ -1609,8 +1659,66 @@ function renderProjectFilesBrowser(
                     </select>
                     <span class="workbench-sidecard__sort-select-chevron">${icons.chevronDown}</span>
                   </label>
+                  <div class="workbench-sidecard__visibility-switch">
+                    <span>${tLocale(locale, "Show agent files", "显示智能体文件")}</span>
+                    <label class="workbench-switch">
+                      <input
+                        type="checkbox"
+                        .checked=${props.showAgentFiles}
+                        @change=${() => props.onToggleAgentFilesVisibility()}
+                      />
+                      <span></span>
+                    </label>
+                  </div>
                 `
                 : html`
+                    <div class="workbench-sidecard__sort-menu-anchor">
+                      <button
+                        type="button"
+                        class="workbench-icon-button workbench-sidecard__toolbar-icon"
+                        title=${tLocale(locale, "File visibility", "显示设置")}
+                        aria-label=${tLocale(locale, "File visibility", "显示设置")}
+                        aria-expanded=${String(props.fileVisibilityMenuOpen)}
+                        @click=${(event: Event) => {
+                          event.stopPropagation();
+                          props.onToggleFileVisibilityMenu();
+                        }}
+                      >
+                        ${props.showAgentFiles ? icons.eye : icons.eyeOff}
+                      </button>
+                      ${
+                        props.fileVisibilityMenuOpen
+                          ? html`
+                              <div class="workbench-sidecard__sort-menu" role="menu">
+                                <div class="workbench-sidecard__sort-menu-title">
+                                  ${tLocale(locale, "Visibility", "显示内容")}
+                                </div>
+                                <button
+                                  type="button"
+                                  class="workbench-sidecard__sort-menu-item ${
+                                    props.showAgentFiles ? "is-active" : ""
+                                  }"
+                                  role="menuitemcheckbox"
+                                  aria-checked=${String(props.showAgentFiles)}
+                                  @click=${(event: Event) => {
+                                    event.stopPropagation();
+                                    props.onToggleAgentFilesVisibility();
+                                  }}
+                                >
+                                  <span>${tLocale(locale, "Agent files", "智能体文件")}</span>
+                                  ${
+                                    props.showAgentFiles
+                                      ? html`
+                                          <span class="workbench-sidecard__sort-menu-check">✓</span>
+                                        `
+                                      : nothing
+                                  }
+                                </button>
+                              </div>
+                            `
+                          : nothing
+                      }
+                    </div>
                     <div class="workbench-sidecard__sort-menu-anchor">
                       <button
                         type="button"
@@ -1724,6 +1832,7 @@ function renderProjectFilesBrowser(
                 <input
                   type="text"
                   class="workbench-sidecard__create-input"
+                  data-file-manager-folder-input
                   .value=${props.fileManagerNewFolderName}
                   placeholder=${tLocale(locale, "Enter folder name...", "输入文件夹名称...")}
                   @input=${(event: Event) =>
@@ -1878,6 +1987,14 @@ function renderProjectFilesBrowser(
         <div class="workbench-sidecard__footer">
           ${folderCount} ${tLocale(locale, "folders", "个文件夹")} · ${fileCount}
           ${tLocale(locale, "files", "个文件")}
+          ${
+            !props.showAgentFiles && hiddenAgentFileCount > 0
+              ? html`
+                  · ${tLocale(locale, "Hidden", "已隐藏")} ${hiddenAgentFileCount}
+                  ${tLocale(locale, "agent files", "个智能体文件")}
+                `
+              : nothing
+          }
         </div>
       </section>
   `;
@@ -2499,6 +2616,7 @@ function renderModelInputRow(
 }
 
 function resolveProjects(props: WorkbenchProps): WorkbenchProject[] {
+  const locale = props.settings.locale;
   const agents = props.agentsList?.agents ?? [];
   const sessionsByAgent = new Map<string, WorkbenchSession[]>();
   for (const row of props.sessionsResult?.sessions ?? []) {
@@ -2507,13 +2625,15 @@ function resolveProjects(props: WorkbenchProps): WorkbenchProject[] {
       continue;
     }
     const list = sessionsByAgent.get(parsed.agentId) ?? [];
+    const fallbackLabel = shortSessionLabel(row.key);
     list.push({
       key: row.key,
       label:
         row.displayName?.trim() ||
         row.label?.trim() ||
         row.subject?.trim() ||
-        shortSessionLabel(row.key),
+        fallbackLabel ||
+        formatUntitledSessionLabel(row.updatedAt ?? null, locale),
       title: row.subject?.trim() || row.key,
       updatedAt: row.updatedAt ?? null,
       tokens: row.totalTokens ?? 0,
@@ -2567,7 +2687,31 @@ function resolveProjects(props: WorkbenchProps): WorkbenchProject[] {
 function shortSessionLabel(sessionKey: string) {
   const parsed = parseAgentSessionKey(sessionKey);
   const last = parsed?.rest?.split(":").filter(Boolean).pop();
-  return last || sessionKey;
+  const candidate = (last || sessionKey).trim();
+  if (!candidate) {
+    return "";
+  }
+  if (looksLikeOpaqueSessionId(candidate) || isGeneratedUntitledSessionLabel(candidate)) {
+    return "";
+  }
+  return candidate;
+}
+
+function formatUntitledSessionLabel(updatedAt: number | null, locale?: string) {
+  const base = tLocale(locale, "New conversation", "新会话");
+  if (!updatedAt) {
+    return base;
+  }
+  try {
+    const time = new Intl.DateTimeFormat(locale, {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(updatedAt);
+    return `${base} · ${time}`;
+  } catch {
+    return base;
+  }
 }
 
 function formatBytes(bytes: number) {

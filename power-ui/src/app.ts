@@ -1,6 +1,7 @@
 import { LitElement, html, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { parseAgentSessionKey } from "../../src/routing/session-key.ts";
+import { extractText } from "../../ui/src/ui/chat/message-extract.ts";
 import { GatewayWorkbenchAdapter } from "./adapters/gateway-workbench-adapter.ts";
 import type { WorkbenchSnapshot } from "./adapters/mock-workbench-adapter.ts";
 import type {
@@ -90,7 +91,12 @@ import {
   type ToolStreamEntry,
   type UiSettings,
 } from "./compat/ui-core.ts";
-import { buildSessionLabelFromPrompt } from "./integrations/openclaw/session-keys.ts";
+import {
+  buildSessionLabelFromPrompt,
+  isGeneratedUntitledSessionLabel,
+  isProtectedMainSessionKey,
+  looksLikeOpaqueSessionId,
+} from "./integrations/openclaw/session-keys.ts";
 import {
   renderWorkbench,
   type WorkbenchFileSortKey,
@@ -332,6 +338,10 @@ function buildUniqueSessionLabel(
   return normalizeSessionLabelInput(`${normalizedBase} ${Date.now().toString().slice(-4)}`);
 }
 
+function resolveSessionProjectId(sessionKey: string | null | undefined): string | null {
+  return parseAgentSessionKey(sessionKey ?? "")?.agentId ?? null;
+}
+
 function createEmptyModelConfig(): WorkbenchModelConfig {
   return {
     id: createLocalId(),
@@ -383,6 +393,21 @@ function resolvePrimaryModelFromConfig(config: Record<string, unknown> | null | 
     return ((modelConfig as { primary?: string }).primary ?? "").trim();
   }
   return "";
+}
+
+function readDefaultAgentWorkspace(
+  config: Record<string, unknown> | null | undefined,
+): string | null {
+  const workspace = (
+    config as {
+      agents?: {
+        defaults?: {
+          workspace?: unknown;
+        };
+      };
+    } | null
+  )?.agents?.defaults?.workspace;
+  return typeof workspace === "string" && workspace.trim() ? workspace.trim() : null;
 }
 
 function readGlobalModelConfigs(
@@ -678,7 +703,12 @@ export class OpenClawPowerApp extends LitElement {
   });
   private adapterUnsubscribe: (() => void) | null = null;
   private readonly handleDocumentPointerDown = (event: PointerEvent) => {
-    if (!this.newTaskProjectMenuOpen && !this.treeMenuOpenKey && !this.fileSortMenuOpen) {
+    if (
+      !this.newTaskProjectMenuOpen &&
+      !this.treeMenuOpenKey &&
+      !this.fileSortMenuOpen &&
+      !this.fileVisibilityMenuOpen
+    ) {
       return;
     }
     const path = event.composedPath();
@@ -704,6 +734,7 @@ export class OpenClawPowerApp extends LitElement {
     }
     if (!clickedInsideFileSortMenu) {
       this.fileSortMenuOpen = false;
+      this.fileVisibilityMenuOpen = false;
     }
   };
   basePath = resolveBasePath();
@@ -823,6 +854,7 @@ export class OpenClawPowerApp extends LitElement {
   @state() expandedProjectSessionIds: string[] = [];
   @state() priorityProjectIds: string[] = [];
   @state() workbenchSelectedProjectId: string | null = null;
+  @state() filesPageProjectId: string | null = null;
   @state() workbenchSelectedSessionKey: string | null = null;
   @state() workbenchSettingsOpen = false;
   @state() workbenchSettingsClosing = false;
@@ -847,6 +879,7 @@ export class OpenClawPowerApp extends LitElement {
   @state() projectDirectoryCreateFolderOpen = false;
   @state() projectDirectoryCreateFolderName = "";
   @state() projectDirectoryCreateFolderBusy = false;
+  @state() defaultAgentWorkspace: string | null = null;
   @state() fileManagerLoading = false;
   @state() fileManagerError: string | null = null;
   @state() fileManagerAgentId: string | null = null;
@@ -857,6 +890,8 @@ export class OpenClawPowerApp extends LitElement {
   @state() fileManagerEntries: WorkbenchFileEntry[] = [];
   @state() fileSortKey: WorkbenchFileSortKey = "name";
   @state() fileSortMenuOpen = false;
+  @state() showAgentFiles = false;
+  @state() fileVisibilityMenuOpen = false;
   @state() fileSearchQuery = "";
   @state() selectedProjectEntryPath: string | null = null;
   @state() fileManagerBusyPath: string | null = null;
@@ -909,6 +944,7 @@ export class OpenClawPowerApp extends LitElement {
   }
   private readonly chatRuntimeBySessionKey = new Map<string, SessionRuntimeState>();
   private readonly chatUploadTasks = new Map<string, Promise<void>>();
+  private readonly autoTitlingSessionKeys = new Set<string>();
   private readonly initialSessionKeyFromUrl = INITIAL_SETTINGS.urlSessionKey;
   private pendingProjectFileUploadAgentId: string | null = null;
   private pendingProjectFileUploadPath: string | null = null;
@@ -1556,6 +1592,7 @@ export class OpenClawPowerApp extends LitElement {
     ]);
     this.applyGlobalModelSettings(configSnapshot);
     this.applySnapshot(snapshot);
+    this.filesPageProjectId = this.resolveDefaultProjectId();
     await this.refreshProjectFiles(selection.projectId);
     this.connected = true;
     this.logsState.connected = true;
@@ -1613,12 +1650,35 @@ export class OpenClawPowerApp extends LitElement {
     this.skillsState.connected = true;
     this.channelsState.connected = true;
     this.cronState.connected = true;
+    const defaultProjectId =
+      snapshot.agentsList?.defaultId ?? snapshot.agentsList?.agents[0]?.id ?? null;
+    if (
+      !this.filesPageProjectId ||
+      !snapshot.agentsList?.agents.some((agent) => agent.id === this.filesPageProjectId)
+    ) {
+      this.filesPageProjectId = defaultProjectId;
+    }
     if (snapshot.currentSessionKey) {
       const runtime = this.getOrCreateSessionRuntime(snapshot.currentSessionKey);
       if (runtime) {
         const snapshotMessages = snapshot.chatMessages;
+        const snapshotUserCount = snapshotMessages.filter(
+          (message) =>
+            message &&
+            typeof message === "object" &&
+            typeof (message as { role?: unknown }).role === "string" &&
+            (message as { role: string }).role.toLowerCase() === "user",
+        ).length;
+        const runtimeUserCount = runtime.chatMessages.filter(
+          (message) =>
+            message &&
+            typeof message === "object" &&
+            typeof (message as { role?: unknown }).role === "string" &&
+            (message as { role: string }).role.toLowerCase() === "user",
+        ).length;
         const shouldPreserveLocalChatState =
-          snapshotMessages.length === 0 &&
+          (snapshotMessages.length === 0 ||
+            (runtimeUserCount > snapshotUserCount && runtime.chatMessages.length > 0)) &&
           (runtime.chatMessages.length > 0 ||
             runtime.chatSending ||
             Boolean(runtime.chatRunId) ||
@@ -1633,6 +1693,7 @@ export class OpenClawPowerApp extends LitElement {
           runtime.lastError = null;
           resetToolStream(runtime as unknown as Parameters<typeof resetToolStream>[0]);
         }
+        void this.maybeBackfillSessionLabel(snapshot.currentSessionKey, runtime.chatMessages);
       }
     }
     this.clearSessionUnread(snapshot.currentSessionKey);
@@ -1699,6 +1760,7 @@ export class OpenClawPowerApp extends LitElement {
     this.expandedModelConfigId = this.modelConfigs[0]?.id ?? null;
     const primary = resolvePrimaryModelFromConfig(config);
     this.currentModelId = this.resolveAvailableModelRef(primary);
+    this.defaultAgentWorkspace = readDefaultAgentWorkspace(config);
   }
 
   private scheduleGlobalModelConfigPersist() {
@@ -2109,7 +2171,10 @@ export class OpenClawPowerApp extends LitElement {
     });
     await this.refreshSnapshot(null, projectId);
     if (preserveFilesView) {
-      await this.refreshProjectFiles(projectId);
+      const filesProjectId = this.filesPageProjectId ?? this.resolveDefaultProjectId();
+      if (filesProjectId) {
+        await this.refreshProjectFiles(filesProjectId);
+      }
     }
   }
 
@@ -2140,6 +2205,15 @@ export class OpenClawPowerApp extends LitElement {
     if (!input) {
       return;
     }
+    input.value = "";
+    if (typeof input.showPicker === "function") {
+      try {
+        input.showPicker();
+        return;
+      } catch {
+        // Fall back to click() when the browser rejects showPicker for this input state.
+      }
+    }
     input.click();
   }
 
@@ -2150,7 +2224,26 @@ export class OpenClawPowerApp extends LitElement {
     if (!input) {
       return;
     }
+    input.value = "";
+    if (typeof input.showPicker === "function") {
+      try {
+        input.showPicker();
+        return;
+      } catch {
+        // Fall back to click() when the browser rejects showPicker for this input state.
+      }
+    }
     input.click();
+  }
+
+  private focusFileManagerCreateFolderInput() {
+    window.requestAnimationFrame(() => {
+      const input = this.renderRoot.querySelector<HTMLInputElement>(
+        "[data-file-manager-folder-input]",
+      );
+      input?.focus();
+      input?.select();
+    });
   }
 
   private clearFileManagerState() {
@@ -2220,13 +2313,17 @@ export class OpenClawPowerApp extends LitElement {
       this.clearFileManagerState();
       return;
     }
+    const expectedAgentId =
+      this.workbenchSection === "files"
+        ? (this.filesPageProjectId ?? this.resolveDefaultProjectId() ?? targetAgentId)
+        : (this.workbenchSelectedProjectId ?? "").trim() || targetAgentId;
     this.projectFilesLoading = true;
     this.projectFilesError = null;
     const requestedPath =
       this.fileManagerAgentId === targetAgentId ? this.fileManagerCurrentPath : null;
     try {
       const listing = await this.adapter.listProjectFiles(targetAgentId, requestedPath);
-      if ((this.workbenchSelectedProjectId ?? "") !== targetAgentId) {
+      if (expectedAgentId !== targetAgentId) {
         return;
       }
       this.projectFilesAgentId = listing.agentId;
@@ -2241,7 +2338,7 @@ export class OpenClawPowerApp extends LitElement {
       this.syncSelectedProjectEntry(listing.entries);
       this.lastError = null;
     } catch (error) {
-      if ((this.workbenchSelectedProjectId ?? "") !== targetAgentId) {
+      if (expectedAgentId !== targetAgentId) {
         return;
       }
       const message = error instanceof Error ? error.message : String(error);
@@ -2259,11 +2356,15 @@ export class OpenClawPowerApp extends LitElement {
       this.fileManagerEntries = [];
       this.selectedProjectEntryPath = null;
     } finally {
-      if ((this.workbenchSelectedProjectId ?? "") === targetAgentId) {
+      if (expectedAgentId === targetAgentId) {
         this.projectFilesLoading = false;
         this.fileManagerLoading = false;
       }
     }
+  }
+
+  private resolveDefaultProjectId() {
+    return this.agentsList?.defaultId ?? this.agentsList?.agents[0]?.id ?? null;
   }
 
   private async loadFileManagerPath(agentId: string, path: string | null) {
@@ -2384,7 +2485,7 @@ export class OpenClawPowerApp extends LitElement {
     const projectName =
       this.agentsList?.agents.find((agent) => agent.id === projectId)?.name?.trim() || projectId;
     const confirmed = window.confirm(
-      `Delete project "${projectName}"? This will remove the project and its sessions.`,
+      `Delete project "${projectName}"? This will only remove it from the project list and keep the workspace files and session history.`,
     );
     this.treeMenuOpenKey = null;
     if (!confirmed) {
@@ -2446,6 +2547,14 @@ export class OpenClawPowerApp extends LitElement {
     const sessionLabel =
       this.sessionsResult?.sessions.find((session) => session.key === sessionKey)?.label?.trim() ||
       sessionKey;
+    if (isProtectedMainSessionKey(sessionKey)) {
+      this.treeMenuOpenKey = null;
+      this.lastError =
+        this.i18n.locale === "zh-CN"
+          ? "默认主会话不能删除。请新建或删除其他普通会话。"
+          : "The default main session cannot be deleted.";
+      return;
+    }
     const confirmed = window.confirm(`Delete session "${sessionLabel}"?`);
     this.treeMenuOpenKey = null;
     if (!confirmed) {
@@ -2585,15 +2694,38 @@ export class OpenClawPowerApp extends LitElement {
     const validation = await this.adapter.validateProjectWorkspace(workspace);
     const normalizedName = validation.name.trim();
     const normalizedWorkspace = validation.path.trim();
+    const defaultWorkspace = this.defaultAgentWorkspace?.trim() ?? "";
     if (!normalizedName || !normalizedWorkspace) {
       return null;
     }
-    return await this.adapter.createProject(normalizedName, normalizedWorkspace);
+    if (defaultWorkspace && normalizedWorkspace === defaultWorkspace) {
+      throw new Error("默认工作目录已由系统主项目使用，请选择其下的子文件夹作为项目目录。");
+    }
+    try {
+      return await this.adapter.createProject(normalizedName, normalizedWorkspace);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/already exists/i.test(message)) {
+        throw new Error(`该目录已添加为“${normalizedName}”项目，无需重复添加。`, { cause: error });
+      }
+      throw error;
+    }
   }
 
   private async loadProjectDirectoryRoots() {
-    const { roots } = await this.adapter.listProjectRoots();
-    this.projectDirectoryRoots = roots;
+    const defaultWorkspace = this.defaultAgentWorkspace?.trim() ?? "";
+    if (defaultWorkspace) {
+      const validated = await this.adapter.validateProjectWorkspace(defaultWorkspace);
+      this.projectDirectoryRoots = [
+        {
+          name: validated.name,
+          path: validated.path,
+        },
+      ];
+    } else {
+      const { roots } = await this.adapter.listProjectRoots();
+      this.projectDirectoryRoots = roots;
+    }
     this.projectDirectoryTreeChildrenByPath = {};
     this.projectDirectoryExpandedPaths = [];
     this.projectDirectoryLoadingPaths = [];
@@ -2714,6 +2846,11 @@ export class OpenClawPowerApp extends LitElement {
     if (!normalizedPath) {
       return;
     }
+    const rootPath = this.projectDirectoryRoots[0]?.path?.trim() || "";
+    if (rootPath && normalizedPath !== rootPath && !normalizedPath.startsWith(`${rootPath}/`)) {
+      this.projectDirectoryError = `Path is outside allowed workspace root: ${normalizedPath}`;
+      return;
+    }
     try {
       this.projectDirectoryError = null;
       this.projectDirectorySelectedPath = normalizedPath;
@@ -2740,7 +2877,15 @@ export class OpenClawPowerApp extends LitElement {
     if (!open) {
       this.projectDirectoryCreateFolderName = "";
       this.projectDirectoryCreateFolderBusy = false;
+      return;
     }
+    window.requestAnimationFrame(() => {
+      const input = this.renderRoot.querySelector<HTMLInputElement>(
+        "[data-project-directory-folder-input]",
+      );
+      input?.focus();
+      input?.select();
+    });
   }
 
   private async createProjectDirectoryFolder() {
@@ -2930,6 +3075,9 @@ export class OpenClawPowerApp extends LitElement {
       sessionKey: this.workbenchSelectedSessionKey ?? "",
       lastActiveSessionKey: this.workbenchSelectedSessionKey ?? "",
     });
+    if (this.workbenchSelectedSessionKey) {
+      void this.maybeBackfillSessionLabel(this.workbenchSelectedSessionKey, runtime.chatMessages);
+    }
     this.bumpChatRuntime();
     this.scheduleActiveChatScroll(true, false);
   }
@@ -2944,7 +3092,7 @@ export class OpenClawPowerApp extends LitElement {
     this.lastError = null;
     try {
       const requestedLabel = buildSessionLabelFromPrompt(prompt);
-      const existingLabels = (this.sessionsResult?.sessions ?? []).map((session) => session.label);
+      const existingLabels = this.getProjectSessionLabels(projectId);
       const uniqueLabel = buildUniqueSessionLabel(requestedLabel, existingLabels);
       const { sessionKey } = await this.adapter.startTask(projectId, prompt, this.currentModelId, {
         label: uniqueLabel,
@@ -3075,6 +3223,7 @@ export class OpenClawPowerApp extends LitElement {
       this.markSessionUnread(event.sessionKey);
     }
     this.bumpChatRuntime();
+    void this.maybeBackfillSessionLabel(event.sessionKey, runtime.chatMessages);
     if (isActiveSession) {
       if (event.state === "final" || event.state === "aborted" || event.state === "error") {
         flushToolStreamSync(runtime as unknown as Parameters<typeof flushToolStreamSync>[0]);
@@ -3090,6 +3239,126 @@ export class OpenClawPowerApp extends LitElement {
           this.workbenchSelectedProjectId,
         );
       }
+    }
+  }
+
+  private getSessionListRow(sessionKey: string) {
+    return this.sessionsResult?.sessions.find((session) => session.key === sessionKey) ?? null;
+  }
+
+  private hasStableSessionLabel(sessionKey: string) {
+    const row = this.getSessionListRow(sessionKey);
+    const candidate = row?.displayName?.trim() || row?.label?.trim() || row?.subject?.trim() || "";
+    if (!candidate) {
+      return false;
+    }
+    if (looksLikeOpaqueSessionId(candidate) || isGeneratedUntitledSessionLabel(candidate)) {
+      return false;
+    }
+    return true;
+  }
+
+  private extractFirstUserMessageLabel(messages: unknown[]) {
+    for (const message of messages) {
+      if (!message || typeof message !== "object") {
+        continue;
+      }
+      const role =
+        typeof (message as { role?: unknown }).role === "string"
+          ? (message as { role: string }).role.toLowerCase()
+          : "";
+      if (role !== "user") {
+        continue;
+      }
+      const text = extractText(message)?.trim() ?? "";
+      if (text) {
+        return buildSessionLabelFromPrompt(text);
+      }
+    }
+    return null;
+  }
+
+  private getProjectSessionLabels(
+    projectId: string | null,
+    options?: { excludeSessionKey?: string | null },
+  ) {
+    const scopedProjectId = projectId?.trim() ?? "";
+    const excludedKey = options?.excludeSessionKey?.trim() ?? "";
+    if (!scopedProjectId) {
+      return [];
+    }
+    return (this.sessionsResult?.sessions ?? [])
+      .filter((session) => {
+        if (excludedKey && session.key === excludedKey) {
+          return false;
+        }
+        return resolveSessionProjectId(session.key) === scopedProjectId;
+      })
+      .map((session) => session.label);
+  }
+
+  private applySessionLabelLocally(sessionKey: string, nextLabel: string) {
+    if (!this.sessionsResult) {
+      return;
+    }
+    const normalizedLabel = nextLabel.trim();
+    if (!normalizedLabel) {
+      return;
+    }
+    let changed = false;
+    const sessions = this.sessionsResult.sessions.map((session) => {
+      if (session.key !== sessionKey) {
+        return session;
+      }
+      changed = true;
+      const displayName =
+        session.displayName?.trim() && !isGeneratedUntitledSessionLabel(session.displayName.trim())
+          ? session.displayName
+          : normalizedLabel;
+      const label =
+        session.label?.trim() && !isGeneratedUntitledSessionLabel(session.label.trim())
+          ? session.label
+          : normalizedLabel;
+      return {
+        ...session,
+        displayName,
+        label,
+      };
+    });
+    if (!changed) {
+      return;
+    }
+    this.sessionsResult = {
+      ...this.sessionsResult,
+      sessions,
+    };
+  }
+
+  private async maybeBackfillSessionLabel(sessionKey: string | null, messages: unknown[]) {
+    const key = sessionKey?.trim() ?? "";
+    if (!key || this.autoTitlingSessionKeys.has(key) || this.hasStableSessionLabel(key)) {
+      return;
+    }
+    const baseLabel = this.extractFirstUserMessageLabel(messages);
+    if (!baseLabel) {
+      return;
+    }
+    const projectId = resolveSessionProjectId(key);
+    const nextLabel = buildUniqueSessionLabel(
+      baseLabel,
+      this.getProjectSessionLabels(projectId, { excludeSessionKey: key }),
+    );
+    this.autoTitlingSessionKeys.add(key);
+    try {
+      if (this.hasStableSessionLabel(key)) {
+        return;
+      }
+      await this.adapter.renameSession(key, nextLabel);
+      this.applySessionLabelLocally(key, nextLabel);
+    } catch {
+      // Keep auto-title attempts silent to avoid polluting the UI with transient naming failures.
+    } finally {
+      this.autoTitlingSessionKeys.delete(key);
     }
   }
 
@@ -3231,6 +3500,7 @@ export class OpenClawPowerApp extends LitElement {
       basePath: this.basePath,
       assistantName: this.assistantName,
       currentProjectId: this.workbenchSelectedProjectId,
+      filesPageProjectId: this.filesPageProjectId,
       currentSessionKey: this.workbenchSelectedSessionKey ?? "",
       treeMenuOpenKey: this.treeMenuOpenKey,
       currentModelId: this.currentModelId,
@@ -3579,13 +3849,9 @@ export class OpenClawPowerApp extends LitElement {
           this.treeMenuOpenKey = null;
           if (section === "files") {
             this.stopLogsAutoRefresh();
-            const projectId =
-              this.workbenchSelectedProjectId ??
-              this.agentsList?.defaultId ??
-              this.agentsList?.agents[0]?.id ??
-              null;
+            const projectId = this.resolveDefaultProjectId();
             if (projectId) {
-              this.workbenchSelectedProjectId = projectId;
+              this.filesPageProjectId = projectId;
               await this.refreshProjectFiles(projectId);
             }
             return;
@@ -3715,6 +3981,8 @@ export class OpenClawPowerApp extends LitElement {
       fileManagerBusyPath: this.fileManagerBusyPath,
       fileSortKey: this.fileSortKey,
       fileSortMenuOpen: this.fileSortMenuOpen,
+      showAgentFiles: this.showAgentFiles,
+      fileVisibilityMenuOpen: this.fileVisibilityMenuOpen,
       fileSearchQuery: this.fileSearchQuery,
       fileManagerCreateFolderOpen: this.fileManagerCreateFolderOpen,
       fileManagerNewFolderName: this.fileManagerNewFolderName,
@@ -3755,7 +4023,16 @@ export class OpenClawPowerApp extends LitElement {
         this.fileSortMenuOpen = false;
       },
       onToggleFileSortMenu: () => {
+        this.fileVisibilityMenuOpen = false;
         this.fileSortMenuOpen = !this.fileSortMenuOpen;
+      },
+      onToggleAgentFilesVisibility: () => {
+        this.showAgentFiles = !this.showAgentFiles;
+        this.fileVisibilityMenuOpen = false;
+      },
+      onToggleFileVisibilityMenu: () => {
+        this.fileSortMenuOpen = false;
+        this.fileVisibilityMenuOpen = !this.fileVisibilityMenuOpen;
       },
       onFileSearchChange: (value) => {
         this.fileSearchQuery = value;
@@ -3787,11 +4064,17 @@ export class OpenClawPowerApp extends LitElement {
             await this.refreshProjectFiles(this.workbenchSelectedProjectId);
             this.fileManagerCreateFolderOpen = !this.fileManagerCreateFolderOpen;
             this.fileManagerNewFolderName = "";
+            if (this.fileManagerCreateFolderOpen) {
+              this.focusFileManagerCreateFolderInput();
+            }
           })();
           return;
         }
         this.fileManagerCreateFolderOpen = !this.fileManagerCreateFolderOpen;
         this.fileManagerNewFolderName = "";
+        if (this.fileManagerCreateFolderOpen) {
+          this.focusFileManagerCreateFolderInput();
+        }
       },
       onFileManagerFolderNameChange: (value) => {
         this.fileManagerNewFolderName = value;
@@ -3835,17 +4118,21 @@ export class OpenClawPowerApp extends LitElement {
     return html`
       ${view}
       <input
-        hidden
+        class="workbench-hidden-file-input"
         data-chat-file-input
         type="file"
         multiple
+        tabindex="-1"
+        aria-hidden="true"
         @change=${(event: Event) => this.handleChatFileSelection(event)}
       />
       <input
-        hidden
+        class="workbench-hidden-file-input"
         data-project-file-input
         type="file"
         multiple
+        tabindex="-1"
+        aria-hidden="true"
         @change=${(event: Event) => this.handleProjectFileSelection(event)}
       />
     `;

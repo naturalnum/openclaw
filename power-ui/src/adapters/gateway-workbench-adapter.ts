@@ -409,7 +409,7 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
     await requiredRequest(
       this.gateway.request("agents.delete", {
         agentId: projectId,
-        deleteFiles: true,
+        deleteFiles: false,
       }),
       "agents.delete",
     );
