@@ -15,6 +15,7 @@ import { renderPowerChatThread } from "../integrations/openclaw/chat/thread.ts";
 import {
   isGeneratedUntitledSessionLabel,
   isProtectedMainSessionKey,
+  isSystemGeneratedSessionLabel,
   looksLikeOpaqueSessionId,
 } from "../integrations/openclaw/session-keys.ts";
 import { renderSkills, type SkillsProps } from "./skills.ts";
@@ -2626,15 +2627,18 @@ function resolveProjects(props: WorkbenchProps): WorkbenchProject[] {
     }
     const list = sessionsByAgent.get(parsed.agentId) ?? [];
     const fallbackLabel = shortSessionLabel(row.key);
+    const resolvedLabel =
+      [row.label?.trim(), row.displayName?.trim(), row.subject?.trim()].find((value) =>
+        Boolean(
+          value && !isGeneratedUntitledSessionLabel(value) && !isSystemGeneratedSessionLabel(value),
+        ),
+      ) ||
+      fallbackLabel ||
+      formatUntitledSessionLabel(row.updatedAt ?? null, locale);
     list.push({
       key: row.key,
-      label:
-        row.displayName?.trim() ||
-        row.label?.trim() ||
-        row.subject?.trim() ||
-        fallbackLabel ||
-        formatUntitledSessionLabel(row.updatedAt ?? null, locale),
-      title: row.subject?.trim() || row.key,
+      label: resolvedLabel,
+      title: resolvedLabel,
       updatedAt: row.updatedAt ?? null,
       tokens: row.totalTokens ?? 0,
     });

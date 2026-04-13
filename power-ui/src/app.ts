@@ -95,6 +95,7 @@ import {
   buildSessionLabelFromPrompt,
   isGeneratedUntitledSessionLabel,
   isProtectedMainSessionKey,
+  isSystemGeneratedSessionLabel,
   looksLikeOpaqueSessionId,
 } from "./integrations/openclaw/session-keys.ts";
 import {
@@ -3248,11 +3249,15 @@ export class OpenClawPowerApp extends LitElement {
 
   private hasStableSessionLabel(sessionKey: string) {
     const row = this.getSessionListRow(sessionKey);
-    const candidate = row?.displayName?.trim() || row?.label?.trim() || row?.subject?.trim() || "";
+    const candidate = row?.label?.trim() || row?.displayName?.trim() || row?.subject?.trim() || "";
     if (!candidate) {
       return false;
     }
-    if (looksLikeOpaqueSessionId(candidate) || isGeneratedUntitledSessionLabel(candidate)) {
+    if (
+      looksLikeOpaqueSessionId(candidate) ||
+      isGeneratedUntitledSessionLabel(candidate) ||
+      isSystemGeneratedSessionLabel(candidate)
+    ) {
       return false;
     }
     return true;
@@ -3271,7 +3276,7 @@ export class OpenClawPowerApp extends LitElement {
         continue;
       }
       const text = extractText(message)?.trim() ?? "";
-      if (text) {
+      if (text && !isSystemGeneratedSessionLabel(text)) {
         return buildSessionLabelFromPrompt(text);
       }
     }

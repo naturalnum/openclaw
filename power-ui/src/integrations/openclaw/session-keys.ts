@@ -42,6 +42,17 @@ export function isGeneratedUntitledSessionLabel(value: string) {
   return /^(New conversation|新会话)(\s*[·•-]\s*\d{2}:\d{2})?$/.test(normalized);
 }
 
+export function isSystemGeneratedSessionLabel(value: string) {
+  const normalized = value.trim();
+  if (!normalized) {
+    return false;
+  }
+  if (/^(system|assistant|tool)\s*:/i.test(normalized)) {
+    return true;
+  }
+  return /^\[(?:19|20)\d{2}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\b.*\]/.test(normalized);
+}
+
 export function isProtectedMainSessionKey(sessionKey: string) {
   const normalized = sessionKey.trim().toLowerCase();
   if (!normalized) {
