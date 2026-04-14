@@ -1,5 +1,6 @@
 {
   "name": "openclaw-power-ui",
+  "version": "1.0",
   "private": true,
   "type": "module",
   "scripts": {

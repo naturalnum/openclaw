@@ -234,6 +234,8 @@ const CRON_TIMEZONE_SUGGESTIONS = [
   "Europe/Berlin",
   "Asia/Tokyo",
 ];
+const SIDEBAR_MIN_RATIO = 1 / 6;
+const SIDEBAR_MAX_RATIO = 1 / 3;
 const SETTINGS_LOCALE_OPTIONS = [
   { value: "zh-CN", label: "简体中文" },
   { value: "en", label: "English" },
@@ -926,6 +928,7 @@ export class OpenClawPowerApp extends LitElement {
 
   @state() workbenchSection: WorkbenchSection = "newTask";
   @state() sidebarCollapsed = false;
+  @state() sidebarResizeActive = false;
   @state() sidebarUserExpandedOnNarrow = false;
   @state() projectsCollapsed = false;
   @state() rightRailCollapsed = false;
@@ -1040,6 +1043,8 @@ export class OpenClawPowerApp extends LitElement {
   private logsRefreshTimer: number | null = null;
   private syncingWorkbenchShellScroll = false;
   private syncingWorkbenchScrollbarScroll = false;
+  private sidebarResizeStartX = 0;
+  private sidebarResizeStartWidth = 0;
   private readonly handleWindowResize = () => {
     this.viewportWidth = window.innerWidth;
     if (this.viewportWidth >= SIDEBAR_AUTO_COLLAPSE_WIDTH && this.sidebarUserExpandedOnNarrow) {
@@ -1052,6 +1057,26 @@ export class OpenClawPowerApp extends LitElement {
       this.rightRailUserExpandedOnNarrow = false;
     }
     window.requestAnimationFrame(() => this.syncHorizontalScrollbar());
+  };
+  private readonly handleSidebarResizeMove = (event: MouseEvent) => {
+    if (!this.sidebarResizeActive) {
+      return;
+    }
+    const delta = event.clientX - this.sidebarResizeStartX;
+    const nextWidth = this.clampSidebarWidth(this.sidebarResizeStartWidth + delta);
+    if (nextWidth === this.settings.navWidth) {
+      return;
+    }
+    this.persistSettings({ navWidth: nextWidth });
+  };
+  private readonly handleSidebarResizeEnd = () => {
+    if (!this.sidebarResizeActive) {
+      return;
+    }
+    this.sidebarResizeActive = false;
+    document.body.style.userSelect = "";
+    window.removeEventListener("mousemove", this.handleSidebarResizeMove);
+    window.removeEventListener("mouseup", this.handleSidebarResizeEnd);
   };
 
   connectedCallback() {
@@ -1070,6 +1095,7 @@ export class OpenClawPowerApp extends LitElement {
     this.adapterUnsubscribe = null;
     this.adapter.dispose?.();
     this.resetFilePreviewState();
+    this.handleSidebarResizeEnd();
     document.removeEventListener("pointerdown", this.handleDocumentPointerDown, true);
     window.removeEventListener("resize", this.handleWindowResize);
     if (this.modelConfigPersistTimer != null) {
@@ -1294,6 +1320,16 @@ export class OpenClawPowerApp extends LitElement {
     return (
       this.isSidebarNarrowViewport && this.sidebarUserExpandedOnNarrow && !this.sidebarCollapsed
     );
+  }
+
+  private clampSidebarWidth(width: number, viewportWidth = this.viewportWidth): number {
+    const min = Math.round(viewportWidth * SIDEBAR_MIN_RATIO);
+    const max = Math.round(viewportWidth * SIDEBAR_MAX_RATIO);
+    return Math.max(min, Math.min(max, Math.round(width)));
+  }
+
+  private get effectiveSidebarWidth() {
+    return this.clampSidebarWidth(this.settings.navWidth);
   }
 
   private get effectiveRightRailCollapsed() {
@@ -2241,6 +2277,19 @@ export class OpenClawPowerApp extends LitElement {
     this.settings = { ...this.settings, ...patch };
     saveSettings(this.settings);
     this.themeResolved = applyTheme(this.settings);
+  }
+
+  private startSidebarResize(event: MouseEvent) {
+    if (this.effectiveSidebarCollapsed) {
+      return;
+    }
+    this.sidebarResizeActive = true;
+    this.sidebarResizeStartX = event.clientX;
+    this.sidebarResizeStartWidth = this.effectiveSidebarWidth;
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", this.handleSidebarResizeMove);
+    window.addEventListener("mouseup", this.handleSidebarResizeEnd);
+    event.preventDefault();
   }
 
   private async setLocale(next: string) {
@@ -3701,6 +3750,8 @@ export class OpenClawPowerApp extends LitElement {
       newTaskProjectId: this.workbenchSelectedProjectId,
       newTaskProjectMenuOpen: this.newTaskProjectMenuOpen,
       sidebarCollapsed: this.effectiveSidebarCollapsed,
+      sidebarWidthPx: this.effectiveSidebarWidth,
+      sidebarResizeActive: this.sidebarResizeActive,
       sidebarNarrowScrollable: this.sidebarNarrowScrollable,
       projectsCollapsed: this.projectsCollapsed,
       rightRailCollapsed: this.effectiveRightRailCollapsed,
@@ -4384,6 +4435,9 @@ export class OpenClawPowerApp extends LitElement {
           return;
         }
         this.setSidebarCollapsedState();
+      },
+      onSidebarResizeStart: (event) => {
+        this.startSidebarResize(event);
       },
       onToggleProjects: () => {
         this.projectsCollapsed = !this.projectsCollapsed;

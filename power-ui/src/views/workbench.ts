@@ -28,6 +28,9 @@ import {
 } from "../integrations/openclaw/session-keys.ts";
 import { renderSkills, type SkillsProps } from "./skills.ts";
 
+declare const __OPENCLAW_VERSION__: string;
+declare const __POWER_UI_VERSION__: string;
+
 export type WorkbenchSection = "newTask" | "skills" | "files" | "automations" | "logs";
 export type WorkbenchSettingsTab =
   | "general"
@@ -63,6 +66,8 @@ const AGENT_MANAGED_PROJECT_FILE_NAMES = new Set([
   "TOOLS.md",
   "USER.md",
 ]);
+
+const SETTINGS_VERSION_LABEL = `v${__OPENCLAW_VERSION__}-${__POWER_UI_VERSION__}`;
 
 type WorkbenchDirectoryEntry = {
   name: string;
@@ -107,6 +112,8 @@ type PendingChatFileView = {
 export type WorkbenchProps = {
   basePath: string;
   assistantName: string;
+  sidebarWidthPx: number;
+  sidebarResizeActive: boolean;
   currentProjectId: string | null;
   filesPageProjectId: string | null;
   currentSessionKey: string;
@@ -298,6 +305,7 @@ export type WorkbenchProps = {
   onFileManagerFolderNameChange: (value: string) => void;
   onCreateFileManagerFolder: () => void;
   onToggleSidebar: () => void;
+  onSidebarResizeStart: (event: MouseEvent) => void;
   onToggleProjects: () => void;
   onToggleRightRail: () => void;
   onToggleProject: (projectId: string) => void;
@@ -400,7 +408,10 @@ export function renderWorkbench(props: WorkbenchProps) {
           ? "workbench--light"
           : ""} ${props.sidebarCollapsed
           ? "workbench--sidebar-collapsed"
-          : ""} ${props.sidebarNarrowScrollable ? "workbench--sidebar-narrow-scrollable" : ""}"
+          : ""} ${props.sidebarNarrowScrollable
+          ? "workbench--sidebar-narrow-scrollable"
+          : ""} ${props.sidebarResizeActive ? "workbench--sidebar-resizing" : ""}"
+        style=${`--wb-sidebar-width: ${props.sidebarWidthPx}px;`}
       >
         <aside class="workbench-sidebar">
           <div class="workbench-brand">
@@ -518,11 +529,24 @@ export function renderWorkbench(props: WorkbenchProps) {
             >
               <span class="workbench-settings-entry__icon">${icons.settings}</span>
               <span class="workbench-settings-entry__label">
-                ${tLocale(locale, "Settings", "设置")}
+                <span>${tLocale(locale, "Settings", "设置")}</span>
+                <span class="workbench-settings-entry__version">${SETTINGS_VERSION_LABEL}</span>
               </span>
             </button>
           </div>
         </aside>
+
+        ${props.sidebarCollapsed
+          ? nothing
+          : html`
+              <button
+                type="button"
+                class="workbench-sidebar-resizer"
+                aria-label=${tLocale(locale, "Resize navigation", "调整导航宽度")}
+                title=${tLocale(locale, "Resize navigation", "调整导航宽度")}
+                @mousedown=${props.onSidebarResizeStart}
+              ></button>
+            `}
 
         <div class="workbench-main">
           ${showContextBar && activeProject && activeSession

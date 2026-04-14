@@ -1,8 +1,15 @@
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const rootPackageJson = JSON.parse(
+  fs.readFileSync(path.resolve(here, "../package.json"), "utf8"),
+) as { version?: string };
+const powerUiPackageJson = JSON.parse(
+  fs.readFileSync(path.resolve(here, "./package.json"), "utf8"),
+) as { version?: string };
 
 function normalizeBase(input: string): string {
   const trimmed = input.trim();
@@ -23,6 +30,10 @@ export default defineConfig(() => {
   const base = envBase ? normalizeBase(envBase) : "./";
   return {
     base,
+    define: {
+      __OPENCLAW_VERSION__: JSON.stringify(rootPackageJson.version ?? "0.0.0"),
+      __POWER_UI_VERSION__: JSON.stringify(powerUiPackageJson.version ?? "0.0"),
+    },
     build: {
       outDir: path.resolve(here, "../dist/power-ui"),
       emptyOutDir: true,
