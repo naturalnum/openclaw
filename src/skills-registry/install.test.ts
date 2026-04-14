@@ -11,6 +11,14 @@ async function createSkillArchiveBytes(): Promise<Uint8Array> {
   return new Uint8Array(await zip.generateAsync({ type: "uint8array" }));
 }
 
+async function createFlatRootSkillArchiveBytes(): Promise<Uint8Array> {
+  const zip = new JSZip();
+  zip.file("SKILL.md", "# Create Skill\n\nBuild new skills.");
+  zip.file("README.md", "Legacy flat-root registry package.");
+  zip.file("_meta.json", JSON.stringify({ slug: "create-skill", version: "1.0.4" }, null, 2));
+  return new Uint8Array(await zip.generateAsync({ type: "uint8array" }));
+}
+
 describe("skills registry install flow", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -194,6 +202,59 @@ describe("skills registry install flow", () => {
       expect(installed.get("slides")).toMatchObject({
         slug: "slides",
         source: "directory",
+      });
+    });
+  });
+
+  it("installs a flat-root skill archive from the registry", async () => {
+    await withTempDir("openclaw-skills-registry-flat-root-", async (stateDir) => {
+      vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+      vi.stubEnv("OPENCLAW_TEST_FAST", "1");
+      vi.resetModules();
+
+      const bytes = await createFlatRootSkillArchiveBytes();
+      const { installRegistrySkill } = await import("./install.js");
+      const { readInstalledRegistrySkills } = await import("./state.js");
+
+      const result = await installRegistrySkill({
+        slug: "create-skill",
+        cfg: {
+          skills: {
+            registry: {
+              enabled: true,
+              baseUrl: "https://skills.example.com",
+            },
+          },
+        },
+        client: {
+          listCatalog: async () => {
+            throw new Error("not used in install test");
+          },
+          downloadArtifact: async () => ({
+            filename: "create-skill-1.0.4.zip",
+            version: "1.0.4",
+            contentType: "application/zip",
+            bytes,
+          }),
+          reportInstall: async () => ({ installs: 1 }),
+        },
+      });
+
+      expect(result).toMatchObject({
+        slug: "create-skill",
+        version: "1.0.4",
+        targetDir: path.join(stateDir, "skills", "create-skill"),
+      });
+      await expect(fs.readFile(path.join(result.targetDir, "SKILL.md"), "utf8")).resolves.toContain(
+        "# Create Skill",
+      );
+
+      const installed = await readInstalledRegistrySkills({
+        managedSkillsDir: path.join(stateDir, "skills"),
+      });
+      expect(installed.get("create-skill")).toMatchObject({
+        slug: "create-skill",
+        source: "openclaw-registry",
       });
     });
   });
