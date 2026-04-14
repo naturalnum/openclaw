@@ -239,6 +239,14 @@ import {
   SessionsUsageParamsSchema,
   type ShutdownEvent,
   ShutdownEventSchema,
+  type SkillsRegistryInstallArchiveParams,
+  SkillsRegistryInstallArchiveParamsSchema,
+  type SkillsRegistryInstallParams,
+  SkillsRegistryInstallParamsSchema,
+  type SkillsRegistryListParams,
+  SkillsRegistryListParamsSchema,
+  type SkillsRegistryUninstallParams,
+  SkillsRegistryUninstallParamsSchema,
   type SkillsBinsParams,
   SkillsBinsParamsSchema,
   type SkillsBinsResult,
@@ -436,6 +444,17 @@ export const validateChannelsLogoutParams = ajv.compile<ChannelsLogoutParams>(
 );
 export const validateModelsListParams = ajv.compile<ModelsListParams>(ModelsListParamsSchema);
 export const validateSkillsStatusParams = ajv.compile<SkillsStatusParams>(SkillsStatusParamsSchema);
+export const validateSkillsRegistryListParams = ajv.compile<SkillsRegistryListParams>(
+  SkillsRegistryListParamsSchema,
+);
+export const validateSkillsRegistryInstallParams = ajv.compile<SkillsRegistryInstallParams>(
+  SkillsRegistryInstallParamsSchema,
+);
+export const validateSkillsRegistryInstallArchiveParams =
+  ajv.compile<SkillsRegistryInstallArchiveParams>(SkillsRegistryInstallArchiveParamsSchema);
+export const validateSkillsRegistryUninstallParams = ajv.compile<SkillsRegistryUninstallParams>(
+  SkillsRegistryUninstallParamsSchema,
+);
 export const validateToolsCatalogParams = ajv.compile<ToolsCatalogParams>(ToolsCatalogParamsSchema);
 export const validateToolsEffectiveParams = ajv.compile<ToolsEffectiveParams>(
   ToolsEffectiveParamsSchema,

@@ -106,6 +106,25 @@ export const icons = {
       />
     </svg>
   `,
+  folderOpen: html`
+    <svg viewBox="0 0 24 24">
+      <path
+        d="M2 10.5A2.5 2.5 0 0 1 4.5 8H9a2 2 0 0 0 1.5-.67l.9-1.03A2 2 0 0 1 12.9 5.5H19.5A2.5 2.5 0 0 1 22 8v1.5"
+      />
+      <path
+        d="M3.3 11.7A2 2 0 0 1 5.2 10.5h15.93a1.5 1.5 0 0 1 1.45 1.9l-1.85 6.5A2 2 0 0 1 18.83 20.5H4.94a2 2 0 0 1-1.93-2.52z"
+      />
+    </svg>
+  `,
+  folderPlus: html`
+    <svg viewBox="0 0 24 24">
+      <path
+        d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"
+      />
+      <path d="M12 11v6" />
+      <path d="M9 14h6" />
+    </svg>
+  `,
 
   // UI icons
   menu: html`
@@ -126,6 +145,12 @@ export const icons = {
     <svg viewBox="0 0 24 24">
       <path d="M12 5v14" />
       <path d="m19 12-7 7-7-7" />
+    </svg>
+  `,
+  arrowUp: html`
+    <svg viewBox="0 0 24 24">
+      <path d="M12 19V5" />
+      <path d="m5 12 7-7 7 7" />
     </svg>
   `,
   copy: html`
@@ -390,6 +415,12 @@ export const icons = {
     </svg>
   `,
   refresh: html`
+    <svg viewBox="0 0 24 24">
+      <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+      <path d="M21 3v5h-5" />
+    </svg>
+  `,
+  rotateCw: html`
     <svg viewBox="0 0 24 24">
       <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
       <path d="M21 3v5h-5" />

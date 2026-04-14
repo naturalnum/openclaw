@@ -62,6 +62,11 @@ export const BUILD_ALL_STEPS = [
     kind: "node",
     args: ["--import", "tsx", "scripts/write-cli-compat.ts"],
   },
+  {
+    label: "power-ui:build",
+    kind: "pnpm",
+    pnpmArgs: ["--filter", "openclaw-power-ui", "build"],
+  },
 ];
 
 function resolveStepEnv(step, env, platform) {

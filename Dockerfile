@@ -172,6 +172,14 @@ COPY --from=runtime-assets --chown=node:node /app/skills ./skills
 COPY --from=runtime-assets --chown=node:node /app/docs ./docs
 COPY --from=runtime-assets --chown=node:node /app/qa ./qa
 
+# The bundled power-backend plugin is produced into dist/extensions during the
+# build and needs to be made available in the runtime extension search path.
+RUN mkdir -p ./extensions/power-backend && \
+    if [ -d ./dist/extensions/power-backend ]; then \
+      cp -R ./dist/extensions/power-backend/. ./extensions/power-backend/; \
+    fi && \
+    chown -R node:node ./extensions/power-backend
+
 # Keep pnpm available in the runtime image for container-local workflows.
 # Use a shared Corepack home so the non-root `node` user does not need a
 # first-run network fetch when invoking pnpm.

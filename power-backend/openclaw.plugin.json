@@ -1,0 +1,24 @@
+{
+  "id": "power-backend",
+  "name": "Power Backend",
+  "description": "Backend companion plugin for power-ui directory browsing and project workspace helpers.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "roots": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": []
+      }
+    }
+  },
+  "uiHints": {
+    "roots": {
+      "label": "Allowed Roots",
+      "help": "Server directories that power-ui is allowed to browse when selecting a project workspace."
+    }
+  }
+}

@@ -918,6 +918,14 @@ export const OpenClawSchema = z
           })
           .strict()
           .optional(),
+        registry: z
+          .object({
+            enabled: z.boolean().optional(),
+            baseUrl: z.string().optional(),
+            timeoutMs: z.number().int().min(1000).optional(),
+          })
+          .strict()
+          .optional(),
         limits: z
           .object({
             maxCandidatesPerRoot: z.number().int().min(1).optional(),
