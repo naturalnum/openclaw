@@ -418,6 +418,31 @@ describe("agents.create", () => {
     );
   });
 
+  it("creates a safe internal id for non-ascii project names", async () => {
+    const { respond, promise } = makeCall("agents.create", {
+      name: "文档编写",
+      workspace: "/tmp/ws-cn",
+    });
+    await promise;
+
+    expect(respond).toHaveBeenCalledWith(
+      true,
+      expect.objectContaining({
+        ok: true,
+        agentId: expect.stringMatching(/^agent-[0-9a-f]{12}$/),
+        name: "文档编写",
+      }),
+      undefined,
+    );
+    expect(mocks.applyAgentConfig).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        agentId: expect.stringMatching(/^agent-[0-9a-f]{12}$/),
+        name: "文档编写",
+      }),
+    );
+  });
+
   it("rejects creating a duplicate agent", async () => {
     mocks.findAgentEntryIndex.mockReturnValue(0);
 

@@ -23,6 +23,15 @@ export type {
   SkillsRegistryListResult,
   SkillsRegistryPagination,
   SkillsRegistryUninstallResult,
+  ConnectorActionDefinition,
+  ConnectorCapabilitiesListResult,
+  ConnectorCapability,
+  ConnectorCatalogListResult,
+  ConnectorFieldDefinition,
+  ConnectorInstance,
+  ConnectorProviderDefinition,
+  ConnectorToolSummary,
+  ConnectorToolsListResult,
 } from "../../../src/gateway/protocol/schema/types.ts";
 
 export type SkillsRegistryInstallFilter = "all" | "installed" | "not_installed";

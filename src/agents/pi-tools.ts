@@ -62,6 +62,7 @@ import {
   mergeAlsoAllowPolicy,
   resolveToolProfilePolicy,
 } from "./tool-policy.js";
+import { createConnectorAgentTools } from "./tools/connectors-tool.js";
 import { resolveWorkspaceRoot } from "./workspace-dir.js";
 
 function isOpenAIProvider(provider?: string) {
@@ -496,6 +497,12 @@ export function createOpenClawCodingTools(options?: {
     processTool as unknown as AnyAgentTool,
     // Channel docking: include channel-defined agent tools (login, etc.).
     ...listChannelAgentTools({ cfg: options?.config }),
+    ...createConnectorAgentTools({
+      ownerAccountId: options?.agentAccountId,
+      agentId,
+      sessionKey: options?.sessionKey,
+      abortSignal: options?.abortSignal,
+    }),
     ...createOpenClawTools({
       sandboxBrowserBridgeUrl: sandbox?.browser?.bridgeUrl,
       allowHostBrowserControl: sandbox ? sandbox.browserAllowHostControl : true,

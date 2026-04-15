@@ -5,6 +5,10 @@ import type { WorkbenchFileEntry } from "../adapters/workbench-adapter.ts";
 import type {
   AgentIdentityResult,
   AgentsFilesListResult,
+  ConnectorActionDefinition,
+  ConnectorFieldDefinition,
+  ConnectorInstance,
+  ConnectorProviderDefinition,
   ConfigSnapshot,
   AgentsListResult,
   ModelCatalogEntry,
@@ -34,6 +38,7 @@ declare const __POWER_UI_VERSION__: string;
 export type WorkbenchSection = "newTask" | "skills" | "files" | "automations" | "logs";
 export type WorkbenchSettingsTab =
   | "general"
+  | "connectors"
   | "models"
   | "dreaming"
   | "statistics"
@@ -117,6 +122,7 @@ export type WorkbenchProps = {
   currentProjectId: string | null;
   filesPageProjectId: string | null;
   currentSessionKey: string;
+  showToolCalls: boolean;
   treeMenuOpenKey: string | null;
   currentModelId: string;
   newTaskProjectId: string | null;
@@ -197,6 +203,40 @@ export type WorkbenchProps = {
       onRangeChange: (value: WorkbenchStatisticsRange) => void;
       onRefresh: () => void;
     };
+    connectors: {
+      loading: boolean;
+      saving: boolean;
+      testing: boolean;
+      error: string | null;
+      selectedProviderId: string | null;
+      editingInstanceId: string | null;
+      providers: ConnectorProviderDefinition[];
+      instances: ConnectorInstance[];
+      draft: {
+        providerId: string | null;
+        displayName: string;
+        description: string;
+        enabled: boolean;
+        policyMode: "read-only" | "limited-write" | "full";
+        config: Record<string, string>;
+        secretInputs: Record<string, string>;
+      };
+      testResult: string | null;
+      onRefresh: () => void;
+      onSelectProvider: (providerId: string) => void;
+      onSelectInstance: (instanceId: string | null) => void;
+      onCreateNew: () => void;
+      onDraftChange: (
+        section: "meta" | "config" | "secret",
+        key: string,
+        value: string | boolean,
+      ) => void;
+      onDraftPolicyModeChange: (value: "read-only" | "limited-write" | "full") => void;
+      onSave: () => void;
+      onDelete: (instanceId: string) => void;
+      onToggleEnabled: (instanceId: string, enabled: boolean) => void;
+      onTest: () => void;
+    };
     onLocaleChange: (value: string) => void;
     onThemeChange: (value: string) => void;
     onThemeModeChange: (value: string) => void;
@@ -270,6 +310,8 @@ export type WorkbenchProps = {
   onComposerKeyDown: (event: KeyboardEvent) => void;
   onComposerCompositionEnd: (event: CompositionEvent) => void;
   onChatScroll: (event: Event) => void;
+  onRequestUpdate: () => void;
+  onToggleToolCalls: () => void;
   onSend: () => void;
   onAbort: () => void;
   onOpenSettings: () => void;
@@ -707,23 +749,54 @@ function renderContextBar(
   project: WorkbenchProject,
   session: WorkbenchSession,
 ) {
+  const toolCallsIcon = html`
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    >
+      <path
+        d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"
+      ></path>
+      ${props.showToolCalls ? nothing : html`<path d="M4 4l16 16"></path>`}
+    </svg>
+  `;
   return html`
     <header class="workbench-context-bar">
       <div class="workbench-context-bar__identity">
         <strong>${session.label}</strong>
         <span>${project.label}</span>
       </div>
-      <button
-        type="button"
-        class="workbench-icon-button workbench-context-bar__toggle ${props.rightRailCollapsed
-          ? "is-collapsed"
-          : ""}"
-        title=${props.rightRailCollapsed ? "展开卡片区" : "折叠卡片区"}
-        aria-label=${props.rightRailCollapsed ? "展开卡片区" : "折叠卡片区"}
-        @click=${props.onToggleRightRail}
-      >
-        ${props.rightRailCollapsed ? icons.panelLeftOpen : icons.panelLeftClose}
-      </button>
+      <div class="workbench-context-bar__actions">
+        <button
+          type="button"
+          class="workbench-icon-button workbench-context-bar__tool-toggle ${props.showToolCalls
+            ? "is-active"
+            : "is-inactive"}"
+          title=${props.showToolCalls ? "隐藏工具调用" : "显示工具调用"}
+          aria-label=${props.showToolCalls ? "隐藏工具调用" : "显示工具调用"}
+          aria-pressed=${props.showToolCalls}
+          @click=${props.onToggleToolCalls}
+        >
+          ${toolCallsIcon}
+        </button>
+        <button
+          type="button"
+          class="workbench-icon-button workbench-context-bar__toggle ${props.rightRailCollapsed
+            ? "is-collapsed"
+            : ""}"
+          title=${props.rightRailCollapsed ? "展开卡片区" : "折叠卡片区"}
+          aria-label=${props.rightRailCollapsed ? "展开卡片区" : "折叠卡片区"}
+          @click=${props.onToggleRightRail}
+        >
+          ${props.rightRailCollapsed ? icons.panelLeftOpen : icons.panelLeftClose}
+        </button>
+      </div>
     </header>
   `;
 }
@@ -1350,9 +1423,11 @@ function renderSessionView(
           stream: props.chatStream,
           streamStartedAt: props.chatStreamStartedAt,
           sessionKey: props.currentSessionKey,
+          showToolCalls: props.showToolCalls,
           assistantName: props.assistantName,
           assistantAvatar,
           basePath: props.basePath,
+          onRequestUpdate: props.onRequestUpdate,
           onScroll: props.onChatScroll,
           emptyState: hasLiveMessages
             ? nothing
@@ -1569,6 +1644,9 @@ function renderProjectFilesBrowser(
 ) {
   const locale = props.settings.locale;
   const isActiveBrowser = props.fileManagerAgentId === project.id;
+  const browserAgentId = isActiveBrowser
+    ? props.fileManagerAgentId
+    : (props.projectFilesAgentId ?? project.id);
   const workspacePath =
     (isActiveBrowser ? props.fileManagerWorkspace : props.projectFilesWorkspace) ??
     project.workspace;
@@ -1761,7 +1839,12 @@ function renderProjectFilesBrowser(
             title=${tLocale(locale, "Upload files", "上传文件")}
             aria-label=${tLocale(locale, "Upload files", "上传文件")}
             ?disabled=${!currentPath || loading}
-            @click=${() => props.onOpenProjectFilePicker(project.id, currentPath)}
+            @click=${() => {
+              if (!browserAgentId) {
+                return;
+              }
+              props.onOpenProjectFilePicker(browserAgentId, currentPath);
+            }}
           >
             ${icons.plus}
           </button>
@@ -1898,7 +1981,10 @@ function renderProjectFilesBrowser(
                           props.onNavigateFileManager(entry.path);
                           return;
                         }
-                        props.onPreviewProjectFile(project.id, entry);
+                        if (!browserAgentId) {
+                          return;
+                        }
+                        props.onPreviewProjectFile(browserAgentId, entry);
                       }}
                     >
                       <span class="workbench-mini-row__name">${entry.name}</span>
@@ -1919,7 +2005,10 @@ function renderProjectFilesBrowser(
                               ?disabled=${busyPath === entry.path}
                               @click=${(event: Event) => {
                                 event.stopPropagation();
-                                props.onDownloadProjectFile(project.id, entry.path);
+                                if (!browserAgentId) {
+                                  return;
+                                }
+                                props.onDownloadProjectFile(browserAgentId, entry.path);
                               }}
                             >
                               ${icons.download}
@@ -1938,7 +2027,10 @@ function renderProjectFilesBrowser(
                         ?disabled=${busyPath === entry.path}
                         @click=${(event: Event) => {
                           event.stopPropagation();
-                          props.onDeleteProjectEntry(project.id, entry.path);
+                          if (!browserAgentId) {
+                            return;
+                          }
+                          props.onDeleteProjectEntry(browserAgentId, entry.path);
                         }}
                       >
                         ${icons.trash}
@@ -1984,6 +2076,14 @@ function renderSettingsDialog(props: WorkbenchProps) {
             </button>
             <button
               type="button"
+              class="${props.settingsTab === "connectors" ? "is-active" : ""}"
+              @click=${() => props.onSettingsTabChange("connectors")}
+            >
+              <span class="workbench-settings-nav__icon">${icons.plug}</span>
+              ${tLocale(locale, "Connectors", "连接器")}
+            </button>
+            <button
+              type="button"
               class="${props.settingsTab === "models" ? "is-active" : ""}"
               @click=${() => props.onSettingsTabChange("models")}
             >
@@ -2026,6 +2126,7 @@ function renderSettingsDialog(props: WorkbenchProps) {
 
           <section
             class="workbench-settings-panel ${props.settingsTab === "models" ||
+            props.settingsTab === "connectors" ||
             props.settingsTab === "dreaming" ||
             props.settingsTab === "automations" ||
             props.settingsTab === "logs"
@@ -2037,15 +2138,17 @@ function renderSettingsDialog(props: WorkbenchProps) {
                 <h4>
                   ${props.settingsTab === "general"
                     ? tLocale(locale, "General", "通用")
-                    : props.settingsTab === "models"
-                      ? tLocale(locale, "Model Settings", "模型设置")
-                      : props.settingsTab === "dreaming"
-                        ? tLocale(locale, "Dreaming", "梦境")
-                        : props.settingsTab === "statistics"
-                          ? tLocale(locale, "Statistics", "统计")
-                          : props.settingsTab === "automations"
-                            ? tLocale(locale, "Scheduled Jobs", "定时任务")
-                            : tLocale(locale, "Logs", "日志")}
+                    : props.settingsTab === "connectors"
+                      ? tLocale(locale, "Connectors", "连接器")
+                      : props.settingsTab === "models"
+                        ? tLocale(locale, "Model Settings", "模型设置")
+                        : props.settingsTab === "dreaming"
+                          ? tLocale(locale, "Dreaming", "梦境")
+                          : props.settingsTab === "statistics"
+                            ? tLocale(locale, "Statistics", "统计")
+                            : props.settingsTab === "automations"
+                              ? tLocale(locale, "Scheduled Jobs", "定时任务")
+                              : tLocale(locale, "Logs", "日志")}
                 </h4>
                 ${props.settingsTab === "general"
                   ? html`
@@ -2057,57 +2160,67 @@ function renderSettingsDialog(props: WorkbenchProps) {
                         )}
                       </p>
                     `
-                  : props.settingsTab === "models"
+                  : props.settingsTab === "connectors"
                     ? html`
                         <p>
                           ${tLocale(
                             locale,
-                            "Manage model providers, endpoints, and default selections.",
-                            "管理模型提供方、接口地址和默认选择。",
+                            "Manage external systems and expose governed tools to agents.",
+                            "管理外部系统连接，并向 agent 暴露受控工具。",
                           )}
                         </p>
                       `
-                    : props.settingsTab === "dreaming"
+                    : props.settingsTab === "models"
                       ? html`
                           <p>
                             ${tLocale(
                               locale,
-                              "Inspect and manage memory dreaming using the upstream experience.",
-                              "使用原生梦境页面检查和管理记忆梦境。",
+                              "Manage model providers, endpoints, and default selections.",
+                              "管理模型提供方、接口地址和默认选择。",
                             )}
                           </p>
                         `
-                      : props.settingsTab === "statistics"
+                      : props.settingsTab === "dreaming"
                         ? html`
                             <p>
                               ${tLocale(
                                 locale,
-                                "Check the recent token footprint.",
-                                "查看最近的 token 消耗概况。",
+                                "Inspect and manage memory dreaming using the upstream experience.",
+                                "使用原生梦境页面检查和管理记忆梦境。",
                               )}
                             </p>
                           `
-                        : props.settingsTab === "automations"
+                        : props.settingsTab === "statistics"
                           ? html`
                               <p>
                                 ${tLocale(
                                   locale,
-                                  "Manage recurring jobs and delivery settings.",
-                                  "管理周期任务和投递设置。",
+                                  "Check the recent token footprint.",
+                                  "查看最近的 token 消耗概况。",
                                 )}
                               </p>
                             `
-                          : props.settingsTab === "logs"
+                          : props.settingsTab === "automations"
                             ? html`
                                 <p>
                                   ${tLocale(
                                     locale,
-                                    "Inspect gateway logs with filtering and export.",
-                                    "查看网关日志并进行筛选和导出。",
+                                    "Manage recurring jobs and delivery settings.",
+                                    "管理周期任务和投递设置。",
                                   )}
                                 </p>
                               `
-                            : nothing}
+                            : props.settingsTab === "logs"
+                              ? html`
+                                  <p>
+                                    ${tLocale(
+                                      locale,
+                                      "Inspect gateway logs with filtering and export.",
+                                      "查看网关日志并进行筛选和导出。",
+                                    )}
+                                  </p>
+                                `
+                              : nothing}
               </div>
               <button
                 type="button"
@@ -2228,76 +2341,401 @@ function renderSettingsDialog(props: WorkbenchProps) {
                       </div>
                     </article>
                   `
-                : props.settingsTab === "dreaming"
+                : props.settingsTab === "connectors"
                   ? html`
                       <article class="workbench-setting-card workbench-setting-card--models">
-                        <div class="workbench-settings-model-shell">
-                          <div class="workbench-settings-model-shell__head">
-                            <div class="dreaming-header-controls">
-                              <button
-                                type="button"
-                                class="btn btn--subtle btn--sm"
-                                ?disabled=${props.dreamingPage.loading}
-                                @click=${props.dreamingPage.onRefresh}
-                              >
-                                ${props.dreamingPage.refreshLoading
-                                  ? tLocale(locale, "Refreshing", "刷新中")
-                                  : tLocale(locale, "Refresh", "刷新")}
-                              </button>
-                              <button
-                                type="button"
-                                class="dreams__phase-toggle ${props.dreamingPage.active
-                                  ? "dreams__phase-toggle--on"
-                                  : ""}"
-                                ?disabled=${props.dreamingPage.loading}
-                                @click=${props.dreamingPage.onToggleEnabled}
-                              >
-                                <span class="dreams__phase-toggle-dot"></span>
-                                <span class="dreams__phase-toggle-label">
-                                  ${props.dreamingPage.active
-                                    ? tLocale(locale, "DREAMING 已开启", "DREAMING 已开启")
-                                    : tLocale(locale, "DREAMING 已关闭", "DREAMING 已关闭")}
-                                </span>
-                              </button>
-                            </div>
-                          </div>
-                          <div class="workbench-settings-model-shell__list">
-                            ${renderDreaming(props.dreamingPage.view)}
-                          </div>
-                        </div>
+                        ${renderConnectorsPanel(props)}
                       </article>
                     `
-                  : props.settingsTab === "automations"
+                  : props.settingsTab === "dreaming"
                     ? html`
                         <article class="workbench-setting-card workbench-setting-card--models">
                           <div class="workbench-settings-model-shell">
-                            <div class="workbench-settings-model-shell__head"></div>
+                            <div class="workbench-settings-model-shell__head">
+                              <div class="dreaming-header-controls">
+                                <button
+                                  type="button"
+                                  class="btn btn--subtle btn--sm"
+                                  ?disabled=${props.dreamingPage.loading}
+                                  @click=${props.dreamingPage.onRefresh}
+                                >
+                                  ${props.dreamingPage.refreshLoading
+                                    ? tLocale(locale, "Refreshing", "刷新中")
+                                    : tLocale(locale, "Refresh", "刷新")}
+                                </button>
+                                <button
+                                  type="button"
+                                  class="dreams__phase-toggle ${props.dreamingPage.active
+                                    ? "dreams__phase-toggle--on"
+                                    : ""}"
+                                  ?disabled=${props.dreamingPage.loading}
+                                  @click=${props.dreamingPage.onToggleEnabled}
+                                >
+                                  <span class="dreams__phase-toggle-dot"></span>
+                                  <span class="dreams__phase-toggle-label">
+                                    ${props.dreamingPage.active
+                                      ? tLocale(locale, "DREAMING 已开启", "DREAMING 已开启")
+                                      : tLocale(locale, "DREAMING 已关闭", "DREAMING 已关闭")}
+                                  </span>
+                                </button>
+                              </div>
+                            </div>
                             <div class="workbench-settings-model-shell__list">
-                              ${renderCron(props.automationsPage)}
+                              ${renderDreaming(props.dreamingPage.view)}
                             </div>
                           </div>
                         </article>
                       `
-                    : props.settingsTab === "logs"
+                    : props.settingsTab === "automations"
                       ? html`
                           <article class="workbench-setting-card workbench-setting-card--models">
                             <div class="workbench-settings-model-shell">
                               <div class="workbench-settings-model-shell__head"></div>
                               <div class="workbench-settings-model-shell__list">
-                                ${renderLogs(props.logsPage)}
+                                ${renderCron(props.automationsPage)}
                               </div>
                             </div>
                           </article>
                         `
-                      : html`
-                          <article class="workbench-setting-card">
-                            ${renderStatisticsPanel(props)}
-                          </article>
-                        `}
+                      : props.settingsTab === "logs"
+                        ? html`
+                            <article class="workbench-setting-card workbench-setting-card--models">
+                              <div class="workbench-settings-model-shell">
+                                <div class="workbench-settings-model-shell__head"></div>
+                                <div class="workbench-settings-model-shell__list">
+                                  ${renderLogs(props.logsPage)}
+                                </div>
+                              </div>
+                            </article>
+                          `
+                        : html`
+                            <article class="workbench-setting-card">
+                              ${renderStatisticsPanel(props)}
+                            </article>
+                          `}
           </section>
         </div>
       </div>
     </div>
+  `;
+}
+
+function renderConnectorsPanel(props: WorkbenchProps) {
+  const locale = props.settings.locale;
+  const connectors = props.settingsView.connectors;
+  const selectedProvider =
+    connectors.providers.find((provider) => provider.id === connectors.selectedProviderId) ?? null;
+  const editingInstance =
+    connectors.instances.find((instance) => instance.id === connectors.editingInstanceId) ?? null;
+  return html`
+    <div class="workbench-settings-model-shell">
+      <div class="workbench-settings-model-shell__head">
+        <div class="dreaming-header-controls">
+          <button type="button" class="btn btn--subtle btn--sm" @click=${connectors.onRefresh}>
+            ${tLocale(locale, "Refresh", "刷新")}
+          </button>
+          <button type="button" class="btn btn--primary btn--sm" @click=${connectors.onCreateNew}>
+            ${tLocale(locale, "New Connection", "新建连接")}
+          </button>
+        </div>
+      </div>
+      <div class="workbench-settings-model-shell__list">
+        ${connectors.error ? html`<p class="skills-empty">${connectors.error}</p>` : nothing}
+        <div class="workbench-settings-section">
+          <div class="workbench-settings-section__header">
+            <span>${tLocale(locale, "Providers", "连接器类型")}</span>
+          </div>
+          <div class="workbench-settings-cards">
+            ${repeat(
+              connectors.providers,
+              (provider) => provider.id,
+              (provider) => html`
+                <button
+                  type="button"
+                  class="workbench-theme-card ${provider.id === connectors.selectedProviderId
+                    ? "is-active"
+                    : ""}"
+                  @click=${() => connectors.onSelectProvider(provider.id)}
+                >
+                  <strong>${provider.displayName}</strong>
+                  <span>${provider.description}</span>
+                </button>
+              `,
+            )}
+          </div>
+        </div>
+
+        <div class="workbench-settings-section">
+          <div class="workbench-settings-section__header">
+            <span>${tLocale(locale, "Configured Instances", "已配置实例")}</span>
+          </div>
+          <div class="workbench-settings-models">
+            ${connectors.instances.length === 0
+              ? html`<p class="skills-empty">
+                  ${tLocale(locale, "No connectors yet.", "还没有连接器。")}
+                </p>`
+              : repeat(
+                  connectors.instances,
+                  (instance) => instance.id,
+                  (instance) => renderConnectorInstanceCard(connectors, instance, locale),
+                )}
+          </div>
+        </div>
+
+        ${selectedProvider
+          ? html`
+              <div class="workbench-settings-section">
+                <div class="workbench-settings-section__header">
+                  <span>
+                    ${editingInstance
+                      ? tLocale(locale, "Edit Connection", "编辑连接")
+                      : tLocale(locale, "Create Connection", "新建连接")}
+                  </span>
+                </div>
+                <div class="workbench-settings-models">
+                  ${renderConnectorEditor(connectors, selectedProvider, locale)}
+                </div>
+              </div>
+            `
+          : nothing}
+      </div>
+    </div>
+  `;
+}
+
+function renderConnectorInstanceCard(
+  connectors: WorkbenchProps["settingsView"]["connectors"],
+  instance: ConnectorInstance,
+  locale: string | undefined,
+) {
+  return html`
+    <section class="workbench-model-card ${instance.enabled ? "" : "is-disabled"}">
+      <div class="workbench-model-card__header">
+        <div class="workbench-model-card__title-group">
+          <strong>${instance.displayName}</strong>
+          <span>${instance.providerId}</span>
+        </div>
+        <div class="workbench-model-card__actions">
+          <label class="dreams__phase-toggle ${instance.enabled ? "dreams__phase-toggle--on" : ""}">
+            <input
+              type="checkbox"
+              .checked=${instance.enabled}
+              @change=${(event: Event) =>
+                connectors.onToggleEnabled(instance.id, (event.target as HTMLInputElement).checked)}
+            />
+            <span class="dreams__phase-toggle-label">
+              ${instance.enabled
+                ? tLocale(locale, "Enabled", "已启用")
+                : tLocale(locale, "Disabled", "已停用")}
+            </span>
+          </label>
+          <button
+            type="button"
+            class="workbench-icon-button"
+            aria-label="Edit connector"
+            @click=${() => connectors.onSelectInstance(instance.id)}
+          >
+            ${icons.edit}
+          </button>
+          <button
+            type="button"
+            class="workbench-icon-button"
+            aria-label="Delete connector"
+            @click=${() => connectors.onDelete(instance.id)}
+          >
+            ${icons.x}
+          </button>
+        </div>
+      </div>
+      <div class="workbench-model-card__summary">
+        <span>${instance.description || tLocale(locale, "No description", "暂无描述")}</span>
+        <span>${instance.health.status}</span>
+      </div>
+    </section>
+  `;
+}
+
+function renderConnectorEditor(
+  connectors: WorkbenchProps["settingsView"]["connectors"],
+  provider: ConnectorProviderDefinition,
+  locale: string | undefined,
+) {
+  return html`
+    <section class="workbench-model-card">
+      <div class="workbench-model-card__header">
+        <div class="workbench-model-card__title-group">
+          <strong>${provider.displayName}</strong>
+          <span>${provider.category}</span>
+        </div>
+      </div>
+      <div class="workbench-model-card__form">
+        ${renderConnectorMetaField(
+          locale,
+          tLocale(locale, "Name", "名称"),
+          connectors.draft.displayName,
+          (value) => connectors.onDraftChange("meta", "displayName", value),
+        )}
+        ${renderConnectorTextareaField(
+          locale,
+          tLocale(locale, "Description", "描述"),
+          connectors.draft.description,
+          (value) => connectors.onDraftChange("meta", "description", value),
+        )}
+        <label class="workbench-settings-field">
+          <span>${tLocale(locale, "Enabled", "启用")}</span>
+          <input
+            type="checkbox"
+            .checked=${connectors.draft.enabled}
+            @change=${(event: Event) =>
+              connectors.onDraftChange(
+                "meta",
+                "enabled",
+                (event.target as HTMLInputElement).checked,
+              )}
+          />
+        </label>
+        <label class="workbench-settings-field">
+          <span>${tLocale(locale, "Policy", "权限模式")}</span>
+          <div class="workbench-settings-select">
+            <select
+              .value=${connectors.draft.policyMode}
+              @change=${(event: Event) =>
+                connectors.onDraftPolicyModeChange(
+                  (event.target as HTMLSelectElement).value as
+                    | "read-only"
+                    | "limited-write"
+                    | "full",
+                )}
+            >
+              <option value="read-only">${tLocale(locale, "Read only", "只读")}</option>
+              <option value="limited-write">${tLocale(locale, "Limited write", "受限写")}</option>
+              <option value="full">${tLocale(locale, "Full", "全量")}</option>
+            </select>
+            <span class="workbench-settings-select__chevron">${icons.chevronDown}</span>
+          </div>
+        </label>
+
+        ${provider.configFields.map((field) =>
+          renderConnectorField(connectors, field, "config", locale),
+        )}
+        ${provider.secretFields.map((field) =>
+          renderConnectorField(connectors, field, "secret", locale),
+        )}
+
+        <div class="workbench-model-card__summary">
+          ${repeat(
+            provider.actions,
+            (action) => action.name,
+            (action) => renderConnectorActionChip(action),
+          )}
+        </div>
+
+        ${connectors.testResult
+          ? html`<p class="skills-empty">${connectors.testResult}</p>`
+          : nothing}
+
+        <div class="dreaming-header-controls">
+          <button
+            type="button"
+            class="btn btn--subtle btn--sm"
+            ?disabled=${connectors.testing || connectors.saving}
+            @click=${connectors.onTest}
+          >
+            ${connectors.testing
+              ? tLocale(locale, "Testing", "测试中")
+              : tLocale(locale, "Test Connection", "测试连接")}
+          </button>
+          <button
+            type="button"
+            class="btn btn--primary btn--sm"
+            ?disabled=${connectors.saving}
+            @click=${connectors.onSave}
+          >
+            ${connectors.saving
+              ? tLocale(locale, "Saving", "保存中")
+              : tLocale(locale, "Save", "保存")}
+          </button>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function renderConnectorField(
+  connectors: WorkbenchProps["settingsView"]["connectors"],
+  field: ConnectorFieldDefinition,
+  section: "config" | "secret",
+  locale: string | undefined,
+) {
+  const values = section === "config" ? connectors.draft.config : connectors.draft.secretInputs;
+  const value = values[field.key] ?? "";
+  if (field.kind === "boolean") {
+    return html`
+      <label class="workbench-settings-field">
+        <span>${field.label}</span>
+        <input
+          type="checkbox"
+          .checked=${value === "true"}
+          @change=${(event: Event) =>
+            connectors.onDraftChange(
+              section,
+              field.key,
+              (event.target as HTMLInputElement).checked,
+            )}
+        />
+      </label>
+    `;
+  }
+  if (field.kind === "textarea") {
+    return renderConnectorTextareaField(locale, field.label, value, (next) =>
+      connectors.onDraftChange(section, field.key, next),
+    );
+  }
+  return renderConnectorMetaField(locale, field.label, value, (next) =>
+    connectors.onDraftChange(section, field.key, next),
+  );
+}
+
+function renderConnectorMetaField(
+  locale: string | undefined,
+  label: string,
+  value: string,
+  onInput: (value: string) => void,
+) {
+  return html`
+    <label class="workbench-settings-field">
+      <span>${label}</span>
+      <input
+        .value=${value}
+        @input=${(event: Event) => onInput((event.target as HTMLInputElement).value)}
+      />
+    </label>
+  `;
+}
+
+function renderConnectorTextareaField(
+  locale: string | undefined,
+  label: string,
+  value: string,
+  onInput: (value: string) => void,
+) {
+  return html`
+    <label class="workbench-settings-field">
+      <span>${label}</span>
+      <textarea
+        rows="3"
+        .value=${value}
+        @input=${(event: Event) => onInput((event.target as HTMLTextAreaElement).value)}
+      ></textarea>
+    </label>
+  `;
+}
+
+function renderConnectorActionChip(action: ConnectorActionDefinition) {
+  return html`
+    <span class="skill-card__tag"
+      >${action.displayName} · ${action.access} · ${action.riskLevel}</span
+    >
   `;
 }
 

@@ -344,10 +344,23 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
     path: string,
     mode: WorkbenchFilePreviewMode,
   ): Promise<WorkbenchFilePreviewResult> {
-    const blob = await this.gateway.fetchHttpBlob({
-      routePath: "/api/power/fs/download",
-      fields: { agentId, path: this.toWorkspaceRelativePath(agentId, path) },
-    });
+    const response = await requiredRequest<{
+      file?: {
+        contentBase64?: string;
+      };
+    }>(
+      this.gateway.request("power.fs.downloadFile", {
+        agentId,
+        path: this.toWorkspaceRelativePath(agentId, path),
+      }),
+      "power.fs.downloadFile",
+    );
+    const contentBase64 = response.file?.contentBase64?.trim() ?? "";
+    if (!contentBase64) {
+      throw new Error("power.fs.downloadFile returned empty content");
+    }
+    const bytes = Uint8Array.from(atob(contentBase64), (char) => char.charCodeAt(0));
+    const blob = new Blob([bytes]);
     if (mode === "text") {
       return {
         mode,

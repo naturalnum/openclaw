@@ -1,5 +1,8 @@
 import { html, nothing, type TemplateResult } from "lit";
 import { repeat } from "lit/directives/repeat.js";
+import { isToolResultMessage } from "../../../../../ui/src/ui/chat/message-normalizer.ts";
+import { getOrCreateSessionCacheValue } from "../../../../../ui/src/ui/chat/session-cache.ts";
+import { extractToolCards } from "../../../../../ui/src/ui/chat/tool-cards.ts";
 import {
   renderMessageGroup,
   renderReadingIndicatorGroup,
@@ -23,12 +26,26 @@ export type PowerChatThreadProps = {
   stream: string | null;
   streamStartedAt: number | null;
   sessionKey: string;
+  showToolCalls: boolean;
   assistantName: string;
   assistantAvatar: string | null;
   basePath?: string;
   onScroll?: (event: Event) => void;
+  onRequestUpdate?: () => void;
   emptyState?: TemplateResult | null;
 };
+
+const expandedToolCardsBySession = new Map<string, Map<string, boolean>>();
+const initializedToolCardsBySession = new Map<string, Set<string>>();
+const lastAutoExpandPrefBySession = new Map<string, boolean>();
+
+function getExpandedToolCards(sessionKey: string): Map<string, boolean> {
+  return getOrCreateSessionCacheValue(expandedToolCardsBySession, sessionKey, () => new Map());
+}
+
+function getInitializedToolCards(sessionKey: string): Set<string> {
+  return getOrCreateSessionCacheValue(initializedToolCardsBySession, sessionKey, () => new Set());
+}
 
 export function renderPowerChatThread(props: PowerChatThreadProps) {
   const chatItems = buildChatItems(props);
@@ -37,6 +54,8 @@ export function renderPowerChatThread(props: PowerChatThreadProps) {
     name: props.assistantName,
     avatar: props.assistantAvatar,
   };
+  const expandedToolCards = getExpandedToolCards(props.sessionKey);
+  syncToolCardExpansionState(props.sessionKey, chatItems, false);
 
   return html`
     <div class="workbench-chat-scroll chat-thread" @scroll=${props.onScroll ?? null}>
@@ -70,7 +89,20 @@ export function renderPowerChatThread(props: PowerChatThreadProps) {
             if (item.kind === "group") {
               return renderMessageGroup(item, {
                 showReasoning: false,
-                showToolCalls: true,
+                showToolCalls: props.showToolCalls,
+                autoExpandToolCalls: false,
+                isToolMessageExpanded: (messageId: string) =>
+                  expandedToolCards.get(messageId) ?? false,
+                onToggleToolMessageExpanded: (messageId: string) => {
+                  expandedToolCards.set(messageId, !expandedToolCards.get(messageId));
+                  props.onRequestUpdate?.();
+                },
+                isToolExpanded: (toolCardId: string) => expandedToolCards.get(toolCardId) ?? false,
+                onToggleToolExpanded: (toolCardId: string) => {
+                  expandedToolCards.set(toolCardId, !expandedToolCards.get(toolCardId));
+                  props.onRequestUpdate?.();
+                },
+                onRequestUpdate: props.onRequestUpdate,
                 assistantName: props.assistantName,
                 assistantAvatar: props.assistantAvatar,
                 basePath: props.basePath,
@@ -82,6 +114,60 @@ export function renderPowerChatThread(props: PowerChatThreadProps) {
       </div>
     </div>
   `;
+}
+
+function syncToolCardExpansionState(
+  sessionKey: string,
+  items: Array<ChatItem | MessageGroup>,
+  autoExpandToolCalls: boolean,
+) {
+  const expanded = getExpandedToolCards(sessionKey);
+  const initialized = getInitializedToolCards(sessionKey);
+  const previousAutoExpand = lastAutoExpandPrefBySession.get(sessionKey) ?? false;
+  const currentToolCardIds = new Set<string>();
+  for (const item of items) {
+    if (item.kind !== "group") {
+      continue;
+    }
+    for (const entry of item.messages) {
+      const cards = extractToolCards(entry.message, entry.key);
+      for (let cardIndex = 0; cardIndex < cards.length; cardIndex += 1) {
+        const disclosureId = `${entry.key}:toolcard:${cardIndex}`;
+        currentToolCardIds.add(disclosureId);
+        if (initialized.has(disclosureId)) {
+          continue;
+        }
+        expanded.set(disclosureId, autoExpandToolCalls);
+        initialized.add(disclosureId);
+      }
+      const messageRecord = entry.message as Record<string, unknown>;
+      const role = typeof messageRecord.role === "string" ? messageRecord.role : "unknown";
+      const normalizedRole = normalizeRoleForGrouping(role);
+      const isToolMessage =
+        isToolResultMessage(entry.message) ||
+        normalizedRole === "tool" ||
+        role.toLowerCase() === "toolresult" ||
+        role.toLowerCase() === "tool_result" ||
+        typeof messageRecord.toolCallId === "string" ||
+        typeof messageRecord.tool_call_id === "string";
+      if (!isToolMessage) {
+        continue;
+      }
+      const disclosureId = `toolmsg:${entry.key}`;
+      currentToolCardIds.add(disclosureId);
+      if (initialized.has(disclosureId)) {
+        continue;
+      }
+      expanded.set(disclosureId, autoExpandToolCalls);
+      initialized.add(disclosureId);
+    }
+  }
+  if (autoExpandToolCalls && !previousAutoExpand) {
+    for (const toolCardId of currentToolCardIds) {
+      expanded.set(toolCardId, true);
+    }
+  }
+  lastAutoExpandPrefBySession.set(sessionKey, autoExpandToolCalls);
 }
 
 function buildChatItems(props: PowerChatThreadProps): Array<ChatItem | MessageGroup> {
@@ -120,6 +206,9 @@ function buildChatItems(props: PowerChatThreadProps): Array<ChatItem | MessageGr
       });
       continue;
     }
+    if (!props.showToolCalls && normalized.role.toLowerCase() === "toolresult") {
+      continue;
+    }
     items.push({
       kind: "message",
       key: messageKey(message, index),
@@ -140,7 +229,7 @@ function buildChatItems(props: PowerChatThreadProps): Array<ChatItem | MessageGr
         startedAt: segments[index].ts,
       });
     }
-    if (index < tools.length) {
+    if (index < tools.length && props.showToolCalls) {
       items.push({
         kind: "message",
         key: messageKey(tools[index], index + history.length),

@@ -12,6 +12,10 @@ import {
 import { summarizeToolDescriptionText } from "../../agents/tool-description-summary.js";
 import { loadConfig } from "../../config/config.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import {
+  getConnectorInstanceForAccountSync,
+  listConnectorToolsForAccountSync,
+} from "../../connectors/runtime.js";
 import { getPluginToolMeta, resolvePluginTools } from "../../plugins/tools.js";
 import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import {
@@ -127,10 +131,50 @@ function buildPluginGroups(params: {
     .toSorted((a, b) => a.label.localeCompare(b.label));
 }
 
+function buildConnectorGroups(params: { ownerAccountId: string }): ToolCatalogGroup[] {
+  const toolRows = listConnectorToolsForAccountSync({
+    ownerAccountId: params.ownerAccountId,
+  });
+  const groups = new Map<string, ToolCatalogGroup>();
+  for (const row of toolRows) {
+    const instance = getConnectorInstanceForAccountSync({
+      ownerAccountId: params.ownerAccountId,
+      instanceId: row.instanceId,
+    });
+    const groupId = `plugin:connector:${row.instanceId}`;
+    const label = instance?.displayName?.trim() || row.instanceId;
+    const existing =
+      groups.get(groupId) ??
+      ({
+        id: groupId,
+        label,
+        source: "plugin",
+        pluginId: `connector:${row.providerId}`,
+        tools: [],
+      } as ToolCatalogGroup);
+    existing.tools.push({
+      id: row.toolName,
+      label: row.action,
+      description: row.description,
+      source: "plugin",
+      pluginId: `connector:${row.providerId}`,
+      defaultProfiles: [],
+    });
+    groups.set(groupId, existing);
+  }
+  return [...groups.values()]
+    .map((group) => ({
+      ...group,
+      tools: group.tools.toSorted((a, b) => a.id.localeCompare(b.id)),
+    }))
+    .toSorted((a, b) => a.label.localeCompare(b.label));
+}
+
 export function buildToolsCatalogResult(params: {
   cfg: OpenClawConfig;
   agentId?: string;
   includePlugins?: boolean;
+  ownerAccountId?: string;
 }): ToolsCatalogResult {
   const agentId = normalizeOptionalString(params.agentId) || resolveDefaultAgentId(params.cfg);
   const includePlugins = params.includePlugins !== false;
@@ -146,6 +190,9 @@ export function buildToolsCatalogResult(params: {
         existingToolNames,
       }),
     );
+    if (params.ownerAccountId?.trim()) {
+      groups.push(...buildConnectorGroups({ ownerAccountId: params.ownerAccountId.trim() }));
+    }
   }
   return {
     agentId,
@@ -155,7 +202,7 @@ export function buildToolsCatalogResult(params: {
 }
 
 export const toolsCatalogHandlers: GatewayRequestHandlers = {
-  "tools.catalog": ({ params, respond }) => {
+  "tools.catalog": ({ params, client, respond }) => {
     if (!validateToolsCatalogParams(params)) {
       respond(
         false,
@@ -177,6 +224,7 @@ export const toolsCatalogHandlers: GatewayRequestHandlers = {
         cfg: resolved.cfg,
         agentId: resolved.agentId,
         includePlugins: params.includePlugins,
+        ownerAccountId: client?.connect.client.instanceId,
       }),
       undefined,
     );

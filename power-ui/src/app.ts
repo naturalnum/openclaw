@@ -77,6 +77,8 @@ import type {
   AgentIdentityResult,
   AgentsFilesListResult,
   AgentsListResult,
+  ConnectorInstance,
+  ConnectorProviderDefinition,
   ConfigSnapshot,
   LogLevel,
   ModelCatalogEntry,
@@ -85,7 +87,6 @@ import type {
 } from "./compat/types.ts";
 import {
   DEFAULT_CRON_FORM,
-  flushToolStreamSync,
   handleAgentEvent,
   handleChatScroll,
   icons,
@@ -223,6 +224,69 @@ function applyTheme(settings: UiSettings) {
   return resolved;
 }
 
+function trimCommittedPrefixFromText(text: string, prefix: string): string {
+  if (!prefix || !text.startsWith(prefix)) {
+    return text;
+  }
+  return text.slice(prefix.length);
+}
+
+function stringifyDraftValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return "";
+}
+
+function trimCommittedPrefixFromChatMessage(
+  message: unknown,
+  prefix: string,
+  state: "delta" | "final" | "aborted" | "error",
+): unknown {
+  if (!prefix || (state !== "delta" && state !== "final")) {
+    return message;
+  }
+  if (!message || typeof message !== "object") {
+    return message;
+  }
+  const record = message as Record<string, unknown>;
+  if (typeof record.text === "string") {
+    return {
+      ...record,
+      text: trimCommittedPrefixFromText(record.text, prefix),
+    };
+  }
+  if (!Array.isArray(record.content)) {
+    return message;
+  }
+  let trimmed = false;
+  const nextContent = record.content.map((item) => {
+    if (
+      !trimmed &&
+      item &&
+      typeof item === "object" &&
+      (item as Record<string, unknown>).type === "text" &&
+      typeof (item as Record<string, unknown>).text === "string"
+    ) {
+      trimmed = true;
+      return {
+        ...(item as Record<string, unknown>),
+        text: trimCommittedPrefixFromText((item as Record<string, unknown>).text as string, prefix),
+      };
+    }
+    return item;
+  });
+  return trimmed
+    ? {
+        ...record,
+        content: nextContent,
+      }
+    : message;
+}
+
 const CRON_THINKING_SUGGESTIONS = ["off", "minimal", "low", "medium", "high"];
 const CRON_TIMEZONE_SUGGESTIONS = [
   "UTC",
@@ -250,6 +314,41 @@ const DEFAULT_LOG_LEVEL_FILTERS: Record<LogLevel, boolean> = {
 };
 const DEFAULT_STATISTICS_RANGE_DAYS: WorkbenchStatisticsRange = 7;
 const STATISTICS_RANGE_OPTIONS: readonly WorkbenchStatisticsRange[] = new Set([1, 7, 30]);
+
+type ConnectorDraftState = {
+  providerId: string | null;
+  displayName: string;
+  description: string;
+  enabled: boolean;
+  policyMode: "read-only" | "limited-write" | "full";
+  config: Record<string, string>;
+  secretInputs: Record<string, string>;
+};
+
+type ConnectorState = {
+  loading: boolean;
+  saving: boolean;
+  testing: boolean;
+  error: string | null;
+  testResult: string | null;
+  providers: ConnectorProviderDefinition[];
+  instances: ConnectorInstance[];
+  selectedProviderId: string | null;
+  editingInstanceId: string | null;
+  draft: ConnectorDraftState;
+};
+
+function createEmptyConnectorDraft(providerId: string | null = null): ConnectorDraftState {
+  return {
+    providerId,
+    displayName: "",
+    description: "",
+    enabled: true,
+    policyMode: "read-only",
+    config: {},
+    secretInputs: {},
+  };
+}
 
 function formatUtcOffsetForLocalTimezone(): string {
   const offsetFromUtcMinutes = -new Date().getTimezoneOffset();
@@ -630,6 +729,7 @@ type SessionRuntimeState = ChatState & {
   toolStreamOrder: string[];
   chatToolMessages: Record<string, unknown>[];
   chatStreamSegments: Array<{ text: string; ts: number }>;
+  chatCommittedToolPrefix: string;
   chatScrollFrame: number | null;
   chatScrollTimeout: number | null;
   chatHasAutoScrolled: boolean;
@@ -910,8 +1010,6 @@ export class OpenClawPowerApp extends LitElement {
     wikiMemoryPalace: null,
     lastError: null,
   };
-  private pendingComposerSendAfterComposition = false;
-
   createRenderRoot() {
     return this;
   }
@@ -1011,6 +1109,18 @@ export class OpenClawPowerApp extends LitElement {
     rangeDays: DEFAULT_STATISTICS_RANGE_DAYS,
     result: null,
     lastLoadedRangeDays: null,
+  };
+  @state() connectorState: ConnectorState = {
+    loading: false,
+    saving: false,
+    testing: false,
+    error: null,
+    testResult: null,
+    providers: [],
+    instances: [],
+    selectedProviderId: null,
+    editingInstanceId: null,
+    draft: createEmptyConnectorDraft(),
   };
 
   @state() agentsList: AgentsListResult | null = null;
@@ -1261,6 +1371,7 @@ export class OpenClawPowerApp extends LitElement {
       toolStreamOrder: [],
       chatToolMessages: [],
       chatStreamSegments: [],
+      chatCommittedToolPrefix: "",
       chatScrollFrame: null,
       chatScrollTimeout: null,
       chatHasAutoScrolled: false,
@@ -1411,6 +1522,9 @@ export class OpenClawPowerApp extends LitElement {
   private resolveWorkspaceForAgent(agentId: string | null): string | null {
     if (!agentId) {
       return null;
+    }
+    if (this.fileManagerAgentId === agentId && this.fileManagerWorkspace?.trim()) {
+      return this.fileManagerWorkspace.trim();
     }
     if (this.projectFilesAgentId === agentId && this.projectFilesWorkspace?.trim()) {
       return this.projectFilesWorkspace.trim();
@@ -1694,6 +1808,7 @@ export class OpenClawPowerApp extends LitElement {
       return;
     }
     resetToolStream(runtime as unknown as Parameters<typeof resetToolStream>[0]);
+    runtime.chatCommittedToolPrefix = "";
     resetChatScroll(
       this.createActiveScrollHost(runtime) as unknown as Parameters<typeof resetChatScroll>[0],
     );
@@ -1759,7 +1874,10 @@ export class OpenClawPowerApp extends LitElement {
     }
   }
 
-  private applySnapshot(snapshot: WorkbenchSnapshot) {
+  private applySnapshot(
+    snapshot: WorkbenchSnapshot,
+    options?: { forceReplaceSessionKey?: string | null },
+  ) {
     this.assistantName = snapshot.assistantName;
     this.workbenchSelectedProjectId = snapshot.currentProjectId;
     this.agentsList = snapshot.agentsList;
@@ -1800,7 +1918,9 @@ export class OpenClawPowerApp extends LitElement {
             typeof (message as { role?: unknown }).role === "string" &&
             (message as { role: string }).role.toLowerCase() === "user",
         ).length;
+        const forceReplace = options?.forceReplaceSessionKey === snapshot.currentSessionKey;
         const shouldPreserveLocalChatState =
+          !forceReplace &&
           (snapshotMessages.length === 0 ||
             (runtimeUserCount > snapshotUserCount && runtime.chatMessages.length > 0)) &&
           (runtime.chatMessages.length > 0 ||
@@ -1815,6 +1935,7 @@ export class OpenClawPowerApp extends LitElement {
           runtime.chatRunId = null;
           runtime.chatSending = false;
           runtime.lastError = null;
+          runtime.chatCommittedToolPrefix = "";
           resetToolStream(runtime as unknown as Parameters<typeof resetToolStream>[0]);
         }
         void this.maybeBackfillSessionLabel(snapshot.currentSessionKey, runtime.chatMessages);
@@ -1936,13 +2057,14 @@ export class OpenClawPowerApp extends LitElement {
   private async refreshSnapshot(
     sessionKey = this.workbenchSelectedSessionKey,
     projectId = this.workbenchSelectedProjectId,
+    options?: { forceReplaceSessionKey?: string | null },
   ) {
     try {
       const snapshot = await this.adapter.snapshot({
         projectId,
         sessionKey,
       });
-      this.applySnapshot(snapshot);
+      this.applySnapshot(snapshot, options);
       await this.refreshProjectFiles(projectId);
       this.lastError = null;
     } catch (error) {
@@ -2176,12 +2298,308 @@ export class OpenClawPowerApp extends LitElement {
     }
   }
 
+  private buildConnectorDraftFromInstance(instance: ConnectorInstance): ConnectorDraftState {
+    return {
+      providerId: instance.providerId,
+      displayName: instance.displayName,
+      description: instance.description,
+      enabled: instance.enabled,
+      policyMode: instance.policy.mode,
+      config: Object.fromEntries(
+        Object.entries(instance.config ?? {}).map(([key, value]) => [
+          key,
+          stringifyDraftValue(value),
+        ]),
+      ),
+      secretInputs: Object.fromEntries(
+        Object.entries(instance.secretInputs ?? {}).map(([key, value]) => [
+          key,
+          stringifyDraftValue(value),
+        ]),
+      ),
+    };
+  }
+
+  private async loadConnectorsPage(force = false) {
+    if (this.connectorState.loading && !force) {
+      return;
+    }
+    this.connectorState = {
+      ...this.connectorState,
+      loading: true,
+      error: null,
+      testResult: null,
+    };
+    try {
+      const [catalog, instances] = await Promise.all([
+        this.adapter.request<{ providers?: ConnectorProviderDefinition[] }>(
+          "connectors.catalog.list",
+          {},
+        ),
+        this.adapter.request<{ instances?: ConnectorInstance[] }>("connectors.instances.list", {}),
+      ]);
+      const providers = Array.isArray(catalog.providers) ? catalog.providers : [];
+      const instanceList = Array.isArray(instances.instances) ? instances.instances : [];
+      const selectedProviderId =
+        this.connectorState.selectedProviderId ??
+        this.connectorState.draft.providerId ??
+        instanceList[0]?.providerId ??
+        providers[0]?.id ??
+        null;
+      const editingInstanceId =
+        this.connectorState.editingInstanceId &&
+        instanceList.some((instance) => instance.id === this.connectorState.editingInstanceId)
+          ? this.connectorState.editingInstanceId
+          : null;
+      const editingInstance = editingInstanceId
+        ? (instanceList.find((instance) => instance.id === editingInstanceId) ?? null)
+        : null;
+      const draft =
+        editingInstance != null
+          ? this.buildConnectorDraftFromInstance(editingInstance)
+          : {
+              ...this.connectorState.draft,
+              providerId: selectedProviderId,
+            };
+      this.connectorState = {
+        ...this.connectorState,
+        loading: false,
+        providers,
+        instances: instanceList,
+        selectedProviderId,
+        editingInstanceId,
+        draft,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.connectorState = {
+        ...this.connectorState,
+        loading: false,
+        error: message,
+      };
+    }
+  }
+
+  private selectConnectorProvider(providerId: string) {
+    this.connectorState = {
+      ...this.connectorState,
+      selectedProviderId: providerId,
+      editingInstanceId: null,
+      testResult: null,
+      draft: createEmptyConnectorDraft(providerId),
+    };
+  }
+
+  private selectConnectorInstance(instanceId: string | null) {
+    if (!instanceId) {
+      this.connectorState = {
+        ...this.connectorState,
+        editingInstanceId: null,
+        draft: createEmptyConnectorDraft(this.connectorState.selectedProviderId),
+      };
+      return;
+    }
+    const instance = this.connectorState.instances.find((item) => item.id === instanceId);
+    if (!instance) {
+      return;
+    }
+    this.connectorState = {
+      ...this.connectorState,
+      selectedProviderId: instance.providerId,
+      editingInstanceId: instance.id,
+      testResult: null,
+      draft: this.buildConnectorDraftFromInstance(instance),
+    };
+  }
+
+  private updateConnectorDraft(
+    section: "meta" | "config" | "secret",
+    key: string,
+    value: string | boolean,
+  ) {
+    const draft = this.connectorState.draft;
+    if (section === "meta") {
+      this.connectorState = {
+        ...this.connectorState,
+        draft: {
+          ...draft,
+          [key]: typeof value === "boolean" ? value : value,
+        },
+      };
+      return;
+    }
+    if (section === "config") {
+      this.connectorState = {
+        ...this.connectorState,
+        draft: {
+          ...draft,
+          config: {
+            ...draft.config,
+            [key]: String(value),
+          },
+        },
+      };
+      return;
+    }
+    this.connectorState = {
+      ...this.connectorState,
+      draft: {
+        ...draft,
+        secretInputs: {
+          ...draft.secretInputs,
+          [key]: String(value),
+        },
+      },
+    };
+  }
+
+  private updateConnectorDraftPolicyMode(value: "read-only" | "limited-write" | "full") {
+    this.connectorState = {
+      ...this.connectorState,
+      draft: {
+        ...this.connectorState.draft,
+        policyMode: value,
+      },
+    };
+  }
+
+  private async saveConnectorDraft() {
+    const providerId =
+      this.connectorState.draft.providerId ?? this.connectorState.selectedProviderId;
+    if (!providerId) {
+      this.connectorState = {
+        ...this.connectorState,
+        error: "connector provider is required",
+      };
+      return;
+    }
+    this.connectorState = {
+      ...this.connectorState,
+      saving: true,
+      error: null,
+    };
+    const payload = {
+      providerId,
+      displayName: this.connectorState.draft.displayName.trim(),
+      description: this.connectorState.draft.description.trim(),
+      enabled: this.connectorState.draft.enabled,
+      config: this.connectorState.draft.config,
+      secretInputs: this.connectorState.draft.secretInputs,
+      policy: {
+        mode: this.connectorState.draft.policyMode,
+        allowedActions: [],
+        deniedActions: [],
+        requireApprovalActions: [],
+      },
+    };
+    try {
+      if (this.connectorState.editingInstanceId) {
+        await this.adapter.request("connectors.instances.update", {
+          id: this.connectorState.editingInstanceId,
+          ...payload,
+        });
+      } else {
+        await this.adapter.request("connectors.instances.create", payload);
+      }
+      this.connectorState = {
+        ...this.connectorState,
+        saving: false,
+      };
+      await this.loadConnectorsPage(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.connectorState = {
+        ...this.connectorState,
+        saving: false,
+        error: message,
+      };
+    }
+  }
+
+  private async testConnectorDraft() {
+    if (!this.connectorState.editingInstanceId) {
+      this.connectorState = {
+        ...this.connectorState,
+        testResult: "Save the connector before testing the live connection.",
+      };
+      return;
+    }
+    this.connectorState = {
+      ...this.connectorState,
+      testing: true,
+      error: null,
+      testResult: null,
+    };
+    try {
+      const result = await this.adapter.request<{ ok?: boolean; message?: string }>(
+        "connectors.instances.test",
+        { id: this.connectorState.editingInstanceId },
+      );
+      this.connectorState = {
+        ...this.connectorState,
+        testing: false,
+        testResult: result.message?.trim() || "Connection test completed.",
+      };
+      await this.loadConnectorsPage(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.connectorState = {
+        ...this.connectorState,
+        testing: false,
+        error: message,
+      };
+    }
+  }
+
+  private async toggleConnectorInstanceEnabled(instanceId: string, enabled: boolean) {
+    try {
+      await this.adapter.request(
+        enabled ? "connectors.instances.enable" : "connectors.instances.disable",
+        {
+          id: instanceId,
+          enabled,
+        },
+      );
+      await this.loadConnectorsPage(true);
+    } catch (error) {
+      this.connectorState = {
+        ...this.connectorState,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  private async deleteConnectorInstance(instanceId: string) {
+    try {
+      await this.adapter.request("connectors.instances.delete", { id: instanceId });
+      this.connectorState = {
+        ...this.connectorState,
+        editingInstanceId:
+          this.connectorState.editingInstanceId === instanceId
+            ? null
+            : this.connectorState.editingInstanceId,
+        draft:
+          this.connectorState.editingInstanceId === instanceId
+            ? createEmptyConnectorDraft(this.connectorState.selectedProviderId)
+            : this.connectorState.draft,
+      };
+      await this.loadConnectorsPage(true);
+    } catch (error) {
+      this.connectorState = {
+        ...this.connectorState,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
   private openSettingsDialog(tab?: WorkbenchSettingsTab) {
     if (tab) {
       this.workbenchSettingsTab = tab;
     }
     this.openModal("settings");
-    if (this.workbenchSettingsTab === "dreaming") {
+    if (this.workbenchSettingsTab === "connectors") {
+      void this.loadConnectorsPage();
+    } else if (this.workbenchSettingsTab === "dreaming") {
       void this.loadDreamingPage();
     } else if (this.workbenchSettingsTab === "statistics") {
       void this.loadStatistics();
@@ -2197,7 +2615,10 @@ export class OpenClawPowerApp extends LitElement {
 
   private changeSettingsTab(value: WorkbenchSettingsTab) {
     this.workbenchSettingsTab = value;
-    if (value === "dreaming" && this.workbenchSettingsOpen) {
+    if (value === "connectors" && this.workbenchSettingsOpen) {
+      void this.loadConnectorsPage();
+      this.stopLogsAutoRefresh();
+    } else if (value === "dreaming" && this.workbenchSettingsOpen) {
       void this.loadDreamingPage();
       this.stopLogsAutoRefresh();
     } else if (value === "statistics" && this.workbenchSettingsOpen) {
@@ -2675,7 +3096,10 @@ export class OpenClawPowerApp extends LitElement {
     }
     try {
       this.fileManagerBusyPath = path;
-      await this.adapter.deleteProjectEntry(agentId, path);
+      await this.adapter.deleteProjectEntry(
+        agentId,
+        this.toWorkspaceRelativePath(path, this.resolveWorkspaceForAgent(agentId)),
+      );
       if (this.selectedProjectEntryPath === path) {
         this.selectedProjectEntryPath = null;
       }
@@ -2817,7 +3241,10 @@ export class OpenClawPowerApp extends LitElement {
   private async downloadProjectFile(agentId: string, path: string) {
     try {
       this.fileManagerBusyPath = path;
-      await this.adapter.downloadProjectFile(agentId, path);
+      await this.adapter.downloadProjectFile(
+        agentId,
+        this.toWorkspaceRelativePath(path, this.resolveWorkspaceForAgent(agentId)),
+      );
       this.lastError = null;
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : String(error);
@@ -2857,7 +3284,11 @@ export class OpenClawPowerApp extends LitElement {
       objectUrl: null,
     };
     try {
-      const preview = await this.adapter.previewProjectFile(agentId, entry.path, mode);
+      const preview = await this.adapter.previewProjectFile(
+        agentId,
+        this.toWorkspaceRelativePath(entry.path, this.resolveWorkspaceForAgent(agentId)),
+        mode,
+      );
       if (preview.mode === "text") {
         this.filePreviewState = {
           ...this.filePreviewState,
@@ -3225,32 +3656,22 @@ export class OpenClawPowerApp extends LitElement {
   }
 
   private handleComposerKeyDown(event: KeyboardEvent) {
-    if (event.key === "Enter" && !event.shiftKey && (event.isComposing || event.keyCode === 229)) {
-      this.pendingComposerSendAfterComposition = true;
-      return;
+    if (event.key === "Enter" && !event.shiftKey) {
+      if (event.isComposing || event.keyCode === 229) {
+        return;
+      }
     }
-    if (event.isComposing) {
+    if (event.isComposing || event.keyCode === 229) {
       return;
     }
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      this.pendingComposerSendAfterComposition = false;
       void this.sendCurrentMessage();
     }
   }
 
   private handleComposerCompositionEnd(_event: CompositionEvent) {
-    if (!this.pendingComposerSendAfterComposition) {
-      return;
-    }
-    this.pendingComposerSendAfterComposition = false;
-    window.setTimeout(() => {
-      const draft = this.activeChatDraft;
-      if (!draft.message.trim() && draft.files.length === 0) {
-        return;
-      }
-      void this.sendCurrentMessage();
-    }, 0);
+    return;
   }
 
   private handleChatScrollEvent(event: Event) {
@@ -3415,6 +3836,9 @@ export class OpenClawPowerApp extends LitElement {
             runtime as unknown as Parameters<typeof handleAgentEvent>[0],
             event.payload,
           );
+          runtime.chatCommittedToolPrefix = runtime.chatStreamSegments
+            .map((entry) => entry.text)
+            .join("");
           if (this.workbenchSelectedSessionKey === sessionKey) {
             this.bumpChatRuntime();
           }
@@ -3425,6 +3849,9 @@ export class OpenClawPowerApp extends LitElement {
             runtime as unknown as Parameters<typeof handleAgentEvent>[0],
             event.payload,
           );
+          runtime.chatCommittedToolPrefix = runtime.chatStreamSegments
+            .map((entry) => entry.text)
+            .join("");
         }
         this.bumpChatRuntime();
       }
@@ -3441,13 +3868,33 @@ export class OpenClawPowerApp extends LitElement {
     }
     const projectId =
       parseAgentSessionKey(event.sessionKey)?.agentId ?? this.workbenchSelectedProjectId ?? null;
+    const hadToolEventsBeforeChatEvent = runtime.toolStreamOrder.length > 0;
+    const payloadMessage = trimCommittedPrefixFromChatMessage(
+      event.message,
+      runtime.chatCommittedToolPrefix,
+      event.state,
+    );
+    const previousMessageCount = runtime.chatMessages.length;
     const nextState = handleChatEvent(runtime, {
       runId: event.runId ?? "",
       sessionKey: event.sessionKey,
       state: event.state,
-      message: event.message,
+      message: payloadMessage,
       errorMessage: event.errorMessage ?? undefined,
     });
+    if (event.state === "delta" && runtime.chatStream) {
+      runtime.chatStream = trimCommittedPrefixFromText(
+        runtime.chatStream,
+        runtime.chatCommittedToolPrefix,
+      );
+    }
+    if (
+      event.state === "final" &&
+      hadToolEventsBeforeChatEvent &&
+      runtime.chatMessages.length > previousMessageCount
+    ) {
+      runtime.chatMessages = runtime.chatMessages.slice(0, previousMessageCount);
+    }
     const isActiveSession = this.workbenchSelectedSessionKey === event.sessionKey;
     if (!isActiveSession && (event.state === "delta" || event.state === "final")) {
       this.markSessionUnread(event.sessionKey);
@@ -3455,21 +3902,44 @@ export class OpenClawPowerApp extends LitElement {
     this.bumpChatRuntime();
     void this.maybeBackfillSessionLabel(event.sessionKey, runtime.chatMessages);
     if (isActiveSession) {
-      if (event.state === "final" || event.state === "aborted" || event.state === "error") {
-        flushToolStreamSync(runtime as unknown as Parameters<typeof flushToolStreamSync>[0]);
-      }
       this.scheduleActiveChatScroll(false, event.state === "delta");
     }
-    if (nextState === "final" || nextState === "aborted" || nextState === "error") {
-      if (isActiveSession) {
-        void this.refreshSnapshot(event.sessionKey, projectId);
-      } else {
-        void this.refreshSnapshot(
-          this.workbenchSelectedSessionKey,
-          this.workbenchSelectedProjectId,
-        );
-      }
+    const isTerminalState =
+      nextState === "final" || nextState === "aborted" || nextState === "error";
+    if (!isTerminalState) {
+      return;
     }
+
+    const toolHost = runtime as unknown as Parameters<typeof resetToolStream>[0];
+    const hadToolEvents = toolHost.toolStreamOrder.length > 0;
+    const refreshPromise =
+      nextState === "final"
+        ? isActiveSession
+          ? this.refreshSnapshot(event.sessionKey, projectId, {
+              forceReplaceSessionKey: event.sessionKey,
+            })
+          : this.refreshSnapshot(
+              this.workbenchSelectedSessionKey,
+              this.workbenchSelectedProjectId,
+              {
+                forceReplaceSessionKey: event.sessionKey,
+              },
+            )
+        : Promise.resolve();
+
+    if (nextState === "final" && hadToolEvents) {
+      void refreshPromise.finally(() => {
+        resetToolStream(toolHost);
+        runtime.chatCommittedToolPrefix = "";
+        this.bumpChatRuntime();
+      });
+      return;
+    }
+
+    resetToolStream(toolHost);
+    runtime.chatCommittedToolPrefix = "";
+    this.bumpChatRuntime();
+    void refreshPromise;
   }
 
   private getSessionListRow(sessionKey: string) {
@@ -3745,6 +4215,7 @@ export class OpenClawPowerApp extends LitElement {
       currentProjectId: this.workbenchSelectedProjectId,
       filesPageProjectId: this.filesPageProjectId,
       currentSessionKey: this.workbenchSelectedSessionKey ?? "",
+      showToolCalls: this.settings.chatShowToolCalls,
       treeMenuOpenKey: this.treeMenuOpenKey,
       currentModelId: this.currentModelId,
       newTaskProjectId: this.workbenchSelectedProjectId,
@@ -4149,6 +4620,48 @@ export class OpenClawPowerApp extends LitElement {
             void this.loadStatistics(true);
           },
         },
+        connectors: {
+          loading: this.connectorState.loading,
+          saving: this.connectorState.saving,
+          testing: this.connectorState.testing,
+          error: this.connectorState.error,
+          selectedProviderId: this.connectorState.selectedProviderId,
+          editingInstanceId: this.connectorState.editingInstanceId,
+          providers: this.connectorState.providers,
+          instances: this.connectorState.instances,
+          draft: this.connectorState.draft,
+          testResult: this.connectorState.testResult,
+          onRefresh: () => {
+            void this.loadConnectorsPage(true);
+          },
+          onSelectProvider: (providerId) => {
+            this.selectConnectorProvider(providerId);
+          },
+          onSelectInstance: (instanceId) => {
+            this.selectConnectorInstance(instanceId);
+          },
+          onCreateNew: () => {
+            this.selectConnectorInstance(null);
+          },
+          onDraftChange: (section, key, value) => {
+            this.updateConnectorDraft(section, key, value);
+          },
+          onDraftPolicyModeChange: (value) => {
+            this.updateConnectorDraftPolicyMode(value);
+          },
+          onSave: () => {
+            void this.saveConnectorDraft();
+          },
+          onDelete: (instanceId) => {
+            void this.deleteConnectorInstance(instanceId);
+          },
+          onToggleEnabled: (instanceId, enabled) => {
+            void this.toggleConnectorInstanceEnabled(instanceId, enabled);
+          },
+          onTest: () => {
+            void this.testConnectorDraft();
+          },
+        },
         onLocaleChange: (value) => {
           void this.setLocale(value);
         },
@@ -4273,6 +4786,14 @@ export class OpenClawPowerApp extends LitElement {
       },
       onChatScroll: (event) => {
         this.handleChatScrollEvent(event);
+      },
+      onRequestUpdate: () => {
+        this.requestUpdate();
+      },
+      onToggleToolCalls: () => {
+        this.persistSettings({
+          chatShowToolCalls: !this.settings.chatShowToolCalls,
+        });
       },
       onSend: () => {
         void this.sendCurrentMessage();

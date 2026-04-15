@@ -115,7 +115,7 @@ async function loadSkillsCatalog(state: SkillsMarketState): Promise<void> {
     return;
   }
   const res = await state.client.request<SkillsRegistryListResult>(
-    "skills.registry.list",
+    "power.skills.catalog.list",
     buildRegistryListParams(state),
   );
   state.skillsCatalog = res.items;

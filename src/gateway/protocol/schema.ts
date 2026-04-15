@@ -3,6 +3,7 @@ export * from "./schema/agents-models-skills.js";
 export * from "./schema/channels.js";
 export * from "./schema/commands.js";
 export * from "./schema/config.js";
+export * from "./schema/connectors.js";
 export * from "./schema/cron.js";
 export * from "./schema/error-codes.js";
 export * from "./schema/exec-approvals.js";

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
@@ -391,6 +392,22 @@ function sanitizeIdentityLine(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
+function deriveAgentIdForCreate(rawName: string, workspaceDir: string): string {
+  const trimmedName = rawName.trim();
+  const agentId = normalizeAgentId(trimmedName);
+  if (agentId !== DEFAULT_AGENT_ID) {
+    return agentId;
+  }
+  if (!trimmedName || /^main$/i.test(trimmedName) || /[a-z0-9]/i.test(trimmedName)) {
+    return agentId;
+  }
+  const digest = createHash("sha1")
+    .update(`${trimmedName}\n${workspaceDir.trim()}`)
+    .digest("hex")
+    .slice(0, 12);
+  return `agent-${digest}`;
+}
+
 function resolveOptionalStringParam(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -630,7 +647,8 @@ export const agentsHandlers: GatewayRequestHandlers = {
 
     const cfg = loadConfig();
     const rawName = params.name.trim();
-    const agentId = normalizeAgentId(rawName);
+    const workspaceDir = resolveUserPath(params.workspace.trim());
+    const agentId = deriveAgentIdForCreate(rawName, workspaceDir);
     if (agentId === DEFAULT_AGENT_ID) {
       respond(
         false,
@@ -648,9 +666,6 @@ export const agentsHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-
-    const workspaceDir = resolveUserPath(params.workspace.trim());
-
     const safeName = sanitizeIdentityLine(rawName);
     const model = resolveOptionalStringParam(params.model);
     const emoji = resolveOptionalStringParam(params.emoji);

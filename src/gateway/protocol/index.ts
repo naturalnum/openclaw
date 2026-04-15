@@ -87,6 +87,26 @@ import {
   ConfigSchemaResponseSchema,
   type ConfigSetParams,
   ConfigSetParamsSchema,
+  type ConnectorCapabilitiesListParams,
+  ConnectorCapabilitiesListParamsSchema,
+  type ConnectorCatalogGetParams,
+  ConnectorCatalogGetParamsSchema,
+  type ConnectorCatalogListParams,
+  ConnectorCatalogListParamsSchema,
+  type ConnectorInstanceDeleteParams,
+  ConnectorInstanceDeleteParamsSchema,
+  type ConnectorInstanceGetParams,
+  ConnectorInstanceGetParamsSchema,
+  type ConnectorInstanceSetEnabledParams,
+  ConnectorInstanceSetEnabledParamsSchema,
+  type ConnectorInstanceUpsertParams,
+  ConnectorInstanceUpsertParamsSchema,
+  type ConnectorInstancesListParams,
+  ConnectorInstancesListParamsSchema,
+  type ConnectorInvokeParams,
+  ConnectorInvokeParamsSchema,
+  type ConnectorToolsListParams,
+  ConnectorToolsListParamsSchema,
   type ConnectParams,
   ConnectParamsSchema,
   type CronAddParams,
@@ -427,6 +447,35 @@ export const validateConfigSchemaLookupParams = ajv.compile<ConfigSchemaLookupPa
 export const validateConfigSchemaLookupResult = ajv.compile<ConfigSchemaLookupResult>(
   ConfigSchemaLookupResultSchema,
 );
+export const validateConnectorCatalogListParams = ajv.compile<ConnectorCatalogListParams>(
+  ConnectorCatalogListParamsSchema,
+);
+export const validateConnectorCatalogGetParams = ajv.compile<ConnectorCatalogGetParams>(
+  ConnectorCatalogGetParamsSchema,
+);
+export const validateConnectorInstancesListParams = ajv.compile<ConnectorInstancesListParams>(
+  ConnectorInstancesListParamsSchema,
+);
+export const validateConnectorInstanceGetParams = ajv.compile<ConnectorInstanceGetParams>(
+  ConnectorInstanceGetParamsSchema,
+);
+export const validateConnectorInstanceUpsertParams = ajv.compile<ConnectorInstanceUpsertParams>(
+  ConnectorInstanceUpsertParamsSchema,
+);
+export const validateConnectorInstanceDeleteParams = ajv.compile<ConnectorInstanceDeleteParams>(
+  ConnectorInstanceDeleteParamsSchema,
+);
+export const validateConnectorInstanceSetEnabledParams =
+  ajv.compile<ConnectorInstanceSetEnabledParams>(ConnectorInstanceSetEnabledParamsSchema);
+export const validateConnectorCapabilitiesListParams = ajv.compile<ConnectorCapabilitiesListParams>(
+  ConnectorCapabilitiesListParamsSchema,
+);
+export const validateConnectorToolsListParams = ajv.compile<ConnectorToolsListParams>(
+  ConnectorToolsListParamsSchema,
+);
+export const validateConnectorInvokeParams = ajv.compile<ConnectorInvokeParams>(
+  ConnectorInvokeParamsSchema,
+);
 export const validateWizardStartParams = ajv.compile<WizardStartParams>(WizardStartParamsSchema);
 export const validateWizardNextParams = ajv.compile<WizardNextParams>(WizardNextParamsSchema);
 export const validateWizardCancelParams = ajv.compile<WizardCancelParams>(WizardCancelParamsSchema);
@@ -621,6 +670,16 @@ export {
   ConfigSchemaLookupParamsSchema,
   ConfigSchemaResponseSchema,
   ConfigSchemaLookupResultSchema,
+  ConnectorCatalogListParamsSchema,
+  ConnectorCatalogGetParamsSchema,
+  ConnectorInstancesListParamsSchema,
+  ConnectorInstanceGetParamsSchema,
+  ConnectorInstanceUpsertParamsSchema,
+  ConnectorInstanceDeleteParamsSchema,
+  ConnectorInstanceSetEnabledParamsSchema,
+  ConnectorCapabilitiesListParamsSchema,
+  ConnectorToolsListParamsSchema,
+  ConnectorInvokeParamsSchema,
   WizardStartParamsSchema,
   WizardNextParamsSchema,
   WizardCancelParamsSchema,
@@ -724,6 +783,16 @@ export type {
   ConfigPatchParams,
   ConfigSchemaParams,
   ConfigSchemaResponse,
+  ConnectorCatalogListParams,
+  ConnectorCatalogGetParams,
+  ConnectorInstancesListParams,
+  ConnectorInstanceGetParams,
+  ConnectorInstanceUpsertParams,
+  ConnectorInstanceDeleteParams,
+  ConnectorInstanceSetEnabledParams,
+  ConnectorCapabilitiesListParams,
+  ConnectorToolsListParams,
+  ConnectorInvokeParams,
   WizardStartParams,
   WizardNextParams,
   WizardCancelParams,

@@ -410,7 +410,8 @@ export class PowerFsService {
     if (!trimmed) {
       throw new Error("Path is required.");
     }
-    const resolvedPath = realpathOrResolved(trimmed);
+    const candidatePath = path.isAbsolute(trimmed) ? trimmed : path.resolve(workspaceRoot, trimmed);
+    const resolvedPath = realpathOrResolved(candidatePath);
     if (!this.isWithinRoot(resolvedPath, workspaceRoot)) {
       throw new Error(`Path is outside workspace: ${resolvedPath}`);
     }
