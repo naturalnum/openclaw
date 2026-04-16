@@ -1403,10 +1403,14 @@ export class OpenClawPowerApp extends LitElement {
     return this.getOrCreateSessionRuntime(this.workbenchSelectedSessionKey);
   }
 
+  private get activeSessionAgentId() {
+    return parseAgentSessionKey(this.workbenchSelectedSessionKey ?? "")?.agentId ?? null;
+  }
+
   private get activeChatAgentId() {
     return (
+      this.activeSessionAgentId ??
       this.workbenchSelectedProjectId ??
-      parseAgentSessionKey(this.workbenchSelectedSessionKey ?? "")?.agentId ??
       this.agentsList?.defaultId ??
       this.agentsList?.agents[0]?.id ??
       null
@@ -2957,7 +2961,7 @@ export class OpenClawPowerApp extends LitElement {
     }
   }
 
-  private async refreshProjectFiles(agentId = this.workbenchSelectedProjectId) {
+  private async refreshProjectFiles(agentId = this.activeChatAgentId) {
     const targetAgentId = agentId?.trim() ?? "";
     if (!targetAgentId) {
       this.clearProjectFilesState();
@@ -2967,7 +2971,7 @@ export class OpenClawPowerApp extends LitElement {
     const expectedAgentId =
       this.workbenchSection === "files"
         ? (this.filesPageProjectId ?? this.resolveDefaultProjectId() ?? targetAgentId)
-        : (this.workbenchSelectedProjectId ?? "").trim() || targetAgentId;
+        : (this.activeChatAgentId ?? "").trim() || targetAgentId;
     this.projectFilesLoading = true;
     this.projectFilesError = null;
     const requestedPath =

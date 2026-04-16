@@ -4,7 +4,7 @@ import fsp from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import { resolveAgentWorkspaceDir } from "../../src/agents/agent-scope.js";
-import { loadConfig } from "../../src/config/config.js";
+import { readConfigFileSnapshot } from "../../src/config/config.js";
 import { authorizeHttpGatewayConnect, type ResolvedGatewayAuth } from "../../src/gateway/auth.js";
 import { sendGatewayAuthFailure, sendMethodNotAllowed } from "../../src/gateway/http-common.js";
 import { getBearerToken } from "../../src/gateway/http-utils.js";
@@ -80,12 +80,12 @@ function trimOptionalFormValue(value: string | null): string | undefined {
   return trimmed || undefined;
 }
 
-function resolveWorkspaceForAgent(agentIdRaw: unknown) {
+async function resolveWorkspaceForAgent(agentIdRaw: unknown) {
   const agentId = typeof agentIdRaw === "string" ? agentIdRaw.trim() : "";
   if (!agentId) {
     throw new Error("agentId required");
   }
-  const cfg = loadConfig();
+  const cfg = (await readConfigFileSnapshot()).config;
   const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
   if (!workspaceDir?.trim()) {
     throw new Error(`No workspace configured for agent: ${agentId}`);
@@ -248,7 +248,7 @@ export function createPowerFsHttpHandler(params: {
         const agentId = trimOptionalFormValue(url.searchParams.get("agentId"));
         const requestedPath = normalizeRelativePath(url.searchParams.get("path"));
         const fileName = normalizeFileName(url.searchParams.get("name"));
-        const { workspaceDir } = resolveWorkspaceForAgent(agentId);
+        const { workspaceDir } = await resolveWorkspaceForAgent(agentId);
         const targetPath = await resolveParentForWrite(
           workspaceDir,
           requestedPath ? `${requestedPath}/${fileName}` : fileName,
@@ -332,7 +332,7 @@ export function createPowerFsHttpHandler(params: {
         }
 
         const normalizedPath = normalizeRelativePath(payload.path);
-        const { workspaceDir } = resolveWorkspaceForAgent(payload.agentId);
+        const { workspaceDir } = await resolveWorkspaceForAgent(payload.agentId);
         const file = await resolveExistingFile(workspaceDir, normalizedPath);
         res.statusCode = 200;
         res.setHeader("Content-Type", "application/octet-stream");

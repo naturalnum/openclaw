@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { listAgentIds, resolveAgentWorkspaceDir } from "../../src/agents/agent-scope.js";
-import { loadConfig } from "../../src/config/config.js";
+import { loadConfig, readConfigFileSnapshot } from "../../src/config/config.js";
 import { resolveGatewayAuth } from "../../src/gateway/auth.js";
 import { ErrorCodes, errorShape } from "../../src/gateway/protocol/index.js";
 import type { GatewayRequestHandlerOptions } from "../../src/gateway/server-methods/shared-types.js";
@@ -65,12 +65,12 @@ function sendError(respond: GatewayRequestHandlerOptions["respond"], error: unkn
   respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, message));
 }
 
-function resolveWorkspaceForAgent(agentIdRaw: unknown) {
+async function resolveWorkspaceForAgent(agentIdRaw: unknown) {
   const rawAgentId = typeof agentIdRaw === "string" ? agentIdRaw.trim() : "";
   if (!rawAgentId) {
     throw new Error("agentId required");
   }
-  const cfg = loadConfig();
+  const cfg = (await readConfigFileSnapshot()).config;
   const agentId = normalizeAgentId(rawAgentId);
   const knownAgentIds = new Set(listAgentIds(cfg));
   if (!knownAgentIds.has(agentId)) {
@@ -413,7 +413,7 @@ export default function register(api: OpenClawPluginApi) {
     "power.fs.listWorkspace",
     async ({ params, respond }: GatewayRequestHandlerOptions) => {
       try {
-        const { agentId, workspace } = resolveWorkspaceForAgent(params?.agentId);
+        const { agentId, workspace } = await resolveWorkspaceForAgent(params?.agentId);
         const requestedPath = typeof params?.path === "string" ? params.path.trim() : "";
         respond(true, {
           agentId,
@@ -430,7 +430,7 @@ export default function register(api: OpenClawPluginApi) {
     "power.fs.createFolder",
     async ({ params, respond }: GatewayRequestHandlerOptions) => {
       try {
-        const { agentId, workspace } = resolveWorkspaceForAgent(params?.agentId);
+        const { agentId, workspace } = await resolveWorkspaceForAgent(params?.agentId);
         const currentPath = typeof params?.path === "string" ? params.path.trim() : "";
         const name = typeof params?.name === "string" ? params.name.trim() : "";
         if (!name) {
@@ -449,7 +449,7 @@ export default function register(api: OpenClawPluginApi) {
     "power.fs.uploadFiles",
     async ({ params, respond }: GatewayRequestHandlerOptions) => {
       try {
-        const { agentId, workspace } = resolveWorkspaceForAgent(params?.agentId);
+        const { agentId, workspace } = await resolveWorkspaceForAgent(params?.agentId);
         const currentPath = typeof params?.path === "string" ? params.path.trim() : "";
         const files = Array.isArray(params?.files) ? params.files : [];
         if (files.length === 0) {
@@ -478,7 +478,7 @@ export default function register(api: OpenClawPluginApi) {
     "power.fs.downloadFile",
     async ({ params, respond }: GatewayRequestHandlerOptions) => {
       try {
-        const { agentId, workspace } = resolveWorkspaceForAgent(params?.agentId);
+        const { agentId, workspace } = await resolveWorkspaceForAgent(params?.agentId);
         const filePath = typeof params?.path === "string" ? params.path.trim() : "";
         if (!filePath) {
           respond(false, { error: "path required" });
@@ -496,7 +496,7 @@ export default function register(api: OpenClawPluginApi) {
     "power.fs.deleteEntry",
     async ({ params, respond }: GatewayRequestHandlerOptions) => {
       try {
-        const { agentId, workspace } = resolveWorkspaceForAgent(params?.agentId);
+        const { agentId, workspace } = await resolveWorkspaceForAgent(params?.agentId);
         const targetPath = typeof params?.path === "string" ? params.path.trim() : "";
         if (!targetPath) {
           respond(false, { error: "path required" });
