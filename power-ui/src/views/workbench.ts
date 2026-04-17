@@ -58,6 +58,19 @@ export type WorkbenchModelConfig = {
 export type WorkbenchStatisticsRange = 1 | 7 | 30;
 export type WorkbenchFileSortKey = "name" | "updatedAt" | "size" | "kind";
 
+type WorkbenchGuardSettingsItem = {
+  id: string;
+  title: string;
+  description: string;
+  enabled: boolean;
+  fields: Array<{
+    key: string;
+    label: string;
+    placeholder: string;
+    value: string;
+  }>;
+};
+
 const AGENT_MANAGED_PROJECT_FILE_NAMES = new Set([
   ".git",
   ".openclaw",
@@ -236,6 +249,16 @@ export type WorkbenchProps = {
       onDelete: (instanceId: string) => void;
       onToggleEnabled: (instanceId: string, enabled: boolean) => void;
       onTest: () => void;
+    };
+    powerConfig: {
+      saving: boolean;
+      error: string | null;
+      skillCenterBaseUrl: string;
+      guards: WorkbenchGuardSettingsItem[];
+      onSkillCenterBaseUrlChange: (value: string) => void;
+      onGuardEnabledChange: (id: string, enabled: boolean) => void;
+      onGuardFieldChange: (id: string, key: string, value: string) => void;
+      onSave: () => void;
     };
     onLocaleChange: (value: string) => void;
     onThemeChange: (value: string) => void;
@@ -2076,14 +2099,6 @@ function renderSettingsDialog(props: WorkbenchProps) {
             </button>
             <button
               type="button"
-              class="${props.settingsTab === "connectors" ? "is-active" : ""}"
-              @click=${() => props.onSettingsTabChange("connectors")}
-            >
-              <span class="workbench-settings-nav__icon">${icons.plug}</span>
-              ${tLocale(locale, "Connectors", "连接器")}
-            </button>
-            <button
-              type="button"
               class="${props.settingsTab === "models" ? "is-active" : ""}"
               @click=${() => props.onSettingsTabChange("models")}
             >
@@ -2312,6 +2327,98 @@ function renderSettingsDialog(props: WorkbenchProps) {
                           props.settings.themeMode === "system",
                           () => props.settingsView.onThemeModeChange("system"),
                         )}
+                      </div>
+                    </div>
+
+                    <div class="workbench-settings-section">
+                      <div class="workbench-settings-section__header">
+                        <span>${tLocale(locale, "Skill Center", "技能中心")}</span>
+                      </div>
+                      <label class="workbench-settings-field">
+                        <span>${tLocale(locale, "Registry Base URL", "Registry 地址")}</span>
+                        <input
+                          .value=${props.settingsView.powerConfig.skillCenterBaseUrl}
+                          placeholder="http://127.0.0.1:3000"
+                          @input=${(event: Event) =>
+                            props.settingsView.onSkillCenterBaseUrlChange(
+                              (event.target as HTMLInputElement).value,
+                            )}
+                        />
+                      </label>
+                    </div>
+
+                    <div class="workbench-settings-section">
+                      <div class="workbench-settings-section__header">
+                        <span>${tLocale(locale, "Guards", "安全守卫")}</span>
+                      </div>
+                      <div class="workbench-settings-guard-cards">
+                        ${repeat(
+                          props.settingsView.powerConfig.guards,
+                          (guard) => guard.id,
+                          (guard) => html`
+                            <article class="workbench-settings-guard-card">
+                              <div class="workbench-settings-guard-card__header">
+                                <div>
+                                  <h5>${guard.title}</h5>
+                                  <p>${guard.description}</p>
+                                </div>
+                                <label class="workbench-switch">
+                                  <input
+                                    type="checkbox"
+                                    .checked=${guard.enabled}
+                                    @change=${(event: Event) =>
+                                      props.settingsView.powerConfig.onGuardEnabledChange(
+                                        guard.id,
+                                        (event.target as HTMLInputElement).checked,
+                                      )}
+                                  />
+                                  <span></span>
+                                </label>
+                              </div>
+                              <div class="workbench-settings-guard-card__fields">
+                                ${repeat(
+                                  guard.fields,
+                                  (field) => `${guard.id}:${field.key}`,
+                                  (field) => html`
+                                    <label class="workbench-settings-field workbench-settings-field--wide">
+                                      <span>${field.label}</span>
+                                      <textarea
+                                        rows="4"
+                                        placeholder=${field.placeholder}
+                                        .value=${field.value}
+                                        @input=${(event: Event) =>
+                                          props.settingsView.powerConfig.onGuardFieldChange(
+                                            guard.id,
+                                            field.key,
+                                            (event.target as HTMLTextAreaElement).value,
+                                          )}
+                                      ></textarea>
+                                    </label>
+                                  `,
+                                )}
+                              </div>
+                            </article>
+                          `,
+                        )}
+                      </div>
+                      ${props.settingsView.powerConfig.error
+                        ? html`
+                            <p class="skills-empty">
+                              ${props.settingsView.powerConfig.error}
+                            </p>
+                          `
+                        : nothing}
+                      <div class="workbench-settings-actions">
+                        <button
+                          type="button"
+                          class="btn btn--primary"
+                          ?disabled=${props.settingsView.powerConfig.saving}
+                          @click=${props.settingsView.powerConfig.onSave}
+                        >
+                          ${props.settingsView.powerConfig.saving
+                            ? tLocale(locale, "Saving...", "保存中...")
+                            : tLocale(locale, "Save Power Config", "保存 Power 配置")}
+                        </button>
                       </div>
                     </div>
                   </article>

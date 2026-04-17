@@ -4196,6 +4196,10 @@
   max-width: 420px;
 }
 
+.workbench-settings-field--wide {
+  max-width: none;
+}
+
 .workbench-settings-field > span {
   font-size: 12px;
   font-weight: 600;
@@ -4204,6 +4208,7 @@
 }
 
 .workbench-settings-field input,
+.workbench-settings-field textarea,
 .workbench-settings-select select {
   width: 100%;
   min-height: 46px;
@@ -4216,7 +4221,17 @@
   box-shadow: none;
 }
 
+.workbench-settings-field textarea {
+  min-height: 104px;
+  padding: 12px 14px;
+  resize: vertical;
+}
+
 .workbench-settings-field input::placeholder {
+  color: #b2b2b2;
+}
+
+.workbench-settings-field textarea::placeholder {
   color: #b2b2b2;
 }
 
@@ -4249,6 +4264,51 @@
   display: flex;
   flex-wrap: wrap;
   gap: 16px;
+}
+
+.workbench-settings-guard-cards {
+  display: grid;
+  gap: 16px;
+}
+
+.workbench-settings-guard-card {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid #ece7dd;
+  border-radius: 18px;
+  background: #fff;
+}
+
+.workbench-settings-guard-card__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.workbench-settings-guard-card__header h5 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #1d1d1f;
+}
+
+.workbench-settings-guard-card__header p {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #7d7d7d;
+}
+
+.workbench-settings-guard-card__fields {
+  display: grid;
+  gap: 14px;
+}
+
+.workbench-settings-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .workbench-statistics-toolbar {

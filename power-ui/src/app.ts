@@ -455,6 +455,89 @@ function uniquePreserveOrder(values: string[]): string[] {
   return output;
 }
 
+const GUARD_PLUGIN_IDS = [
+  "high-risk-command-guard-plugin",
+  "network-guard-plugin",
+  "workspace-guard-plugin",
+] as const;
+
+type GuardPluginId = (typeof GUARD_PLUGIN_IDS)[number];
+
+type PowerGuardDraft = {
+  enabled: boolean;
+  values: Record<string, string>;
+};
+
+const DEFAULT_POWER_GUARD_DRAFTS: Record<GuardPluginId, PowerGuardDraft> = {
+  "high-risk-command-guard-plugin": {
+    enabled: false,
+    values: {
+      blockedCommands: "",
+      blockedSubstrings: "",
+    },
+  },
+  "network-guard-plugin": {
+    enabled: false,
+    values: {
+      blockedHosts: "",
+      blockedUrlPrefixes: "",
+      blockedCommands: "",
+    },
+  },
+  "workspace-guard-plugin": {
+    enabled: false,
+    values: {
+      readonlyPaths: "",
+    },
+  },
+};
+
+function readConfigObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function readSkillsRegistryBaseUrl(config: Record<string, unknown> | null | undefined): string {
+  const skills = readConfigObject(config?.skills);
+  const registry = readConfigObject(skills.registry);
+  return typeof registry.baseUrl === "string" ? registry.baseUrl : "";
+}
+
+function readPluginConfigArray(
+  config: Record<string, unknown> | null | undefined,
+  pluginId: string,
+  key: string,
+): string[] {
+  const plugins = readConfigObject(config?.plugins);
+  const entries = readConfigObject(plugins.entries);
+  const entry = readConfigObject(entries[pluginId]);
+  const pluginConfig = readConfigObject(entry.config);
+  const value = pluginConfig[key];
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string").map((item) => item.trim())
+    : [];
+}
+
+function readPluginEnabled(
+  config: Record<string, unknown> | null | undefined,
+  pluginId: string,
+): boolean {
+  const plugins = readConfigObject(config?.plugins);
+  const entries = readConfigObject(plugins.entries);
+  const entry = readConfigObject(entries[pluginId]);
+  return entry.enabled === true;
+}
+
+function linesToList(value: string): string[] {
+  return uniquePreserveOrder(
+    value
+      .split("\n")
+      .map((item) => item.trim())
+      .filter(Boolean),
+  );
+}
+
 function isHttpUrl(value: string): boolean {
   return /^https?:\/\//i.test(value.trim());
 }
@@ -1047,6 +1130,12 @@ export class OpenClawPowerApp extends LitElement {
   @state() unreadSessionKeys: string[] = [];
   @state() modelConfigs: WorkbenchModelConfig[] = [createEmptyModelConfig()];
   @state() expandedModelConfigId: string | null = null;
+  @state() skillCenterBaseUrlDraft = "";
+  @state() powerGuardDrafts: Record<GuardPluginId, PowerGuardDraft> = cloneConfigObject(
+    DEFAULT_POWER_GUARD_DRAFTS,
+  ) as Record<GuardPluginId, PowerGuardDraft>;
+  @state() powerConfigSaving = false;
+  @state() powerConfigError: string | null = null;
   @state() projectDirectoryDialogOpen = false;
   @state() projectDirectoryDialogClosing = false;
   @state() projectDirectoryLoading = false;
@@ -2012,6 +2101,145 @@ export class OpenClawPowerApp extends LitElement {
     const primary = resolvePrimaryModelFromConfig(config);
     this.currentModelId = this.resolveAvailableModelRef(primary);
     this.defaultAgentWorkspace = readDefaultAgentWorkspace(config);
+    this.skillCenterBaseUrlDraft = readSkillsRegistryBaseUrl(config);
+    this.powerGuardDrafts = {
+      "high-risk-command-guard-plugin": {
+        enabled: readPluginEnabled(config, "high-risk-command-guard-plugin"),
+        values: {
+          blockedCommands: readPluginConfigArray(
+            config,
+            "high-risk-command-guard-plugin",
+            "blockedCommands",
+          ).join("\n"),
+          blockedSubstrings: readPluginConfigArray(
+            config,
+            "high-risk-command-guard-plugin",
+            "blockedSubstrings",
+          ).join("\n"),
+        },
+      },
+      "network-guard-plugin": {
+        enabled: readPluginEnabled(config, "network-guard-plugin"),
+        values: {
+          blockedHosts: readPluginConfigArray(config, "network-guard-plugin", "blockedHosts").join(
+            "\n",
+          ),
+          blockedUrlPrefixes: readPluginConfigArray(
+            config,
+            "network-guard-plugin",
+            "blockedUrlPrefixes",
+          ).join("\n"),
+          blockedCommands: readPluginConfigArray(
+            config,
+            "network-guard-plugin",
+            "blockedCommands",
+          ).join("\n"),
+        },
+      },
+      "workspace-guard-plugin": {
+        enabled: readPluginEnabled(config, "workspace-guard-plugin"),
+        values: {
+          readonlyPaths: readPluginConfigArray(
+            config,
+            "workspace-guard-plugin",
+            "readonlyPaths",
+          ).join("\n"),
+        },
+      },
+    };
+  }
+
+  private updateGuardEnabled(id: GuardPluginId, enabled: boolean) {
+    this.powerGuardDrafts = {
+      ...this.powerGuardDrafts,
+      [id]: {
+        ...this.powerGuardDrafts[id],
+        enabled,
+      },
+    };
+  }
+
+  private updateGuardField(id: GuardPluginId, key: string, value: string) {
+    this.powerGuardDrafts = {
+      ...this.powerGuardDrafts,
+      [id]: {
+        ...this.powerGuardDrafts[id],
+        values: {
+          ...this.powerGuardDrafts[id].values,
+          [key]: value,
+        },
+      },
+    };
+  }
+
+  private async persistPowerConfig() {
+    if (this.powerConfigSaving) {
+      return;
+    }
+    this.powerConfigSaving = true;
+    this.powerConfigError = null;
+    try {
+      const snapshot = await this.loadGlobalModelSettings();
+      const baseHash = snapshot.hash?.trim();
+      if (!baseHash) {
+        throw new Error("Config hash missing; reload and retry.");
+      }
+      const nextConfig = cloneConfigObject(
+        (snapshot.config as Record<string, unknown> | null | undefined) ?? {},
+      ) as Record<string, unknown>;
+      const skills = readConfigObject(nextConfig.skills);
+      const registry = readConfigObject(skills.registry);
+      const registryBaseUrl = this.skillCenterBaseUrlDraft.trim();
+      if (registryBaseUrl) {
+        registry.baseUrl = registryBaseUrl;
+        registry.enabled = true;
+      } else {
+        delete registry.baseUrl;
+      }
+      skills.registry = registry;
+      nextConfig.skills = skills;
+
+      const plugins = readConfigObject(nextConfig.plugins);
+      const entries = readConfigObject(plugins.entries);
+      const allow = Array.isArray(plugins.allow)
+        ? plugins.allow.filter((item): item is string => typeof item === "string")
+        : [];
+      for (const pluginId of GUARD_PLUGIN_IDS) {
+        const draft = this.powerGuardDrafts[pluginId];
+        const entry = readConfigObject(entries[pluginId]);
+        const pluginConfig = readConfigObject(entry.config);
+        for (const [key, rawValue] of Object.entries(draft.values)) {
+          const values = linesToList(rawValue);
+          if (values.length > 0) {
+            pluginConfig[key] = values;
+          } else {
+            delete pluginConfig[key];
+          }
+        }
+        entry.enabled = draft.enabled;
+        entry.config = pluginConfig;
+        entries[pluginId] = entry;
+        if (draft.enabled && !allow.includes(pluginId)) {
+          allow.push(pluginId);
+        }
+      }
+      plugins.entries = entries;
+      plugins.allow = uniquePreserveOrder(allow);
+      nextConfig.plugins = plugins;
+
+      await this.adapter.request("config.set", {
+        raw: serializeConfigForm(nextConfig),
+        baseHash,
+      });
+      await this.refreshConfigSnapshot();
+      this.lastError = null;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.powerConfigError = message;
+      this.lastError = message;
+    } finally {
+      this.powerConfigSaving = false;
+    }
   }
 
   private scheduleGlobalModelConfigPersist() {
@@ -2598,7 +2826,9 @@ export class OpenClawPowerApp extends LitElement {
 
   private openSettingsDialog(tab?: WorkbenchSettingsTab) {
     if (tab) {
-      this.workbenchSettingsTab = tab;
+      this.workbenchSettingsTab = tab === "connectors" ? "general" : tab;
+    } else if (this.workbenchSettingsTab === "connectors") {
+      this.workbenchSettingsTab = "general";
     }
     this.openModal("settings");
     if (this.workbenchSettingsTab === "connectors") {
@@ -2618,6 +2848,11 @@ export class OpenClawPowerApp extends LitElement {
   }
 
   private changeSettingsTab(value: WorkbenchSettingsTab) {
+    if (value === "connectors") {
+      this.workbenchSettingsTab = "general";
+      this.stopLogsAutoRefresh();
+      return;
+    }
     this.workbenchSettingsTab = value;
     if (value === "connectors" && this.workbenchSettingsOpen) {
       void this.loadConnectorsPage();
@@ -4664,6 +4899,92 @@ export class OpenClawPowerApp extends LitElement {
           },
           onTest: () => {
             void this.testConnectorDraft();
+          },
+        },
+        powerConfig: {
+          saving: this.powerConfigSaving,
+          error: this.powerConfigError,
+          skillCenterBaseUrl: this.skillCenterBaseUrlDraft,
+          guards: [
+            {
+              id: "high-risk-command-guard-plugin",
+              title: "High Risk Command Guard",
+              description: "Block destructive shell commands and dangerous substrings.",
+              enabled: this.powerGuardDrafts["high-risk-command-guard-plugin"].enabled,
+              fields: [
+                {
+                  key: "blockedCommands",
+                  label: "Blocked Commands",
+                  placeholder: "dd\nreboot\nshutdown",
+                  value:
+                    this.powerGuardDrafts["high-risk-command-guard-plugin"].values
+                      .blockedCommands ?? "",
+                },
+                {
+                  key: "blockedSubstrings",
+                  label: "Blocked Substrings",
+                  placeholder: "rm -rf /\nfind / -delete",
+                  value:
+                    this.powerGuardDrafts["high-risk-command-guard-plugin"].values
+                      .blockedSubstrings ?? "",
+                },
+              ],
+            },
+            {
+              id: "network-guard-plugin",
+              title: "Network Guard",
+              description: "Block outbound network access by host, URL prefix, or command.",
+              enabled: this.powerGuardDrafts["network-guard-plugin"].enabled,
+              fields: [
+                {
+                  key: "blockedHosts",
+                  label: "Blocked Hosts",
+                  placeholder: "10.86.188.84\nexample.internal",
+                  value: this.powerGuardDrafts["network-guard-plugin"].values.blockedHosts ?? "",
+                },
+                {
+                  key: "blockedUrlPrefixes",
+                  label: "Blocked URL Prefixes",
+                  placeholder: "https://ai.sgcc.com.cn/",
+                  value:
+                    this.powerGuardDrafts["network-guard-plugin"].values.blockedUrlPrefixes ?? "",
+                },
+                {
+                  key: "blockedCommands",
+                  label: "Blocked Commands",
+                  placeholder: "curl\nwget\nssh",
+                  value:
+                    this.powerGuardDrafts["network-guard-plugin"].values.blockedCommands ?? "",
+                },
+              ],
+            },
+            {
+              id: "workspace-guard-plugin",
+              title: "Workspace Guard",
+              description: "Protect readonly paths and block writes outside the workspace.",
+              enabled: this.powerGuardDrafts["workspace-guard-plugin"].enabled,
+              fields: [
+                {
+                  key: "readonlyPaths",
+                  label: "Readonly Paths",
+                  placeholder: "skills\nextensions\n.openclaw/extensions",
+                  value:
+                    this.powerGuardDrafts["workspace-guard-plugin"].values.readonlyPaths ?? "",
+                },
+              ],
+            },
+          ],
+          onSkillCenterBaseUrlChange: (value) => {
+            this.skillCenterBaseUrlDraft = value;
+          },
+          onGuardEnabledChange: (id, enabled) => {
+            this.updateGuardEnabled(id as GuardPluginId, enabled);
+          },
+          onGuardFieldChange: (id, key, value) => {
+            this.updateGuardField(id as GuardPluginId, key, value);
+          },
+          onSave: () => {
+            void this.persistPowerConfig();
           },
         },
         onLocaleChange: (value) => {

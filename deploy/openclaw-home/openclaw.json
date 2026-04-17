@@ -1,0 +1,164 @@
+{
+  "gateway": {
+    "mode": "local",
+    "bind": "lan",
+    "auth": {
+      "mode": "token"
+    },
+    "controlUi": {
+      "allowedOrigins": [
+        "*"
+      ]
+    }
+  },
+  "plugins": {
+    "allow": [
+      "power-backend",
+      "deepseek",
+      "openai",
+      "memory-core",
+      "memory-wiki",
+      "network-guard-plugin",
+      "workspace-guard-plugin",
+      "high-risk-command-guard-plugin"
+    ],
+    "entries": {
+      "power-backend": {
+        "enabled": true,
+        "config": {
+          "roots": [
+            "/home/node/.openclaw/workspace"
+          ]
+        }
+      },
+      "deepseek": {
+        "enabled": true
+      },
+      "openai": {
+        "enabled": true
+      },
+      "memory-core": {
+        "config": {
+          "dreaming": {
+            "enabled": true
+          }
+        }
+      },
+      "memory-wiki": {
+        "enabled": true
+      },
+      "workspace-guard-plugin": {
+        "enabled": true,
+        "config": {
+          "readonlyPaths": [
+            "star"
+          ]
+        }
+      },
+      "network-guard-plugin": {
+        "enabled": true,
+        "config": {
+          "blockedHosts": [
+            "10.0.0.8"
+          ],
+          "blockedUrlPrefixes": [
+            "https://www.baidu.com/"
+          ],
+          "blockedCommands": [
+            "curl",
+            "wget",
+            "ssh",
+            "scp",
+            "sftp",
+            "nc",
+            "ncat",
+            "telnet"
+          ]
+        }
+      },
+      "high-risk-command-guard-plugin": {
+        "enabled": true,
+        "config": {
+          "blockedCommands": [
+            "brew",
+            "chmod",
+            "chown",
+            "chattr",
+            "setfacl",
+            "passwd",
+            "iptables",
+            "nft",
+            "ip",
+            "ifconfig",
+            "route",
+            "systemctl",
+            "service",
+            "init",
+            "shutdown",
+            "reboot",
+            "poweroff",
+            "halt",
+            "kill",
+            "killall",
+            "pkill"
+          ],
+          "blockedSubstrings": [
+            "rm -rf *"
+          ]
+        }
+      }
+    },
+    "installs": {}
+  },
+  "skills": {
+    "registry": {
+      "enabled": true,
+      "baseUrl": "http://127.0.0.1:3000",
+      "timeoutMs": 10000
+    }
+  },
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "deepseek": {
+        "baseUrl": "https://api.deepseek.com/v1",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "deepseek-chat",
+            "name": "DeepSeek Chat"
+          },
+          {
+            "id": "deepseek-reasoner",
+            "name": "DeepSeek Reasoner"
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "deepseek/deepseek-chat"
+      },
+      "models": {
+        "deepseek/deepseek-chat": {}
+      },
+      "workspace": "/home/node/.openclaw/workspace",
+      "compaction": {
+        "mode": "safeguard"
+      },
+      "maxConcurrent": 4,
+      "subagents": {
+        "maxConcurrent": 8
+      }
+    },
+    "list": [
+      {
+        "id": "main",
+        "name": "main",
+        "workspace": "/home/node/.openclaw/workspace"
+      }
+    ]
+  }
+}
