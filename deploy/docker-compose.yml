@@ -1,6 +1,7 @@
 services:
   openclaw:
     image: ${OPENCLAW_IMAGE:-openclaw-power:20260412-v1.0}
+    platform: ${OPENCLAW_RUNTIME_PLATFORM:-linux/amd64}
     container_name: ${OPENCLAW_CONTAINER_NAME:-openclaw-power}
     restart: unless-stopped
     init: true

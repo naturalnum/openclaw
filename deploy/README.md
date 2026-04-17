@@ -7,6 +7,7 @@
 - 构建时先在本地执行 `pnpm build:docker`
 - 再把运行时产物打进 deploy 专用镜像
 - 镜像内默认带 Python 运行库、文档处理工具、`ssh` 客户端等依赖
+- gateway 根路径默认直接服务你的 `power-ui`
 
 这样镜像进入内网后，运行阶段可以脱离互联网。
 
@@ -67,6 +68,7 @@ cp build.env.example build.env
 5. 最后恢复本地依赖
 
 默认会按 `linux/amd64` 构建，这样你在 macOS ARM 机器上打出来的镜像也能直接部署到 x86 Linux 环境。
+Compose 运行时也默认声明 `linux/amd64`，这样在 ARM 主机本地验证时不会再出现平台未指定告警。
 
 常见构建参数放在 `build.env`：
 
@@ -152,30 +154,15 @@ docker compose ps
 docker compose logs -f openclaw
 ```
 
-## 使用你自己的 Power UI
+## 访问 Power UI
 
-这个 Compose 只启动 gateway，不启动前端。
+这个 Compose 只启动一个服务，但根路径直接就是你的 `power-ui`。
 
-你的 `power-ui` 前端需要连接：
+启动后直接访问：
 
-- Gateway URL: `http://<部署机IP>:18789`
-- Token: `openclaw-home/.env` 中的 `OPENCLAW_GATEWAY_TOKEN`
+- `http://<部署机IP>:18789/`
 
-本地调试时可以直接拼这种链接：
-
-```text
-http://localhost:5174/?openclaw_url=http%3A%2F%2F127.0.0.1%3A18789&openclaw_token=<你的token>
-```
-
-如果前端不是跑在 `localhost:5174`，要同步修改：
-
-- `openclaw-home/openclaw.json`
-- `gateway.controlUi.allowedOrigins`
-
-把前端真实访问源加进去，例如：
-
-- `http://192.168.1.20:5174`
-- `https://power-ui.example.com`
+`power-ui` 会同源连接当前 gateway，不需要再额外部署一个前端服务。
 
 ## 外部可修改目录
 

@@ -6,6 +6,7 @@
       "mode": "token"
     },
     "controlUi": {
+      "root": "/app/dist/power-ui",
       "allowedOrigins": [
         "*"
       ]
@@ -160,5 +161,9 @@
         "workspace": "/home/node/.openclaw/workspace"
       }
     ]
+  },
+  "meta": {
+    "lastTouchedVersion": "2026.4.12",
+    "lastTouchedAt": "2026-04-17T04:49:44.015Z"
   }
 }
