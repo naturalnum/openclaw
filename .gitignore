@@ -150,3 +150,14 @@ test/fixtures/openclaw-vitest-unit-report.json
 analysis/
 .artifacts/qa-e2e/
 extensions/qa-lab/web/dist/
+
+# Deploy runtime state
+deploy.zip
+deploy/openclaw-home/*
+!deploy/openclaw-home/.env
+!deploy/openclaw-home/.env.example
+!deploy/openclaw-home/openclaw.json
+!deploy/openclaw-home/agents/
+deploy/openclaw-home/agents/*
+!deploy/openclaw-home/agents/.gitkeep
+deploy/openclaw-home/workspace/**
