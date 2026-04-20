@@ -56,8 +56,21 @@ const DEFAULT_COLS = 120;
 const DEFAULT_ROWS = 30;
 const DEFAULT_HISTORY_MAX_CHARS = 250_000;
 const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
-const WRAPPER_FILE_NAME = "power-ui-claude";
+const WRAPPER_FILE_NAME = "claude";
+const BOOTSTRAP_FILE_NAME = ".zshrc";
 const execFile = promisify(execFileCallback);
+const CLAUDE_CANDIDATE_PATHS = [
+  path.join(os.homedir(), ".local", "bin", "claude"),
+  "/opt/homebrew/bin/claude",
+  "/usr/local/bin/claude",
+];
+const DEBUG_ENV_KEYS = [
+  "NODE_OPTIONS",
+  "VSCODE_INSPECTOR_OPTIONS",
+  "ELECTRON_RUN_AS_NODE",
+  "npm_config_node_options",
+  "NODE_INSPECT_RESUME_ON_START",
+] as const;
 
 function createTerminalId() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -98,6 +111,7 @@ async function ensureClaudeWrapperPath() {
     wrapperPath,
     [
       "#!/bin/sh",
+      `unset ${DEBUG_ENV_KEYS.join(" ")}`,
       'if [ -z "${POWER_BACKEND_CLAUDE_COMMAND:-}" ]; then',
       '  echo "POWER_BACKEND_CLAUDE_COMMAND is not configured." >&2',
       "  exit 1",
@@ -113,10 +127,51 @@ async function ensureClaudeWrapperPath() {
   return { wrapperDir, wrapperPath };
 }
 
+async function ensureShellBootstrapDir(wrapperDir: string) {
+  const bootstrapDir = path.join(os.tmpdir(), "power-ui-terminal-zsh");
+  const bootstrapPath = path.join(bootstrapDir, BOOTSTRAP_FILE_NAME);
+  await fs.mkdir(bootstrapDir, { recursive: true });
+  await fs.writeFile(
+    bootstrapPath,
+    [
+      'if [ -f "$HOME/.zshrc" ]; then',
+      '  source "$HOME/.zshrc"',
+      "fi",
+      `export PATH=${JSON.stringify(wrapperDir)}:$PATH`,
+      `alias claude=${JSON.stringify(path.join(wrapperDir, WRAPPER_FILE_NAME))}`,
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  return bootstrapDir;
+}
+
+async function findClaudeBinaryOnHost() {
+  for (const candidate of CLAUDE_CANDIDATE_PATHS) {
+    try {
+      await fs.access(candidate);
+      return candidate;
+    } catch {
+      // try next candidate
+    }
+  }
+  try {
+    const { stdout } = await execFile("/bin/sh", ["-lc", "command -v claude"], {
+      env: process.env,
+    });
+    const resolved = stdout.trim();
+    return resolved || null;
+  } catch {
+    return null;
+  }
+}
+
 export class PowerTerminalService {
   private readonly config: PowerTerminalConfig;
   private readonly sessions = new Map<string, TerminalSession>();
   private wrapperDirPromise: Promise<string | null> | null = null;
+  private zshBootstrapDirPromise: Promise<string | null> | null = null;
+  private resolvedClaudeCommandPromise: Promise<string | null> | null = null;
 
   constructor(config: PowerTerminalConfig) {
     this.config = {
@@ -170,7 +225,8 @@ export class PowerTerminalService {
   }
 
   private async resolveWrapperDir() {
-    if (!this.config.claudeCommand?.trim()) {
+    const command = await this.resolveClaudeCommand();
+    if (!command) {
       return null;
     }
     if (!this.wrapperDirPromise) {
@@ -184,13 +240,44 @@ export class PowerTerminalService {
     return await this.wrapperDirPromise;
   }
 
+  private async resolveZshBootstrapDir() {
+    const wrapperDir = await this.resolveWrapperDir();
+    if (!wrapperDir) {
+      return null;
+    }
+    if (!this.zshBootstrapDirPromise) {
+      this.zshBootstrapDirPromise = ensureShellBootstrapDir(wrapperDir).catch((error: unknown) => {
+        this.zshBootstrapDirPromise = null;
+        throw error;
+      });
+    }
+    return await this.zshBootstrapDirPromise;
+  }
+
+  private async resolveClaudeCommand() {
+    if (this.config.claudeCommand?.trim()) {
+      return this.config.claudeCommand.trim();
+    }
+    if (!this.resolvedClaudeCommandPromise) {
+      this.resolvedClaudeCommandPromise = findClaudeBinaryOnHost().catch((error: unknown) => {
+        this.resolvedClaudeCommandPromise = null;
+        throw error;
+      });
+    }
+    return await this.resolvedClaudeCommandPromise;
+  }
+
   private async buildTerminalEnv() {
     const env = toStringEnv(process.env);
+    for (const key of DEBUG_ENV_KEYS) {
+      delete env[key];
+    }
     for (const [key, value] of Object.entries(this.config.env)) {
       env[key] = value;
     }
-    if (this.config.claudeCommand?.trim()) {
-      env.POWER_BACKEND_CLAUDE_COMMAND = this.config.claudeCommand.trim();
+    const resolvedClaudeCommand = await this.resolveClaudeCommand();
+    if (resolvedClaudeCommand) {
+      env.POWER_BACKEND_CLAUDE_COMMAND = resolvedClaudeCommand;
       const wrapperDir = await this.resolveWrapperDir();
       if (wrapperDir) {
         env.PATH = env.PATH ? `${wrapperDir}:${env.PATH}` : wrapperDir;
@@ -207,6 +294,13 @@ export class PowerTerminalService {
     const terminalId = createTerminalId();
     const shell = resolveShell(this.config);
     const env = await this.buildTerminalEnv();
+    const shellName = path.basename(shell);
+    if (shellName === "zsh") {
+      const bootstrapDir = await this.resolveZshBootstrapDir();
+      if (bootstrapDir) {
+        env.ZDOTDIR = bootstrapDir;
+      }
+    }
     const pty = spawn(shell, ["-i"], {
       cwd: input.cwd,
       env,
