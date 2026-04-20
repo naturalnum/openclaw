@@ -12,6 +12,42 @@
           "type": "string"
         },
         "default": []
+      },
+      "terminal": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": false
+          },
+          "shell": {
+            "type": "string"
+          },
+          "defaultCwd": {
+            "type": "string"
+          },
+          "claudeCommand": {
+            "type": "string"
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {}
+          },
+          "idleTimeoutMs": {
+            "type": "number",
+            "minimum": 1000,
+            "default": 1800000
+          },
+          "historyMaxChars": {
+            "type": "number",
+            "minimum": 4096,
+            "default": 250000
+          }
+        }
       }
     }
   },
@@ -19,6 +55,30 @@
     "roots": {
       "label": "Allowed Roots",
       "help": "Server directories that power-ui is allowed to browse when selecting a project workspace."
+    },
+    "terminal.enabled": {
+      "label": "Enable Terminal",
+      "help": "Allow power-ui to create shell terminals through the gateway."
+    },
+    "terminal.shell": {
+      "label": "Shell Path",
+      "help": "Shell executable used for each terminal session, for example /bin/zsh."
+    },
+    "terminal.defaultCwd": {
+      "label": "Default Terminal Directory",
+      "help": "Fallback working directory for new terminal tabs."
+    },
+    "terminal.claudeCommand": {
+      "label": "Claude Wrapper Command",
+      "help": "Command exposed as `claude` inside power-ui terminals."
+    },
+    "terminal.idleTimeoutMs": {
+      "label": "Terminal Idle Timeout (ms)",
+      "help": "Inactive terminal sessions are closed after this many milliseconds."
+    },
+    "terminal.historyMaxChars": {
+      "label": "Terminal History Buffer",
+      "help": "Maximum number of output characters retained per terminal for page refresh recovery."
     }
   }
 }

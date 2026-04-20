@@ -1,8 +1,6 @@
-# syntax=docker/dockerfile:1.7
+ARG OPENCLAW_NODE_IMAGE="node:24-bookworm-slim"
 
-ARG NODE_IMAGE="node:24-bookworm-slim"
-
-FROM ${NODE_IMAGE}
+FROM ${OPENCLAW_NODE_IMAGE}
 
 LABEL org.opencontainers.image.source="https://github.com/openclaw/openclaw" \
   org.opencontainers.image.url="https://openclaw.ai" \
@@ -12,9 +10,7 @@ LABEL org.opencontainers.image.source="https://github.com/openclaw/openclaw" \
 
 WORKDIR /app
 
-RUN --mount=type=cache,id=openclaw-deploy-apt,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,id=openclaw-deploy-apt-lists,target=/var/lib/apt,sharing=locked \
-    sed -i 's|http://deb.debian.org|http://mirrors.aliyun.com|g' \
+RUN sed -i 's|http://deb.debian.org|http://mirrors.aliyun.com|g' \
       /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
     sed -i 's|http://deb.debian.org|http://mirrors.aliyun.com|g' \
       /etc/apt/sources.list 2>/dev/null || true && \
@@ -49,19 +45,23 @@ RUN python3 -m pip install -i https://mirrors.aliyun.com/pypi/simple/ --upgrade 
       --upgrade "polars[rtcompat]" && \
     rm -f /tmp/requirements-openclaw-runtime.txt
 
-RUN --mount=type=cache,id=openclaw-deploy-npm,target=/root/.npm \
-    npm config set registry https://registry.npmmirror.com && \
+RUN npm config set registry https://registry.npmmirror.com && \
     npm install -g clawhub docx pptxgenjs --prefer-offline && \
     npm config set registry https://registry.npmjs.org
 
 COPY dist ./dist
 COPY node_modules ./node_modules
 COPY package.json ./package.json
+RUN npm config set registry https://registry.npmmirror.com && \
+    npm install --no-save --include=optional @lydell/node-pty@1.2.0-beta.12 && \
+    npm config set registry https://registry.npmjs.org
 COPY openclaw.mjs ./openclaw.mjs
 COPY extensions ./extensions
 COPY skills ./skills
 COPY docs ./docs
 COPY qa ./qa
+COPY claude-code /opt/claude-code
+COPY deploy/entrypoint.sh /usr/local/bin/openclaw-deploy-entrypoint.sh
 
 RUN mkdir -p ./extensions/power-backend && \
     if [ -d ./dist/extensions/power-backend ]; then \
@@ -69,7 +69,11 @@ RUN mkdir -p ./extensions/power-backend && \
     fi
 
 RUN ln -sf /app/openclaw.mjs /usr/local/bin/openclaw && \
-    chmod 755 /app/openclaw.mjs
+    printf '%s\n' \
+      '#!/bin/sh' \
+      'exec node /opt/claude-code/scripts/start-custom.mjs "$@"' \
+      > /usr/local/bin/claude && \
+    chmod 755 /app/openclaw.mjs /usr/local/bin/claude /usr/local/bin/openclaw-deploy-entrypoint.sh
 
 ENV NODE_ENV=production
 ENV HOME=/home/node
@@ -79,4 +83,5 @@ USER root
 HEALTHCHECK --interval=3m --timeout=10s --start-period=15s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:18789/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
+ENTRYPOINT ["/usr/local/bin/openclaw-deploy-entrypoint.sh"]
 CMD ["node", "openclaw.mjs", "gateway", "--allow-unconfigured"]

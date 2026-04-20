@@ -7,9 +7,7 @@
     },
     "controlUi": {
       "root": "/app/dist/power-ui",
-      "allowedOrigins": [
-        "*"
-      ]
+      "allowedOrigins": ["*"]
     }
   },
   "plugins": {
@@ -27,9 +25,14 @@
       "power-backend": {
         "enabled": true,
         "config": {
-          "roots": [
-            "/home/node/.openclaw/workspace"
-          ]
+          "roots": ["/home/node/.openclaw/workspace"],
+          "terminal": {
+            "enabled": true,
+            "shell": "/bin/bash",
+            "defaultCwd": "/home/node/.openclaw/workspace",
+            "claudeCommand": "claude",
+            "idleTimeoutMs": 1800000
+          }
         }
       },
       "deepseek": {
@@ -51,30 +54,15 @@
       "workspace-guard-plugin": {
         "enabled": true,
         "config": {
-          "readonlyPaths": [
-            "star"
-          ]
+          "readonlyPaths": ["star"]
         }
       },
       "network-guard-plugin": {
         "enabled": true,
         "config": {
-          "blockedHosts": [
-            "10.0.0.8"
-          ],
-          "blockedUrlPrefixes": [
-            "https://www.baidu.com/"
-          ],
-          "blockedCommands": [
-            "curl",
-            "wget",
-            "ssh",
-            "scp",
-            "sftp",
-            "nc",
-            "ncat",
-            "telnet"
-          ]
+          "blockedHosts": ["10.0.0.8"],
+          "blockedUrlPrefixes": ["https://www.baidu.com/"],
+          "blockedCommands": ["curl", "wget", "ssh", "scp", "sftp", "nc", "ncat", "telnet"]
         }
       },
       "high-risk-command-guard-plugin": {
@@ -103,9 +91,7 @@
             "killall",
             "pkill"
           ],
-          "blockedSubstrings": [
-            "rm -rf *"
-          ]
+          "blockedSubstrings": ["rm -rf *"]
         }
       }
     },

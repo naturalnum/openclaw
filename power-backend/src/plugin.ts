@@ -32,9 +32,12 @@ import {
   POWER_FS_DOWNLOAD_HTTP_PATH,
   POWER_FS_UPLOAD_HTTP_PATH,
 } from "./http-routes.js";
+import { PowerTerminalService } from "./terminal-service.js";
+import type { PowerTerminalConfig } from "./types.js";
 
 type PowerBackendPluginConfig = {
   roots: string[];
+  terminal: PowerTerminalConfig;
 };
 
 type PowerInstalledSkill = InstalledRegistrySkill & {
@@ -57,12 +60,76 @@ function parsePluginConfig(api: OpenClawPluginApi): PowerBackendPluginConfig {
         .map((entry) => api.resolvePath(entry))
     : [];
 
-  return { roots };
+  const terminalRaw =
+    raw.terminal && typeof raw.terminal === "object"
+      ? (raw.terminal as Record<string, unknown>)
+      : {};
+  const terminalEnvRaw =
+    terminalRaw.env && typeof terminalRaw.env === "object"
+      ? (terminalRaw.env as Record<string, unknown>)
+      : {};
+  const terminalEnv = Object.fromEntries(
+    Object.entries(terminalEnvRaw).flatMap(([key, value]) =>
+      typeof value === "string" && key.trim() ? [[key.trim(), value]] : [],
+    ),
+  );
+
+  return {
+    roots,
+    terminal: {
+      enabled: terminalRaw.enabled === true,
+      shell:
+        typeof terminalRaw.shell === "string" && terminalRaw.shell.trim()
+          ? terminalRaw.shell.trim()
+          : process.env.SHELL?.trim() || "/bin/zsh",
+      defaultCwd:
+        typeof terminalRaw.defaultCwd === "string" && terminalRaw.defaultCwd.trim()
+          ? api.resolvePath(terminalRaw.defaultCwd.trim())
+          : null,
+      claudeCommand:
+        typeof terminalRaw.claudeCommand === "string" && terminalRaw.claudeCommand.trim()
+          ? terminalRaw.claudeCommand.trim()
+          : null,
+      env: terminalEnv,
+      idleTimeoutMs:
+        typeof terminalRaw.idleTimeoutMs === "number" && Number.isFinite(terminalRaw.idleTimeoutMs)
+          ? Math.max(terminalRaw.idleTimeoutMs, 1_000)
+          : 30 * 60 * 1000,
+      historyMaxChars:
+        typeof terminalRaw.historyMaxChars === "number" &&
+        Number.isFinite(terminalRaw.historyMaxChars)
+          ? Math.max(terminalRaw.historyMaxChars, 4_096)
+          : 250_000,
+    },
+  };
 }
 
 function sendError(respond: GatewayRequestHandlerOptions["respond"], error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, message));
+}
+
+function resolveTerminalOwnerId(client: GatewayRequestHandlerOptions["client"]) {
+  const deviceId = client?.connect?.device?.id?.trim();
+  if (deviceId) {
+    return `device:${deviceId}`;
+  }
+  const clientId = client?.connect?.client?.id?.trim();
+  if (clientId) {
+    return `client:${clientId}`;
+  }
+  return "power-ui-default";
+}
+
+function parseTerminalSize(params: Record<string, unknown>) {
+  const cols =
+    typeof params.cols === "number" && Number.isFinite(params.cols) ? Math.floor(params.cols) : 120;
+  const rows =
+    typeof params.rows === "number" && Number.isFinite(params.rows) ? Math.floor(params.rows) : 30;
+  return {
+    cols: Math.max(cols, 20),
+    rows: Math.max(rows, 5),
+  };
 }
 
 async function resolveWorkspaceForAgent(agentIdRaw: unknown) {
@@ -270,6 +337,7 @@ function mergeCategories(
 export default function register(api: OpenClawPluginApi) {
   const config = parsePluginConfig(api);
   const fsService = new PowerFsService(config);
+  const terminalService = new PowerTerminalService(config.terminal);
   const gatewayAuth = resolveGatewayAuth({ authConfig: loadConfig().gateway?.auth });
   const powerFsHttpHandler = createPowerFsHttpHandler({
     auth: gatewayAuth,
@@ -510,7 +578,141 @@ export default function register(api: OpenClawPluginApi) {
     },
   );
 
+  if (terminalService.isEnabled()) {
+    api.registerGatewayMethod(
+      "power.terminal.list",
+      async ({ client, respond }: GatewayRequestHandlerOptions) => {
+        try {
+          respond(true, {
+            terminals: terminalService.list(resolveTerminalOwnerId(client)),
+          });
+        } catch (error) {
+          sendError(respond, error);
+        }
+      },
+    );
+
+    api.registerGatewayMethod(
+      "power.terminal.create",
+      async ({ client, params, respond }: GatewayRequestHandlerOptions) => {
+        try {
+          const ownerId = resolveTerminalOwnerId(client);
+          let cwd: string | null = null;
+          if (typeof params?.followTerminalId === "string" && params.followTerminalId.trim()) {
+            cwd = fsService.validateWorkspace(
+              await terminalService.resolveCurrentWorkingDirectory(
+                ownerId,
+                params.followTerminalId.trim(),
+              ),
+            ).path;
+          } else if (typeof params?.agentId === "string" && params.agentId.trim()) {
+            cwd = (await resolveWorkspaceForAgent(params.agentId)).workspace;
+          } else if (typeof params?.cwd === "string" && params.cwd.trim()) {
+            cwd = fsService.validateWorkspace(params.cwd.trim()).path;
+          } else if (config.terminal.defaultCwd) {
+            cwd = fsService.validateWorkspace(config.terminal.defaultCwd).path;
+          }
+          if (!cwd) {
+            throw new Error("No terminal working directory is configured.");
+          }
+          const { cols, rows } = parseTerminalSize(params);
+          const terminal = await terminalService.create({
+            ownerId,
+            cwd,
+            title: typeof params?.title === "string" ? params.title : null,
+            cols,
+            rows,
+          });
+          respond(true, { terminal });
+        } catch (error) {
+          sendError(respond, error);
+        }
+      },
+    );
+
+    api.registerGatewayMethod(
+      "power.terminal.read",
+      async ({ client, params, respond }: GatewayRequestHandlerOptions) => {
+        try {
+          const terminalId = typeof params?.terminalId === "string" ? params.terminalId.trim() : "";
+          if (!terminalId) {
+            throw new Error("terminalId required");
+          }
+          const cursor =
+            typeof params?.cursor === "number" && Number.isFinite(params.cursor)
+              ? params.cursor
+              : null;
+          respond(true, terminalService.read(resolveTerminalOwnerId(client), terminalId, cursor));
+        } catch (error) {
+          sendError(respond, error);
+        }
+      },
+    );
+
+    api.registerGatewayMethod(
+      "power.terminal.input",
+      async ({ client, params, respond }: GatewayRequestHandlerOptions) => {
+        try {
+          const terminalId = typeof params?.terminalId === "string" ? params.terminalId.trim() : "";
+          const data = typeof params?.data === "string" ? params.data : "";
+          if (!terminalId) {
+            throw new Error("terminalId required");
+          }
+          if (!data) {
+            throw new Error("data required");
+          }
+          terminalService.write(resolveTerminalOwnerId(client), terminalId, data);
+          respond(true, { ok: true });
+        } catch (error) {
+          sendError(respond, error);
+        }
+      },
+    );
+
+    api.registerGatewayMethod(
+      "power.terminal.resize",
+      async ({ client, params, respond }: GatewayRequestHandlerOptions) => {
+        try {
+          const terminalId = typeof params?.terminalId === "string" ? params.terminalId.trim() : "";
+          if (!terminalId) {
+            throw new Error("terminalId required");
+          }
+          const { cols, rows } = parseTerminalSize(params);
+          respond(true, {
+            terminal: terminalService.resize(
+              resolveTerminalOwnerId(client),
+              terminalId,
+              cols,
+              rows,
+            ),
+          });
+        } catch (error) {
+          sendError(respond, error);
+        }
+      },
+    );
+
+    api.registerGatewayMethod(
+      "power.terminal.close",
+      async ({ client, params, respond }: GatewayRequestHandlerOptions) => {
+        try {
+          const terminalId = typeof params?.terminalId === "string" ? params.terminalId.trim() : "";
+          if (!terminalId) {
+            throw new Error("terminalId required");
+          }
+          await terminalService.close(resolveTerminalOwnerId(client), terminalId);
+          respond(true, { ok: true });
+        } catch (error) {
+          sendError(respond, error);
+        }
+      },
+    );
+  }
+
   api.logger.info(
     `[power-backend] registered power.fs methods with ${fsService.listRoots().roots.length} allowed roots`,
   );
+  if (terminalService.isEnabled()) {
+    api.logger.info("[power-backend] registered power.terminal methods");
+  }
 }

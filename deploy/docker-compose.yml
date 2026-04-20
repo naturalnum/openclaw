@@ -1,7 +1,7 @@
 services:
   openclaw:
     image: ${OPENCLAW_IMAGE:-openclaw-power:20260412-v1.0}
-    platform: ${OPENCLAW_RUNTIME_PLATFORM:-linux/amd64}
+    platform: ${OPENCLAW_RUNTIME_PLATFORM:-linux/arm64}
     container_name: ${OPENCLAW_CONTAINER_NAME:-openclaw-power}
     restart: unless-stopped
     init: true
@@ -15,6 +15,7 @@ services:
       OPENCLAW_CONFIG_PATH: /home/node/.openclaw/openclaw.json
     volumes:
       - ./openclaw-home:/home/node/.openclaw
+      - ./openclaw-home/claude:/home/node/.claude
     ports:
       - "${OPENCLAW_GATEWAY_PORT:-18789}:18789"
       - "${OPENCLAW_BRIDGE_PORT:-18790}:18790"

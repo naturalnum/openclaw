@@ -8,6 +8,7 @@
     "dev": "tsx watch index.ts"
   },
   "dependencies": {
+    "@lydell/node-pty": "^1.1.0-beta34",
     "openclaw": "workspace:*"
   },
   "openclaw": {

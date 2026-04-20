@@ -18,6 +18,8 @@ import type {
   WorkbenchDirectoryCreateResult,
   WorkbenchAdapter,
   WorkbenchAdapterEvent,
+  WorkbenchCodeTerminal,
+  WorkbenchCodeTerminalReadResult,
   WorkbenchFilePreviewMode,
   WorkbenchFilePreviewResult,
   WorkbenchDirectoryListResult,
@@ -387,6 +389,84 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
         path,
       }),
       "power.fs.deleteEntry",
+    );
+  }
+
+  async listCodeTerminals(): Promise<WorkbenchCodeTerminal[]> {
+    const result = await requiredRequest<{ terminals?: WorkbenchCodeTerminal[] }>(
+      this.gateway.request("power.terminal.list", {}),
+      "power.terminal.list",
+    );
+    return Array.isArray(result.terminals) ? result.terminals : [];
+  }
+
+  async createCodeTerminal(options?: {
+    agentId?: string | null;
+    cwd?: string | null;
+    followTerminalId?: string | null;
+    title?: string | null;
+    cols?: number;
+    rows?: number;
+  }): Promise<WorkbenchCodeTerminal> {
+    const result = await requiredRequest<{ terminal: WorkbenchCodeTerminal }>(
+      this.gateway.request("power.terminal.create", {
+        agentId: options?.agentId?.trim() || null,
+        cwd: options?.cwd?.trim() || null,
+        followTerminalId: options?.followTerminalId?.trim() || null,
+        title: options?.title?.trim() || null,
+        cols: options?.cols,
+        rows: options?.rows,
+      }),
+      "power.terminal.create",
+    );
+    return result.terminal;
+  }
+
+  async readCodeTerminal(
+    terminalId: string,
+    cursor?: number | null,
+  ): Promise<WorkbenchCodeTerminalReadResult> {
+    return await requiredRequest(
+      this.gateway.request<WorkbenchCodeTerminalReadResult>("power.terminal.read", {
+        terminalId,
+        cursor,
+      }),
+      "power.terminal.read",
+    );
+  }
+
+  async sendCodeTerminalInput(terminalId: string, data: string): Promise<void> {
+    await requiredRequest(
+      this.gateway.request("power.terminal.input", {
+        terminalId,
+        data,
+      }),
+      "power.terminal.input",
+    );
+  }
+
+  async resizeCodeTerminal(
+    terminalId: string,
+    cols: number,
+    rows: number,
+  ): Promise<WorkbenchCodeTerminal> {
+    const result = await requiredRequest<{ terminal: WorkbenchCodeTerminal }>(
+      this.gateway.request("power.terminal.resize", {
+        terminalId,
+        cols,
+        rows,
+      }),
+      "power.terminal.resize",
+    );
+    return result.terminal;
+  }
+
+  async closeCodeTerminal(terminalId: string): Promise<void> {
+    await requiredRequest(
+      this.gateway.request("power.terminal.close", {
+        terminalId,
+      }),
+      "power.terminal.close",
     );
   }
 

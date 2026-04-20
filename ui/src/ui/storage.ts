@@ -56,6 +56,7 @@ export type UiSettings = {
   navCollapsed: boolean; // Collapsible sidebar state
   navWidth: number; // Sidebar width when expanded
   navGroupsCollapsed: Record<string, boolean>; // Which nav groups are collapsed
+  showCodeNav?: boolean; // Whether to show the Code entry in the main navigation
   borderRadius: number; // Corner roundness (0–100, default 50)
   locale?: string;
 };
@@ -194,6 +195,7 @@ export function loadSettings(): UiSettings {
     navCollapsed: false,
     navWidth: 312,
     navGroupsCollapsed: {},
+    showCodeNav: true,
     borderRadius: 50,
   };
 
@@ -249,6 +251,10 @@ export function loadSettings(): UiSettings {
         typeof parsed.navGroupsCollapsed === "object" && parsed.navGroupsCollapsed !== null
           ? parsed.navGroupsCollapsed
           : defaults.navGroupsCollapsed,
+      showCodeNav:
+        typeof (parsed as { showCodeNav?: unknown }).showCodeNav === "boolean"
+          ? Boolean((parsed as { showCodeNav?: unknown }).showCodeNav)
+          : defaults.showCodeNav,
       borderRadius:
         typeof parsed.borderRadius === "number" &&
         parsed.borderRadius >= 0 &&
@@ -314,6 +320,7 @@ function persistSettings(next: UiSettings) {
     navCollapsed: next.navCollapsed,
     navWidth: next.navWidth,
     navGroupsCollapsed: next.navGroupsCollapsed,
+    showCodeNav: next.showCodeNav,
     borderRadius: next.borderRadius,
     sessionsByGateway,
     ...(next.locale ? { locale: next.locale } : {}),

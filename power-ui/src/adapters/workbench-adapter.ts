@@ -80,6 +80,23 @@ export type WorkbenchSkillMessage = {
   message: string;
 };
 
+export type WorkbenchCodeTerminal = {
+  terminalId: string;
+  title: string;
+  cwd: string;
+  status: "running" | "exited";
+  createdAt: number;
+  lastActiveAt: number;
+  exitCode: number | null;
+};
+
+export type WorkbenchCodeTerminalReadResult = {
+  terminal: WorkbenchCodeTerminal;
+  data: string;
+  nextCursor: number;
+  reset: boolean;
+};
+
 export type WorkbenchAdapterEvent =
   | {
       type: "chat";
@@ -129,6 +146,26 @@ export interface WorkbenchAdapter {
   ): Promise<WorkbenchFilePreviewResult>;
   downloadProjectFile(agentId: string, path: string): Promise<void>;
   deleteProjectEntry(agentId: string, path: string): Promise<void>;
+  listCodeTerminals(): Promise<WorkbenchCodeTerminal[]>;
+  createCodeTerminal(options?: {
+    agentId?: string | null;
+    cwd?: string | null;
+    followTerminalId?: string | null;
+    title?: string | null;
+    cols?: number;
+    rows?: number;
+  }): Promise<WorkbenchCodeTerminal>;
+  readCodeTerminal(
+    terminalId: string,
+    cursor?: number | null,
+  ): Promise<WorkbenchCodeTerminalReadResult>;
+  sendCodeTerminalInput(terminalId: string, data: string): Promise<void>;
+  resizeCodeTerminal(
+    terminalId: string,
+    cols: number,
+    rows: number,
+  ): Promise<WorkbenchCodeTerminal>;
+  closeCodeTerminal(terminalId: string): Promise<void>;
   renameProject(projectId: string, name: string): Promise<void>;
   deleteProject(projectId: string): Promise<void>;
   createProject(name: string, workspace: string): Promise<string | null>;

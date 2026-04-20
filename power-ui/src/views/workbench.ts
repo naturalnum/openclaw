@@ -2,6 +2,7 @@ import { html, nothing } from "lit";
 import { repeat } from "lit/directives/repeat.js";
 import { parseAgentSessionKey } from "../../../ui/src/ui/session-key.ts";
 import type { WorkbenchFileEntry } from "../adapters/workbench-adapter.ts";
+import type { WorkbenchCodeTerminal } from "../adapters/workbench-adapter.ts";
 import type {
   AgentIdentityResult,
   AgentsFilesListResult,
@@ -30,14 +31,16 @@ import {
   isSystemGeneratedSessionLabel,
   looksLikeOpaqueSessionId,
 } from "../integrations/openclaw/session-keys.ts";
+import { renderCodePage } from "./code.ts";
 import { renderSkills, type SkillsProps } from "./skills.ts";
 
 declare const __OPENCLAW_VERSION__: string;
 declare const __POWER_UI_VERSION__: string;
 
-export type WorkbenchSection = "newTask" | "skills" | "files" | "automations" | "logs";
+export type WorkbenchSection = "newTask" | "skills" | "files" | "code" | "automations" | "logs";
 export type WorkbenchSettingsTab =
   | "general"
+  | "code"
   | "connectors"
   | "models"
   | "dreaming"
@@ -188,6 +191,7 @@ export type WorkbenchProps = {
     gatewayUrl: string;
     theme: string;
     themeMode: string;
+    showCodeNav: boolean;
     locale?: string;
   };
   configSnapshot: ConfigSnapshot | null;
@@ -260,6 +264,10 @@ export type WorkbenchProps = {
       onGuardFieldChange: (id: string, key: string, value: string) => void;
       onSave: () => void;
     };
+    code: {
+      showCodeNav: boolean;
+      onToggleShowCodeNav: (value: boolean) => void;
+    };
     onLocaleChange: (value: string) => void;
     onThemeChange: (value: string) => void;
     onThemeModeChange: (value: string) => void;
@@ -277,6 +285,19 @@ export type WorkbenchProps = {
   settingsOpen: boolean;
   settingsClosing: boolean;
   settingsTab: WorkbenchSettingsTab;
+  codeView: {
+    loading: boolean;
+    creating: boolean;
+    error: string | null;
+    terminals: WorkbenchCodeTerminal[];
+    activeTerminalId: string | null;
+    buffer: string;
+    onCreate: () => void;
+    onSelect: (terminalId: string) => void;
+    onClose: (terminalId: string) => void;
+    onInput: (terminalId: string, data: string) => void;
+    onResize: (terminalId: string, cols: number, rows: number) => void;
+  };
   runningSessionKeys: Record<string, boolean>;
   unreadSessionKeys: Record<string, boolean>;
   projectDirectoryOpen: boolean;
@@ -467,7 +488,11 @@ export function renderWorkbench(props: WorkbenchProps) {
   const newTaskNavActive = props.section === "newTask" && !activeSession;
 
   return html`
-    <div class="workbench-shell" data-workbench-shell @scroll=${props.onWorkbenchShellScroll}>
+    <div
+      class="workbench-shell ${props.section === "code" ? "workbench-shell--no-horizontal" : ""}"
+      data-workbench-shell
+      @scroll=${props.onWorkbenchShellScroll}
+    >
       <div
         class="workbench ${props.themeResolved.includes("light")
           ? "workbench--light"
@@ -543,6 +568,16 @@ export function renderWorkbench(props: WorkbenchProps) {
               props.sidebarCollapsed,
               () => props.onSectionChange("files"),
             )}
+            ${props.settings.showCodeNav
+              ? renderNavButton(
+                  "code",
+                  "Code",
+                  icons.terminal,
+                  props.section === "code",
+                  props.sidebarCollapsed,
+                  () => props.onSectionChange("code"),
+                )
+              : nothing}
           </nav>
 
           ${props.sidebarCollapsed
@@ -629,11 +664,13 @@ export function renderWorkbench(props: WorkbenchProps) {
             <section class="workbench-center">
               ${props.section === "files"
                 ? renderFilesPage(props, filesPageProject)
-                : props.section === "skills"
-                  ? renderSkillsPage(props)
-                  : activeSession
-                    ? renderSessionView(props, activeProject, activeSession)
-                    : renderNewTaskView(props, currentProject, projects)}
+                : props.section === "code"
+                  ? renderCodePage(props)
+                  : props.section === "skills"
+                    ? renderSkillsPage(props)
+                    : activeSession
+                      ? renderSessionView(props, activeProject, activeSession)
+                      : renderNewTaskView(props, currentProject, projects)}
             </section>
 
             ${showRightRail && activeProject && activeSession
@@ -650,7 +687,7 @@ export function renderWorkbench(props: WorkbenchProps) {
         ? renderFilePreviewDialog(props)
         : nothing}
     </div>
-    ${props.horizontalScrollbarVisible
+    ${props.horizontalScrollbarVisible && props.section !== "code"
       ? html`
           <div
             class="workbench-horizontal-scrollbar"
@@ -2107,6 +2144,14 @@ function renderSettingsDialog(props: WorkbenchProps) {
             </button>
             <button
               type="button"
+              class="${props.settingsTab === "code" ? "is-active" : ""}"
+              @click=${() => props.onSettingsTabChange("code")}
+            >
+              <span class="workbench-settings-nav__icon">${icons.terminal}</span>
+              Code
+            </button>
+            <button
+              type="button"
               class="${props.settingsTab === "dreaming" ? "is-active" : ""}"
               @click=${() => props.onSettingsTabChange("dreaming")}
             >
@@ -2141,6 +2186,7 @@ function renderSettingsDialog(props: WorkbenchProps) {
 
           <section
             class="workbench-settings-panel ${props.settingsTab === "models" ||
+            props.settingsTab === "code" ||
             props.settingsTab === "connectors" ||
             props.settingsTab === "dreaming" ||
             props.settingsTab === "automations" ||
@@ -2153,17 +2199,19 @@ function renderSettingsDialog(props: WorkbenchProps) {
                 <h4>
                   ${props.settingsTab === "general"
                     ? tLocale(locale, "General", "通用")
-                    : props.settingsTab === "connectors"
-                      ? tLocale(locale, "Connectors", "连接器")
-                      : props.settingsTab === "models"
-                        ? tLocale(locale, "Model Settings", "模型设置")
-                        : props.settingsTab === "dreaming"
-                          ? tLocale(locale, "Dreaming", "梦境")
-                          : props.settingsTab === "statistics"
-                            ? tLocale(locale, "Statistics", "统计")
-                            : props.settingsTab === "automations"
-                              ? tLocale(locale, "Scheduled Jobs", "定时任务")
-                              : tLocale(locale, "Logs", "日志")}
+                    : props.settingsTab === "code"
+                      ? "Code"
+                      : props.settingsTab === "connectors"
+                        ? tLocale(locale, "Connectors", "连接器")
+                        : props.settingsTab === "models"
+                          ? tLocale(locale, "Model Settings", "模型设置")
+                          : props.settingsTab === "dreaming"
+                            ? tLocale(locale, "Dreaming", "梦境")
+                            : props.settingsTab === "statistics"
+                              ? tLocale(locale, "Statistics", "统计")
+                              : props.settingsTab === "automations"
+                                ? tLocale(locale, "Scheduled Jobs", "定时任务")
+                                : tLocale(locale, "Logs", "日志")}
                 </h4>
                 ${props.settingsTab === "general"
                   ? html`
@@ -2175,67 +2223,69 @@ function renderSettingsDialog(props: WorkbenchProps) {
                         )}
                       </p>
                     `
-                  : props.settingsTab === "connectors"
-                    ? html`
-                        <p>
-                          ${tLocale(
-                            locale,
-                            "Manage external systems and expose governed tools to agents.",
-                            "管理外部系统连接，并向 agent 暴露受控工具。",
-                          )}
-                        </p>
-                      `
-                    : props.settingsTab === "models"
+                  : props.settingsTab === "code"
+                    ? html` <p>${tLocale(locale, "Code related settings.", "Code相关配置。")}</p> `
+                    : props.settingsTab === "connectors"
                       ? html`
                           <p>
                             ${tLocale(
                               locale,
-                              "Manage model providers, endpoints, and default selections.",
-                              "管理模型提供方、接口地址和默认选择。",
+                              "Manage external systems and expose governed tools to agents.",
+                              "管理外部系统连接，并向 agent 暴露受控工具。",
                             )}
                           </p>
                         `
-                      : props.settingsTab === "dreaming"
+                      : props.settingsTab === "models"
                         ? html`
                             <p>
                               ${tLocale(
                                 locale,
-                                "Inspect and manage memory dreaming using the upstream experience.",
-                                "使用原生梦境页面检查和管理记忆梦境。",
+                                "Manage model providers, endpoints, and default selections.",
+                                "管理模型提供方、接口地址和默认选择。",
                               )}
                             </p>
                           `
-                        : props.settingsTab === "statistics"
+                        : props.settingsTab === "dreaming"
                           ? html`
                               <p>
                                 ${tLocale(
                                   locale,
-                                  "Check the recent token footprint.",
-                                  "查看最近的 token 消耗概况。",
+                                  "Inspect and manage memory dreaming using the upstream experience.",
+                                  "使用原生梦境页面检查和管理记忆梦境。",
                                 )}
                               </p>
                             `
-                          : props.settingsTab === "automations"
+                          : props.settingsTab === "statistics"
                             ? html`
                                 <p>
                                   ${tLocale(
                                     locale,
-                                    "Manage recurring jobs and delivery settings.",
-                                    "管理周期任务和投递设置。",
+                                    "Check the recent token footprint.",
+                                    "查看最近的 token 消耗概况。",
                                   )}
                                 </p>
                               `
-                            : props.settingsTab === "logs"
+                            : props.settingsTab === "automations"
                               ? html`
                                   <p>
                                     ${tLocale(
                                       locale,
-                                      "Inspect gateway logs with filtering and export.",
-                                      "查看网关日志并进行筛选和导出。",
+                                      "Manage recurring jobs and delivery settings.",
+                                      "管理周期任务和投递设置。",
                                     )}
                                   </p>
                                 `
-                              : nothing}
+                              : props.settingsTab === "logs"
+                                ? html`
+                                    <p>
+                                      ${tLocale(
+                                        locale,
+                                        "Inspect gateway logs with filtering and export.",
+                                        "查看网关日志并进行筛选和导出。",
+                                      )}
+                                    </p>
+                                  `
+                                : nothing}
               </div>
               <button
                 type="button"
@@ -2380,7 +2430,9 @@ function renderSettingsDialog(props: WorkbenchProps) {
                                   guard.fields,
                                   (field) => `${guard.id}:${field.key}`,
                                   (field) => html`
-                                    <label class="workbench-settings-field workbench-settings-field--wide">
+                                    <label
+                                      class="workbench-settings-field workbench-settings-field--wide"
+                                    >
                                       <span>${field.label}</span>
                                       <textarea
                                         rows="4"
@@ -2403,9 +2455,7 @@ function renderSettingsDialog(props: WorkbenchProps) {
                       </div>
                       ${props.settingsView.powerConfig.error
                         ? html`
-                            <p class="skills-empty">
-                              ${props.settingsView.powerConfig.error}
-                            </p>
+                            <p class="skills-empty">${props.settingsView.powerConfig.error}</p>
                           `
                         : nothing}
                       <div class="workbench-settings-actions">
@@ -2423,103 +2473,145 @@ function renderSettingsDialog(props: WorkbenchProps) {
                     </div>
                   </article>
                 `
-              : props.settingsTab === "models"
+              : props.settingsTab === "code"
                 ? html`
-                    <article class="workbench-setting-card workbench-setting-card--models">
-                      <div class="workbench-settings-model-shell">
-                        <div class="workbench-settings-model-shell__head"></div>
-                        <div class="workbench-settings-model-shell__list">
-                          <div class="workbench-settings-models">
-                            ${repeat(
-                              props.settingsView.modelConfigs,
-                              (config) => config.id,
-                              (config) => renderModelCard(props, config, locale),
-                            )}
-                            <button
-                              type="button"
-                              class="workbench-settings-model-add"
-                              @click=${props.settingsView.onAddModelConfig}
-                            >
-                              <span class="workbench-settings-model-add__icon">${icons.plus}</span>
-                              ${tLocale(locale, "Add model", "添加模型")}
-                            </button>
+                    <article class="workbench-setting-card workbench-setting-card--code">
+                      <div class="workbench-settings-section workbench-settings-section--code">
+                        <article
+                          class="workbench-settings-guard-card workbench-settings-guard-card--code"
+                        >
+                          <div
+                            class="workbench-settings-guard-card__header workbench-settings-guard-card__header--code"
+                          >
+                            <div>
+                              <h5>
+                                ${tLocale(locale, "Show Code in main menu", "主菜单显示 Code")}
+                              </h5>
+                              <p>
+                                ${tLocale(
+                                  locale,
+                                  "Only controls whether the shell entry is visible in the main navigation.",
+                                  "只控制主界面侧栏中 shell 入口是否显示。",
+                                )}
+                              </p>
+                            </div>
+                            <label class="workbench-switch">
+                              <input
+                                type="checkbox"
+                                .checked=${props.settingsView.code.showCodeNav}
+                                @change=${(event: Event) =>
+                                  props.settingsView.code.onToggleShowCodeNav(
+                                    (event.target as HTMLInputElement).checked,
+                                  )}
+                              />
+                              <span></span>
+                            </label>
                           </div>
-                        </div>
+                        </article>
                       </div>
                     </article>
                   `
-                : props.settingsTab === "connectors"
+                : props.settingsTab === "models"
                   ? html`
                       <article class="workbench-setting-card workbench-setting-card--models">
-                        ${renderConnectorsPanel(props)}
-                      </article>
-                    `
-                  : props.settingsTab === "dreaming"
-                    ? html`
-                        <article class="workbench-setting-card workbench-setting-card--models">
-                          <div class="workbench-settings-model-shell">
-                            <div class="workbench-settings-model-shell__head">
-                              <div class="dreaming-header-controls">
-                                <button
-                                  type="button"
-                                  class="btn btn--subtle btn--sm"
-                                  ?disabled=${props.dreamingPage.loading}
-                                  @click=${props.dreamingPage.onRefresh}
+                        <div class="workbench-settings-model-shell">
+                          <div class="workbench-settings-model-shell__head"></div>
+                          <div class="workbench-settings-model-shell__list">
+                            <div class="workbench-settings-models">
+                              ${repeat(
+                                props.settingsView.modelConfigs,
+                                (config) => config.id,
+                                (config) => renderModelCard(props, config, locale),
+                              )}
+                              <button
+                                type="button"
+                                class="workbench-settings-model-add"
+                                @click=${props.settingsView.onAddModelConfig}
+                              >
+                                <span class="workbench-settings-model-add__icon"
+                                  >${icons.plus}</span
                                 >
-                                  ${props.dreamingPage.refreshLoading
-                                    ? tLocale(locale, "Refreshing", "刷新中")
-                                    : tLocale(locale, "Refresh", "刷新")}
-                                </button>
-                                <button
-                                  type="button"
-                                  class="dreams__phase-toggle ${props.dreamingPage.active
-                                    ? "dreams__phase-toggle--on"
-                                    : ""}"
-                                  ?disabled=${props.dreamingPage.loading}
-                                  @click=${props.dreamingPage.onToggleEnabled}
-                                >
-                                  <span class="dreams__phase-toggle-dot"></span>
-                                  <span class="dreams__phase-toggle-label">
-                                    ${props.dreamingPage.active
-                                      ? tLocale(locale, "DREAMING 已开启", "DREAMING 已开启")
-                                      : tLocale(locale, "DREAMING 已关闭", "DREAMING 已关闭")}
-                                  </span>
-                                </button>
-                              </div>
-                            </div>
-                            <div class="workbench-settings-model-shell__list">
-                              ${renderDreaming(props.dreamingPage.view)}
+                                ${tLocale(locale, "Add model", "添加模型")}
+                              </button>
                             </div>
                           </div>
+                        </div>
+                      </article>
+                    `
+                  : props.settingsTab === "connectors"
+                    ? html`
+                        <article class="workbench-setting-card workbench-setting-card--models">
+                          ${renderConnectorsPanel(props)}
                         </article>
                       `
-                    : props.settingsTab === "automations"
+                    : props.settingsTab === "dreaming"
                       ? html`
                           <article class="workbench-setting-card workbench-setting-card--models">
                             <div class="workbench-settings-model-shell">
-                              <div class="workbench-settings-model-shell__head"></div>
+                              <div class="workbench-settings-model-shell__head">
+                                <div class="dreaming-header-controls">
+                                  <button
+                                    type="button"
+                                    class="btn btn--subtle btn--sm"
+                                    ?disabled=${props.dreamingPage.loading}
+                                    @click=${props.dreamingPage.onRefresh}
+                                  >
+                                    ${props.dreamingPage.refreshLoading
+                                      ? tLocale(locale, "Refreshing", "刷新中")
+                                      : tLocale(locale, "Refresh", "刷新")}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    class="dreams__phase-toggle ${props.dreamingPage.active
+                                      ? "dreams__phase-toggle--on"
+                                      : ""}"
+                                    ?disabled=${props.dreamingPage.loading}
+                                    @click=${props.dreamingPage.onToggleEnabled}
+                                  >
+                                    <span class="dreams__phase-toggle-dot"></span>
+                                    <span class="dreams__phase-toggle-label">
+                                      ${props.dreamingPage.active
+                                        ? tLocale(locale, "DREAMING 已开启", "DREAMING 已开启")
+                                        : tLocale(locale, "DREAMING 已关闭", "DREAMING 已关闭")}
+                                    </span>
+                                  </button>
+                                </div>
+                              </div>
                               <div class="workbench-settings-model-shell__list">
-                                ${renderCron(props.automationsPage)}
+                                ${renderDreaming(props.dreamingPage.view)}
                               </div>
                             </div>
                           </article>
                         `
-                      : props.settingsTab === "logs"
+                      : props.settingsTab === "automations"
                         ? html`
                             <article class="workbench-setting-card workbench-setting-card--models">
                               <div class="workbench-settings-model-shell">
                                 <div class="workbench-settings-model-shell__head"></div>
                                 <div class="workbench-settings-model-shell__list">
-                                  ${renderLogs(props.logsPage)}
+                                  ${renderCron(props.automationsPage)}
                                 </div>
                               </div>
                             </article>
                           `
-                        : html`
-                            <article class="workbench-setting-card">
-                              ${renderStatisticsPanel(props)}
-                            </article>
-                          `}
+                        : props.settingsTab === "logs"
+                          ? html`
+                              <article
+                                class="workbench-setting-card workbench-setting-card--models"
+                              >
+                                <div class="workbench-settings-model-shell">
+                                  <div class="workbench-settings-model-shell__head"></div>
+                                  <div class="workbench-settings-model-shell__list">
+                                    ${renderLogs(props.logsPage)}
+                                  </div>
+                                </div>
+                              </article>
+                            `
+                          : html`
+                              <article class="workbench-setting-card">
+                                ${renderStatisticsPanel(props)}
+                              </article>
+                            `}
           </section>
         </div>
       </div>

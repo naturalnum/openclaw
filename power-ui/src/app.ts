@@ -6,6 +6,7 @@ import type { WorkbenchSnapshot } from "./adapters/mock-workbench-adapter.ts";
 import type {
   WorkbenchAdapter,
   WorkbenchAdapterEvent,
+  WorkbenchCodeTerminal,
   WorkbenchDirectoryEntry,
   WorkbenchFileEntry,
   WorkbenchFilePreviewMode,
@@ -336,6 +337,11 @@ type ConnectorState = {
   selectedProviderId: string | null;
   editingInstanceId: string | null;
   draft: ConnectorDraftState;
+};
+
+type CodeTerminalSize = {
+  cols: number;
+  rows: number;
 };
 
 function createEmptyConnectorDraft(providerId: string | null = null): ConnectorDraftState {
@@ -1133,7 +1139,7 @@ export class OpenClawPowerApp extends LitElement {
   @state() skillCenterBaseUrlDraft = "";
   @state() powerGuardDrafts: Record<GuardPluginId, PowerGuardDraft> = cloneConfigObject(
     DEFAULT_POWER_GUARD_DRAFTS,
-  ) as Record<GuardPluginId, PowerGuardDraft>;
+  );
   @state() powerConfigSaving = false;
   @state() powerConfigError: string | null = null;
   @state() projectDirectoryDialogOpen = false;
@@ -1221,6 +1227,13 @@ export class OpenClawPowerApp extends LitElement {
   @state() chatRuntimeVersion = 0;
   @state() horizontalScrollbarVisible = false;
   @state() horizontalScrollbarContentWidth = 0;
+  @state() codeTerminalLoading = false;
+  @state() codeTerminalCreating = false;
+  @state() codeTerminalError: string | null = null;
+  @state() codeTerminals: WorkbenchCodeTerminal[] = [];
+  @state() codeActiveTerminalId: string | null = null;
+  @state() codeTerminalBuffers: Record<string, string> = {};
+  @state() codeTerminalCursors: Record<string, number> = {};
 
   constructor() {
     super();
@@ -1240,6 +1253,9 @@ export class OpenClawPowerApp extends LitElement {
   private modelConfigPersistInFlight = false;
   private modelConfigPersistQueued = false;
   private logsRefreshTimer: number | null = null;
+  private codeTerminalPollTimer: number | null = null;
+  private codeTerminalPollInFlight = false;
+  private readonly codeTerminalSizes = new Map<string, CodeTerminalSize>();
   private syncingWorkbenchShellScroll = false;
   private syncingWorkbenchScrollbarScroll = false;
   private sidebarResizeStartX = 0;
@@ -1305,6 +1321,7 @@ export class OpenClawPowerApp extends LitElement {
       window.clearInterval(this.logsRefreshTimer);
       this.logsRefreshTimer = null;
     }
+    this.stopCodeTerminalPolling();
     for (const timer of this.modalCloseTimers.values()) {
       window.clearTimeout(timer);
     }
@@ -1380,6 +1397,225 @@ export class OpenClawPowerApp extends LitElement {
       this.syncingWorkbenchScrollbarScroll = false;
     }
   };
+
+  private getActiveCodeTerminal() {
+    return (
+      this.codeTerminals.find((terminal) => terminal.terminalId === this.codeActiveTerminalId) ??
+      null
+    );
+  }
+
+  private mergeCodeTerminal(terminal: WorkbenchCodeTerminal) {
+    this.codeTerminals = this.codeTerminals.some(
+      (entry) => entry.terminalId === terminal.terminalId,
+    )
+      ? this.codeTerminals.map((entry) =>
+          entry.terminalId === terminal.terminalId ? terminal : entry,
+        )
+      : [...this.codeTerminals, terminal];
+  }
+
+  private syncCodeTerminalState(terminals: WorkbenchCodeTerminal[]) {
+    const nextById = new Map(terminals.map((terminal) => [terminal.terminalId, terminal]));
+    const preservedOrder = this.codeTerminals
+      .map((terminal) => nextById.get(terminal.terminalId))
+      .filter((terminal): terminal is WorkbenchCodeTerminal => Boolean(terminal));
+    const knownIds = new Set(preservedOrder.map((terminal) => terminal.terminalId));
+    const appended = terminals.filter((terminal) => !knownIds.has(terminal.terminalId));
+    this.codeTerminals = [...preservedOrder, ...appended];
+    const validIds = new Set(terminals.map((terminal) => terminal.terminalId));
+    const nextBuffers = Object.fromEntries(
+      Object.entries(this.codeTerminalBuffers).filter(([terminalId]) => validIds.has(terminalId)),
+    );
+    const nextCursors = Object.fromEntries(
+      Object.entries(this.codeTerminalCursors).filter(([terminalId]) => validIds.has(terminalId)),
+    );
+    this.codeTerminalBuffers = nextBuffers;
+    this.codeTerminalCursors = nextCursors;
+    if (!this.codeActiveTerminalId || !validIds.has(this.codeActiveTerminalId)) {
+      this.codeActiveTerminalId = terminals[0]?.terminalId ?? null;
+    }
+  }
+
+  private stopCodeTerminalPolling() {
+    if (this.codeTerminalPollTimer != null) {
+      window.clearTimeout(this.codeTerminalPollTimer);
+      this.codeTerminalPollTimer = null;
+    }
+  }
+
+  private scheduleCodeTerminalPoll(delayMs = 150) {
+    this.stopCodeTerminalPolling();
+    if (this.workbenchSection !== "code" || !this.codeActiveTerminalId) {
+      return;
+    }
+    this.codeTerminalPollTimer = window.setTimeout(() => {
+      void this.pollActiveCodeTerminal();
+    }, delayMs);
+  }
+
+  private async enterCodeSection() {
+    this.stopLogsAutoRefresh();
+    this.workbenchSection = "code";
+    this.newTaskProjectMenuOpen = false;
+    this.treeMenuOpenKey = null;
+    await this.restoreCodeTerminals(true);
+  }
+
+  private async restoreCodeTerminals(autoCreate: boolean) {
+    this.codeTerminalLoading = true;
+    this.codeTerminalError = null;
+    try {
+      let terminals = await this.adapter.listCodeTerminals();
+      if (autoCreate && terminals.length === 0) {
+        const created = await this.createCodeTerminalInternal();
+        terminals = created ? [created] : [];
+      }
+      this.syncCodeTerminalState(terminals);
+      if (this.codeActiveTerminalId) {
+        this.scheduleCodeTerminalPoll(10);
+      } else {
+        this.stopCodeTerminalPolling();
+      }
+    } catch (error) {
+      this.codeTerminalError = error instanceof Error ? error.message : String(error);
+    } finally {
+      this.codeTerminalLoading = false;
+    }
+  }
+
+  private async createCodeTerminalInternal() {
+    const activeTerminal = this.getActiveCodeTerminal();
+    const activeSize = this.codeActiveTerminalId
+      ? this.codeTerminalSizes.get(this.codeActiveTerminalId)
+      : null;
+    const projectId = this.workbenchSelectedProjectId ?? this.resolveDefaultProjectId();
+    const terminal = await this.adapter.createCodeTerminal({
+      agentId: activeTerminal ? null : projectId,
+      cwd: activeTerminal ? null : null,
+      followTerminalId: activeTerminal?.terminalId ?? null,
+      cols: activeSize?.cols ?? 120,
+      rows: activeSize?.rows ?? 30,
+    });
+    this.codeTerminalBuffers = {
+      ...this.codeTerminalBuffers,
+      [terminal.terminalId]: "",
+    };
+    this.codeTerminalCursors = {
+      ...this.codeTerminalCursors,
+      [terminal.terminalId]: 0,
+    };
+    return terminal;
+  }
+
+  private async createCodeTerminal() {
+    this.codeTerminalCreating = true;
+    this.codeTerminalError = null;
+    try {
+      const terminal = await this.createCodeTerminalInternal();
+      this.mergeCodeTerminal(terminal);
+      this.codeActiveTerminalId = terminal.terminalId;
+      if (this.workbenchSection === "code") {
+        this.scheduleCodeTerminalPoll(10);
+      }
+    } catch (error) {
+      this.codeTerminalError = error instanceof Error ? error.message : String(error);
+    } finally {
+      this.codeTerminalCreating = false;
+    }
+  }
+
+  private selectCodeTerminal(terminalId: string) {
+    if (this.codeActiveTerminalId === terminalId) {
+      return;
+    }
+    this.codeActiveTerminalId = terminalId;
+    if (this.workbenchSection === "code") {
+      this.scheduleCodeTerminalPoll(10);
+    }
+  }
+
+  private async closeCodeTerminal(terminalId: string) {
+    try {
+      await this.adapter.closeCodeTerminal(terminalId);
+      const terminalIndex = this.codeTerminals.findIndex(
+        (terminal) => terminal.terminalId === terminalId,
+      );
+      const nextTerminals =
+        terminalIndex >= 0 ? this.codeTerminals.toSpliced(terminalIndex, 1) : this.codeTerminals;
+      const { [terminalId]: _removedBuffer, ...restBuffers } = this.codeTerminalBuffers;
+      const { [terminalId]: _removedCursor, ...restCursors } = this.codeTerminalCursors;
+      this.codeTerminalBuffers = restBuffers;
+      this.codeTerminalCursors = restCursors;
+      this.codeTerminals = nextTerminals;
+      if (this.codeActiveTerminalId === terminalId) {
+        this.codeActiveTerminalId = nextTerminals[0]?.terminalId ?? null;
+      }
+      if (this.workbenchSection === "code" && this.codeActiveTerminalId) {
+        this.scheduleCodeTerminalPoll(10);
+      } else {
+        this.stopCodeTerminalPolling();
+      }
+    } catch (error) {
+      this.codeTerminalError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  private async pollActiveCodeTerminal() {
+    const terminalId = this.codeActiveTerminalId;
+    if (this.workbenchSection !== "code" || !terminalId || this.codeTerminalPollInFlight) {
+      return;
+    }
+    this.codeTerminalPollInFlight = true;
+    try {
+      const result = await this.adapter.readCodeTerminal(
+        terminalId,
+        this.codeTerminalCursors[terminalId] ?? null,
+      );
+      this.mergeCodeTerminal(result.terminal);
+      const previousBuffer = this.codeTerminalBuffers[terminalId] ?? "";
+      this.codeTerminalBuffers = {
+        ...this.codeTerminalBuffers,
+        [terminalId]: result.reset ? result.data : `${previousBuffer}${result.data}`,
+      };
+      this.codeTerminalCursors = {
+        ...this.codeTerminalCursors,
+        [terminalId]: result.nextCursor,
+      };
+      this.codeTerminalError = null;
+      this.scheduleCodeTerminalPoll(result.terminal.status === "running" ? 150 : 1000);
+    } catch (error) {
+      this.codeTerminalError = error instanceof Error ? error.message : String(error);
+      this.scheduleCodeTerminalPoll(1000);
+    } finally {
+      this.codeTerminalPollInFlight = false;
+    }
+  }
+
+  private async sendCodeTerminalInput(terminalId: string, data: string) {
+    try {
+      await this.adapter.sendCodeTerminalInput(terminalId, data);
+      if (terminalId === this.codeActiveTerminalId) {
+        this.scheduleCodeTerminalPoll(10);
+      }
+    } catch (error) {
+      this.codeTerminalError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  private async resizeCodeTerminal(terminalId: string, cols: number, rows: number) {
+    const previous = this.codeTerminalSizes.get(terminalId);
+    if (previous && previous.cols === cols && previous.rows === rows) {
+      return;
+    }
+    this.codeTerminalSizes.set(terminalId, { cols, rows });
+    try {
+      const terminal = await this.adapter.resizeCodeTerminal(terminalId, cols, rows);
+      this.mergeCodeTerminal(terminal);
+    } catch (error) {
+      this.codeTerminalError = error instanceof Error ? error.message : String(error);
+    }
+  }
 
   private setModalClosingState(
     key: "settings" | "projectDirectory" | "filePreview",
@@ -2184,9 +2420,7 @@ export class OpenClawPowerApp extends LitElement {
       if (!baseHash) {
         throw new Error("Config hash missing; reload and retry.");
       }
-      const nextConfig = cloneConfigObject(
-        (snapshot.config as Record<string, unknown> | null | undefined) ?? {},
-      ) as Record<string, unknown>;
+      const nextConfig = cloneConfigObject(snapshot.config ?? {});
       const skills = readConfigObject(nextConfig.skills);
       const registry = readConfigObject(skills.registry);
       const registryBaseUrl = this.skillCenterBaseUrlDraft.trim();
@@ -3032,6 +3266,7 @@ export class OpenClawPowerApp extends LitElement {
 
   private async enterNewTask() {
     this.stopLogsAutoRefresh();
+    this.stopCodeTerminalPolling();
     this.workbenchSection = "newTask";
     this.workbenchSelectedSessionKey = null;
     this.newTaskProjectMenuOpen = false;
@@ -3047,6 +3282,7 @@ export class OpenClawPowerApp extends LitElement {
   private async selectProject(projectId: string) {
     const preserveFilesView = this.workbenchSection === "files";
     this.stopLogsAutoRefresh();
+    this.stopCodeTerminalPolling();
     this.workbenchSection = preserveFilesView ? "files" : "newTask";
     this.workbenchSelectedProjectId = projectId;
     this.workbenchSelectedSessionKey = null;
@@ -3072,6 +3308,7 @@ export class OpenClawPowerApp extends LitElement {
     const projectId =
       parseAgentSessionKey(sessionKey)?.agentId ?? this.workbenchSelectedProjectId ?? null;
     this.stopLogsAutoRefresh();
+    this.stopCodeTerminalPolling();
     this.workbenchSection = "newTask";
     this.workbenchSelectedSessionKey = sessionKey;
     this.clearSessionUnread(sessionKey);
@@ -4732,6 +4969,7 @@ export class OpenClawPowerApp extends LitElement {
         gatewayUrl: this.settings.gatewayUrl,
         theme: this.settings.theme,
         themeMode: this.settings.themeMode,
+        showCodeNav: this.settings.showCodeNav ?? true,
         locale: this.settings.locale,
       },
       configSnapshot: this.configSnapshot,
@@ -4953,8 +5191,7 @@ export class OpenClawPowerApp extends LitElement {
                   key: "blockedCommands",
                   label: "Blocked Commands",
                   placeholder: "curl\nwget\nssh",
-                  value:
-                    this.powerGuardDrafts["network-guard-plugin"].values.blockedCommands ?? "",
+                  value: this.powerGuardDrafts["network-guard-plugin"].values.blockedCommands ?? "",
                 },
               ],
             },
@@ -4968,8 +5205,7 @@ export class OpenClawPowerApp extends LitElement {
                   key: "readonlyPaths",
                   label: "Readonly Paths",
                   placeholder: "skills\nextensions\n.openclaw/extensions",
-                  value:
-                    this.powerGuardDrafts["workspace-guard-plugin"].values.readonlyPaths ?? "",
+                  value: this.powerGuardDrafts["workspace-guard-plugin"].values.readonlyPaths ?? "",
                 },
               ],
             },
@@ -4985,6 +5221,16 @@ export class OpenClawPowerApp extends LitElement {
           },
           onSave: () => {
             void this.persistPowerConfig();
+          },
+        },
+        code: {
+          showCodeNav: this.settings.showCodeNav ?? true,
+          onToggleShowCodeNav: (value) => {
+            this.persistSettings({ showCodeNav: value });
+            if (!value && this.workbenchSection === "code") {
+              this.workbenchSection = "newTask";
+              this.stopCodeTerminalPolling();
+            }
           },
         },
         onLocaleChange: (value) => {
@@ -5016,6 +5262,31 @@ export class OpenClawPowerApp extends LitElement {
       settingsOpen: this.workbenchSettingsOpen,
       settingsClosing: this.workbenchSettingsClosing,
       settingsTab: this.workbenchSettingsTab,
+      codeView: {
+        loading: this.codeTerminalLoading,
+        creating: this.codeTerminalCreating,
+        error: this.codeTerminalError,
+        terminals: this.codeTerminals,
+        activeTerminalId: this.codeActiveTerminalId,
+        buffer: this.codeActiveTerminalId
+          ? (this.codeTerminalBuffers[this.codeActiveTerminalId] ?? "")
+          : "",
+        onCreate: () => {
+          void this.createCodeTerminal();
+        },
+        onSelect: (terminalId) => {
+          this.selectCodeTerminal(terminalId);
+        },
+        onClose: (terminalId) => {
+          void this.closeCodeTerminal(terminalId);
+        },
+        onInput: (terminalId, data) => {
+          void this.sendCodeTerminalInput(terminalId, data);
+        },
+        onResize: (terminalId, cols, rows) => {
+          void this.resizeCodeTerminal(terminalId, cols, rows);
+        },
+      },
       runningSessionKeys,
       unreadSessionKeys,
       onNavigateLegacy: () => {
@@ -5026,8 +5297,12 @@ export class OpenClawPowerApp extends LitElement {
         void (async () => {
           if (section === "newTask") {
             this.stopLogsAutoRefresh();
+            this.stopCodeTerminalPolling();
             await this.enterNewTask();
             return;
+          }
+          if (section !== "code") {
+            this.stopCodeTerminalPolling();
           }
           this.workbenchSection = section;
           this.newTaskProjectMenuOpen = false;
@@ -5044,6 +5319,10 @@ export class OpenClawPowerApp extends LitElement {
           if (section === "skills") {
             this.stopLogsAutoRefresh();
             await this.loadSkillsPage(true);
+            return;
+          }
+          if (section === "code") {
+            await this.enterCodeSection();
             return;
           }
           if (section === "automations") {

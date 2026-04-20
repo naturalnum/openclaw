@@ -2,6 +2,8 @@ import { buildAgentMainSessionKey, parseAgentSessionKey } from "../../../ui/src/
 import type {
   WorkbenchAdapter,
   WorkbenchAdapterEvent,
+  WorkbenchCodeTerminal,
+  WorkbenchCodeTerminalReadResult,
   WorkbenchDirectoryCreateResult,
   WorkbenchDirectoryListResult,
   WorkbenchDirectoryRootsResult,
@@ -50,6 +52,17 @@ type MockProject = {
   workspace: string;
   files: AgentFileEntry[];
   sessions: MockSession[];
+};
+
+type MockTerminal = {
+  terminalId: string;
+  title: string;
+  cwd: string;
+  status: "running" | "exited";
+  createdAt: number;
+  lastActiveAt: number;
+  exitCode: number | null;
+  buffer: string;
 };
 
 type MockSnapshotArgs = {
@@ -225,6 +238,7 @@ export class MockWorkbenchAdapter implements WorkbenchAdapter {
   private models: ModelCatalogEntry[];
   private nextProjectNumber = 4;
   private nextSessionNumber = 12;
+  private readonly terminals = new Map<string, MockTerminal>();
   private listeners = new Set<(event: WorkbenchAdapterEvent) => void>();
   private pendingRuns = new Map<
     string,
@@ -823,6 +837,79 @@ export class MockWorkbenchAdapter implements WorkbenchAdapter {
         : `${project.workspace}/${file.path}`.replace(/\/+/g, "/");
       return normalizedPath !== filePath;
     });
+  }
+
+  async listCodeTerminals(): Promise<WorkbenchCodeTerminal[]> {
+    return Array.from(this.terminals.values()).map(({ buffer: _buffer, ...terminal }) => terminal);
+  }
+
+  async createCodeTerminal(options?: {
+    agentId?: string | null;
+    cwd?: string | null;
+    title?: string | null;
+    cols?: number;
+    rows?: number;
+  }): Promise<WorkbenchCodeTerminal> {
+    const now = Date.now();
+    const terminal: MockTerminal = {
+      terminalId: createLocalId(),
+      title: options?.title?.trim() || "Terminal",
+      cwd: options?.cwd?.trim() || "/mock/workspace",
+      status: "running",
+      createdAt: now,
+      lastActiveAt: now,
+      exitCode: null,
+      buffer: "Power UI mock terminal\r\nType here to preview terminal layout.\r\n",
+    };
+    this.terminals.set(terminal.terminalId, terminal);
+    const { buffer: _buffer, ...info } = terminal;
+    return info;
+  }
+
+  async readCodeTerminal(
+    terminalId: string,
+    cursor?: number | null,
+  ): Promise<WorkbenchCodeTerminalReadResult> {
+    const terminal = this.terminals.get(terminalId);
+    if (!terminal) {
+      throw new Error("Terminal not found");
+    }
+    terminal.lastActiveAt = Date.now();
+    const start = typeof cursor === "number" && Number.isFinite(cursor) ? Math.max(cursor, 0) : 0;
+    const { buffer, ...info } = terminal;
+    return {
+      terminal: info,
+      data: buffer.slice(start),
+      nextCursor: buffer.length,
+      reset: start > buffer.length,
+    };
+  }
+
+  async sendCodeTerminalInput(terminalId: string, data: string): Promise<void> {
+    const terminal = this.terminals.get(terminalId);
+    if (!terminal) {
+      throw new Error("Terminal not found");
+    }
+    terminal.buffer += data;
+    terminal.lastActiveAt = Date.now();
+  }
+
+  async resizeCodeTerminal(
+    terminalId: string,
+    _cols: number,
+    _rows: number,
+  ): Promise<WorkbenchCodeTerminal> {
+    const terminal = this.terminals.get(terminalId);
+    if (!terminal) {
+      throw new Error("Terminal not found");
+    }
+    terminal.lastActiveAt = Date.now();
+    const { buffer: _buffer, ...info } = terminal;
+    return info;
+  }
+
+  async closeCodeTerminal(terminalId: string): Promise<void> {
+    this.terminals.delete(terminalId);
   }
 
   async renameProject(projectId: string, name: string): Promise<void> {

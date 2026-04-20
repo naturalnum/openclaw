@@ -3,6 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+WORKSPACE_ROOT="$(cd "${PROJECT_ROOT}/.." && pwd)"
+CLAUDE_CODE_ROOT="${WORKSPACE_ROOT}/claude-code"
 BUILD_ENV_FILE="${SCRIPT_DIR}/build.env"
 
 if [[ -f "${BUILD_ENV_FILE}" ]]; then
@@ -16,7 +18,7 @@ OPENCLAW_IMAGE="${OPENCLAW_IMAGE:-openclaw-power:20260412-v1.0}"
 OPENCLAW_DOCKERFILE="${OPENCLAW_DOCKERFILE:-${SCRIPT_DIR}/Dockerfile}"
 OPENCLAW_BUILD_CONTEXT="${OPENCLAW_BUILD_CONTEXT:-${PROJECT_ROOT}}"
 OPENCLAW_NODE_IMAGE="${OPENCLAW_NODE_IMAGE:-node:24-bookworm-slim}"
-OPENCLAW_PLATFORM="${OPENCLAW_PLATFORM:-linux/amd64}"
+OPENCLAW_PLATFORM="${OPENCLAW_PLATFORM:-linux/arm64}"
 
 CTX_DIR="$(mktemp -d /tmp/openclaw-deploy-build.XXXXXX)"
 
@@ -28,15 +30,16 @@ trap cleanup EXIT
 echo "==> Building local runtime assets"
 (
   cd "${PROJECT_ROOT}"
+CI=true pnpm install --no-frozen-lockfile --reporter=silent
   pnpm build:docker
   pnpm qa:lab:build
-  CI=true pnpm prune --prod --reporter=silent
+  CI=true pnpm install --prod --no-frozen-lockfile --reporter=silent
 )
 
 restore_deps() {
   (
     cd "${PROJECT_ROOT}"
-    pnpm install --reporter=silent
+CI=true pnpm install --no-frozen-lockfile --reporter=silent
   )
 }
 trap 'restore_deps; cleanup' EXIT
@@ -45,6 +48,14 @@ mkdir -p "${CTX_DIR}"
 for item in dist node_modules extensions skills docs qa deploy package.json openclaw.mjs; do
   cp -R "${PROJECT_ROOT}/${item}" "${CTX_DIR}/${item}"
 done
+
+if [[ ! -d "${CLAUDE_CODE_ROOT}" ]]; then
+  echo "ERROR: claude-code not found at ${CLAUDE_CODE_ROOT}" >&2
+  exit 1
+fi
+
+cp -R "${CLAUDE_CODE_ROOT}" "${CTX_DIR}/claude-code"
+find "${CTX_DIR}/claude-code" -type f -name 'custom-provider.local.json' -delete
 
 BUILD_ARGS=()
 for key in OPENCLAW_NODE_IMAGE OPENCLAW_EXTENSIONS OPENCLAW_INSTALL_DOCKER_CLI OPENCLAW_INSTALL_BROWSER OPENCLAW_DOCKER_APT_PACKAGES; do
