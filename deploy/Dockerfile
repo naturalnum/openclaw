@@ -60,7 +60,7 @@ COPY extensions ./extensions
 COPY skills ./skills
 COPY docs ./docs
 COPY qa ./qa
-COPY claude-code /opt/claude-code
+COPY deploy_claude_code /opt/deploy_claude_code
 COPY deploy/entrypoint.sh /usr/local/bin/openclaw-deploy-entrypoint.sh
 
 RUN mkdir -p ./extensions/power-backend && \
@@ -68,10 +68,13 @@ RUN mkdir -p ./extensions/power-backend && \
       cp -R ./dist/extensions/power-backend/. ./extensions/power-backend/; \
     fi
 
+RUN mkdir -p /opt/deploy_claude_code/node/linux-arm64 && \
+    ln -sf "$(command -v node)" /opt/deploy_claude_code/node/linux-arm64/node
+
 RUN ln -sf /app/openclaw.mjs /usr/local/bin/openclaw && \
     printf '%s\n' \
       '#!/bin/sh' \
-      'exec node /opt/claude-code/scripts/start-custom.mjs "$@"' \
+      'exec /opt/deploy_claude_code/claude "$@"' \
       > /usr/local/bin/claude && \
     chmod 755 /app/openclaw.mjs /usr/local/bin/claude /usr/local/bin/openclaw-deploy-entrypoint.sh
 

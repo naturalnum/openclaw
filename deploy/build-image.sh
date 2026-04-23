@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 WORKSPACE_ROOT="$(cd "${PROJECT_ROOT}/.." && pwd)"
-CLAUDE_CODE_ROOT="${WORKSPACE_ROOT}/claude-code"
+DEPLOY_CLAUDE_CODE_ROOT="${WORKSPACE_ROOT}/deploy_claude_code"
 BUILD_ENV_FILE="${SCRIPT_DIR}/build.env"
 
 if [[ -f "${BUILD_ENV_FILE}" ]]; then
@@ -49,13 +49,12 @@ for item in dist node_modules extensions skills docs qa deploy package.json open
   cp -R "${PROJECT_ROOT}/${item}" "${CTX_DIR}/${item}"
 done
 
-if [[ ! -d "${CLAUDE_CODE_ROOT}" ]]; then
-  echo "ERROR: claude-code not found at ${CLAUDE_CODE_ROOT}" >&2
+if [[ ! -d "${DEPLOY_CLAUDE_CODE_ROOT}" ]]; then
+  echo "ERROR: deploy_claude_code not found at ${DEPLOY_CLAUDE_CODE_ROOT}" >&2
   exit 1
 fi
 
-cp -R "${CLAUDE_CODE_ROOT}" "${CTX_DIR}/claude-code"
-find "${CTX_DIR}/claude-code" -type f -name 'custom-provider.local.json' -delete
+cp -R "${DEPLOY_CLAUDE_CODE_ROOT}" "${CTX_DIR}/deploy_claude_code"
 
 BUILD_ARGS=()
 for key in OPENCLAW_NODE_IMAGE OPENCLAW_EXTENSIONS OPENCLAW_INSTALL_DOCKER_CLI OPENCLAW_INSTALL_BROWSER OPENCLAW_DOCKER_APT_PACKAGES; do
