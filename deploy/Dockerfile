@@ -1,6 +1,15 @@
-ARG OPENCLAW_NODE_IMAGE="node:24-bookworm-slim"
+ARG OPENCLAW_NODE_IMAGE="swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/node:24-bookworm-slim-linuxarm64"
+ARG OPENCLAW_CLAUDE_CODE_VERSION="latest"
+ARG OPENCLAW_APT_MIRROR="http://mirrors.aliyun.com"
+ARG OPENCLAW_PYPI_INDEX_URL="https://mirrors.aliyun.com/pypi/simple"
+ARG OPENCLAW_NPM_REGISTRY="https://registry.npmmirror.com"
 
 FROM ${OPENCLAW_NODE_IMAGE}
+
+ARG OPENCLAW_CLAUDE_CODE_VERSION
+ARG OPENCLAW_APT_MIRROR
+ARG OPENCLAW_PYPI_INDEX_URL
+ARG OPENCLAW_NPM_REGISTRY
 
 LABEL org.opencontainers.image.source="https://github.com/openclaw/openclaw" \
   org.opencontainers.image.url="https://openclaw.ai" \
@@ -10,9 +19,13 @@ LABEL org.opencontainers.image.source="https://github.com/openclaw/openclaw" \
 
 WORKDIR /app
 
-RUN sed -i 's|http://deb.debian.org|http://mirrors.aliyun.com|g' \
+RUN sed -i \
+      -e "s|http://deb.debian.org/debian-security|${OPENCLAW_APT_MIRROR}/debian-security|g" \
+      -e "s|http://deb.debian.org/debian|${OPENCLAW_APT_MIRROR}/debian|g" \
       /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
-    sed -i 's|http://deb.debian.org|http://mirrors.aliyun.com|g' \
+    sed -i \
+      -e "s|http://deb.debian.org/debian-security|${OPENCLAW_APT_MIRROR}/debian-security|g" \
+      -e "s|http://deb.debian.org/debian|${OPENCLAW_APT_MIRROR}/debian|g" \
       /etc/apt/sources.list 2>/dev/null || true && \
     apt-get update -qq && \
     DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends && \
@@ -33,34 +46,33 @@ ENV PIP_DEFAULT_TIMEOUT=300
 ENV PIP_RETRIES=10
 
 COPY deploy/requirements-openclaw-runtime.txt /tmp/requirements-openclaw-runtime.txt
-RUN python3 -m pip install -i https://mirrors.aliyun.com/pypi/simple/ --upgrade pip setuptools wheel && \
-    python3 -m pip install -i https://mirrors.aliyun.com/pypi/simple/ \
+RUN python3 -m pip install -i "${OPENCLAW_PYPI_INDEX_URL}" --upgrade pip setuptools wheel && \
+    python3 -m pip install -i "${OPENCLAW_PYPI_INDEX_URL}" \
       --default-timeout="${PIP_DEFAULT_TIMEOUT}" --retries="${PIP_RETRIES}" \
       -r /tmp/requirements-openclaw-runtime.txt && \
-    python3 -m pip install -i https://mirrors.aliyun.com/pypi/simple/ \
+    python3 -m pip install -i "${OPENCLAW_PYPI_INDEX_URL}" \
       --default-timeout="${PIP_DEFAULT_TIMEOUT}" --retries="${PIP_RETRIES}" \
       --no-deps --only-binary=:all: vaex-core==4.19.0 && \
-    python3 -m pip install -i https://mirrors.aliyun.com/pypi/simple/ \
+    python3 -m pip install -i "${OPENCLAW_PYPI_INDEX_URL}" \
       --default-timeout="${PIP_DEFAULT_TIMEOUT}" --retries="${PIP_RETRIES}" \
       --upgrade "polars[rtcompat]" && \
     rm -f /tmp/requirements-openclaw-runtime.txt
 
-RUN npm config set registry https://registry.npmmirror.com && \
-    npm install -g clawhub docx pptxgenjs --prefer-offline && \
+RUN npm config set registry "${OPENCLAW_NPM_REGISTRY}" && \
+    npm install -g clawhub docx pptxgenjs @anthropic-ai/claude-code@${OPENCLAW_CLAUDE_CODE_VERSION} --prefer-offline && \
     npm config set registry https://registry.npmjs.org
 
 COPY dist ./dist
 COPY node_modules ./node_modules
 COPY package.json ./package.json
-RUN npm config set registry https://registry.npmmirror.com && \
-    npm install --no-save --include=optional @lydell/node-pty@1.2.0-beta.12 && \
+RUN npm config set registry "${OPENCLAW_NPM_REGISTRY}" && \
+    npm install --no-save --include=optional --legacy-peer-deps @lydell/node-pty@1.2.0-beta.12 && \
     npm config set registry https://registry.npmjs.org
 COPY openclaw.mjs ./openclaw.mjs
 COPY extensions ./extensions
 COPY skills ./skills
 COPY docs ./docs
 COPY qa ./qa
-COPY deploy_claude_code /opt/deploy_claude_code
 COPY deploy/entrypoint.sh /usr/local/bin/openclaw-deploy-entrypoint.sh
 
 RUN mkdir -p ./extensions/power-backend && \
@@ -68,15 +80,8 @@ RUN mkdir -p ./extensions/power-backend && \
       cp -R ./dist/extensions/power-backend/. ./extensions/power-backend/; \
     fi
 
-RUN mkdir -p /opt/deploy_claude_code/node/linux-arm64 && \
-    ln -sf "$(command -v node)" /opt/deploy_claude_code/node/linux-arm64/node
-
 RUN ln -sf /app/openclaw.mjs /usr/local/bin/openclaw && \
-    printf '%s\n' \
-      '#!/bin/sh' \
-      'exec /opt/deploy_claude_code/claude "$@"' \
-      > /usr/local/bin/claude && \
-    chmod 755 /app/openclaw.mjs /usr/local/bin/claude /usr/local/bin/openclaw-deploy-entrypoint.sh
+    chmod 755 /app/openclaw.mjs /usr/local/bin/openclaw-deploy-entrypoint.sh
 
 ENV NODE_ENV=production
 ENV HOME=/home/node
