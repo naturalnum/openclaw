@@ -4906,6 +4906,10 @@ power-code-terminal-pane {
   padding: 14px 18px;
 }
 
+.workbench-model-card__summary--code {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .workbench-model-card__switch {
   position: relative;
   display: inline-flex;
@@ -5043,6 +5047,14 @@ power-code-terminal-pane {
   gap: 14px;
   padding: 16px 18px 18px;
   border-top: 1px solid #efeff4;
+}
+
+.workbench-model-card__helper {
+  margin: 0;
+  color: #8f8f97;
+  font-size: 12px;
+  line-height: 1.45;
+  word-break: break-all;
 }
 
 .workbench-model-row {

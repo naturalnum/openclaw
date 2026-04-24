@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { listAgentIds, resolveAgentWorkspaceDir } from "../../src/agents/agent-scope.js";
@@ -48,6 +49,18 @@ type PowerInstalledSkill = InstalledRegistrySkill & {
   author: string | null;
   version: string | null;
 };
+
+type PowerClaudeSettings = {
+  path: string;
+  baseUrl: string;
+  authToken: string;
+  apiKey: string;
+  model: string;
+  smallFastModel: string;
+};
+
+const DEFAULT_CLAUDE_BASE_URL = "https://api.deepseek.com/anthropic";
+const DEFAULT_CLAUDE_MODEL = "deepseek-chat";
 
 function parsePluginConfig(api: OpenClawPluginApi): PowerBackendPluginConfig {
   const raw = api.pluginConfig && typeof api.pluginConfig === "object" ? api.pluginConfig : {};
@@ -102,6 +115,124 @@ function parsePluginConfig(api: OpenClawPluginApi): PowerBackendPluginConfig {
           : 250_000,
     },
   };
+}
+
+function resolveClaudeSettingsPath() {
+  const homeDir = process.env.HOME?.trim() || os.homedir();
+  return path.join(homeDir, ".claude", "settings.json");
+}
+
+function readClaudeEnvValue(env: Record<string, unknown>, key: string) {
+  const value = env[key];
+  return typeof value === "string" ? value : "";
+}
+
+function readProcessEnvValue(...keys: string[]) {
+  for (const key of keys) {
+    const value = process.env[key]?.trim();
+    if (value) {
+      return value;
+    }
+  }
+  return "";
+}
+
+async function readClaudeSettingsFile(): Promise<PowerClaudeSettings> {
+  const settingsPath = resolveClaudeSettingsPath();
+  let raw: Record<string, unknown> = {};
+  try {
+    const content = await fs.readFile(settingsPath, "utf8");
+    const parsed = JSON.parse(content) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      raw = parsed as Record<string, unknown>;
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
+      throw error;
+    }
+  }
+  const env =
+    raw.env && typeof raw.env === "object" && !Array.isArray(raw.env)
+      ? (raw.env as Record<string, unknown>)
+      : {};
+  const model =
+    readClaudeEnvValue(env, "ANTHROPIC_MODEL") ||
+    readProcessEnvValue("ANTHROPIC_MODEL", "OPENCLAW_CLAUDE_MODEL") ||
+    DEFAULT_CLAUDE_MODEL;
+  return {
+    path: settingsPath,
+    baseUrl:
+      readClaudeEnvValue(env, "ANTHROPIC_BASE_URL") ||
+      readProcessEnvValue("ANTHROPIC_BASE_URL", "OPENCLAW_CLAUDE_BASE_URL") ||
+      DEFAULT_CLAUDE_BASE_URL,
+    authToken:
+      readClaudeEnvValue(env, "ANTHROPIC_AUTH_TOKEN") ||
+      readProcessEnvValue(
+        "ANTHROPIC_AUTH_TOKEN",
+        "OPENCLAW_CLAUDE_AUTH_TOKEN",
+        "ANTHROPIC_API_KEY",
+        "OPENCLAW_CLAUDE_API_KEY",
+        "DEEPSEEK_API_KEY",
+      ),
+    apiKey:
+      readClaudeEnvValue(env, "ANTHROPIC_API_KEY") ||
+      readProcessEnvValue(
+        "ANTHROPIC_API_KEY",
+        "OPENCLAW_CLAUDE_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "OPENCLAW_CLAUDE_AUTH_TOKEN",
+        "DEEPSEEK_API_KEY",
+      ),
+    model,
+    smallFastModel:
+      readClaudeEnvValue(env, "ANTHROPIC_SMALL_FAST_MODEL") ||
+      readProcessEnvValue("ANTHROPIC_SMALL_FAST_MODEL", "OPENCLAW_CLAUDE_SMALL_FAST_MODEL") ||
+      model,
+  };
+}
+
+function applyClaudeEnvValue(env: Record<string, unknown>, key: string, value: unknown) {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (normalized) {
+    env[key] = normalized;
+    return;
+  }
+  delete env[key];
+}
+
+async function writeClaudeSettingsFile(
+  params: Record<string, unknown>,
+): Promise<PowerClaudeSettings> {
+  const settingsPath = resolveClaudeSettingsPath();
+  let raw: Record<string, unknown> = {};
+  try {
+    const content = await fs.readFile(settingsPath, "utf8");
+    const parsed = JSON.parse(content) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      raw = parsed as Record<string, unknown>;
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
+      throw error;
+    }
+  }
+  const env =
+    raw.env && typeof raw.env === "object" && !Array.isArray(raw.env)
+      ? { ...(raw.env as Record<string, unknown>) }
+      : {};
+  applyClaudeEnvValue(env, "ANTHROPIC_BASE_URL", params.baseUrl);
+  applyClaudeEnvValue(env, "ANTHROPIC_AUTH_TOKEN", params.authToken);
+  applyClaudeEnvValue(env, "ANTHROPIC_API_KEY", params.apiKey);
+  applyClaudeEnvValue(env, "ANTHROPIC_MODEL", params.model);
+  applyClaudeEnvValue(env, "ANTHROPIC_SMALL_FAST_MODEL", params.smallFastModel);
+
+  const next = {
+    ...raw,
+    env,
+  };
+  await fs.mkdir(path.dirname(settingsPath), { recursive: true });
+  await fs.writeFile(settingsPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  return await readClaudeSettingsFile();
 }
 
 function sendError(respond: GatewayRequestHandlerOptions["respond"], error: unknown) {
@@ -572,6 +703,33 @@ export default function register(api: OpenClawPluginApi) {
         }
         const result = fsService.deleteWorkspaceEntry(workspace, targetPath);
         respond(true, { agentId, workspace, ...result });
+      } catch (error) {
+        sendError(respond, error);
+      }
+    },
+  );
+
+  api.registerGatewayMethod(
+    "power.code.settings.get",
+    async ({ respond }: GatewayRequestHandlerOptions) => {
+      try {
+        respond(true, {
+          settings: await readClaudeSettingsFile(),
+        });
+      } catch (error) {
+        sendError(respond, error);
+      }
+    },
+  );
+
+  api.registerGatewayMethod(
+    "power.code.settings.set",
+    async ({ params, respond }: GatewayRequestHandlerOptions) => {
+      try {
+        const payload = params && typeof params === "object" ? params : {};
+        respond(true, {
+          settings: await writeClaudeSettingsFile(payload),
+        });
       } catch (error) {
         sendError(respond, error);
       }

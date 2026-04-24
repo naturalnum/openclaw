@@ -114,6 +114,7 @@ import {
   looksLikeOpaqueSessionId,
 } from "./integrations/openclaw/session-keys.ts";
 import {
+  type WorkbenchCodeModelSettings,
   renderWorkbench,
   type WorkbenchFileSortKey,
   type WorkbenchModelConfig,
@@ -601,6 +602,17 @@ function createEmptyModelConfig(): WorkbenchModelConfig {
     baseUrl: "",
     apiKey: "",
     model: "",
+  };
+}
+
+function createEmptyCodeModelSettings(): WorkbenchCodeModelSettings {
+  return {
+    path: "",
+    baseUrl: "",
+    authToken: "",
+    apiKey: "",
+    model: "",
+    smallFastModel: "",
   };
 }
 
@@ -1136,6 +1148,11 @@ export class OpenClawPowerApp extends LitElement {
   @state() unreadSessionKeys: string[] = [];
   @state() modelConfigs: WorkbenchModelConfig[] = [createEmptyModelConfig()];
   @state() expandedModelConfigId: string | null = null;
+  @state() codeModelConfig: WorkbenchCodeModelSettings = createEmptyCodeModelSettings();
+  @state() codeModelExpanded = true;
+  @state() codeModelLoading = false;
+  @state() codeModelSaving = false;
+  @state() codeModelError: string | null = null;
   @state() skillCenterBaseUrlDraft = "";
   @state() powerGuardDrafts: Record<GuardPluginId, PowerGuardDraft> = cloneConfigObject(
     DEFAULT_POWER_GUARD_DRAFTS,
@@ -2385,6 +2402,77 @@ export class OpenClawPowerApp extends LitElement {
     };
   }
 
+  private async loadCodeModelSettings() {
+    if (this.codeModelLoading) {
+      return;
+    }
+    this.codeModelLoading = true;
+    this.codeModelError = null;
+    try {
+      const result = await this.adapter.request<{ settings: WorkbenchCodeModelSettings }>(
+        "power.code.settings.get",
+        {},
+      );
+      this.codeModelConfig = {
+        ...createEmptyCodeModelSettings(),
+        ...result.settings,
+      };
+      this.lastError = null;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.codeModelError = message;
+      this.lastError = message;
+    } finally {
+      this.codeModelLoading = false;
+    }
+  }
+
+  private updateCodeModelConfig(
+    field: "baseUrl" | "authToken" | "apiKey" | "model" | "smallFastModel",
+    value: string,
+  ) {
+    this.codeModelConfig = {
+      ...this.codeModelConfig,
+      [field]: value,
+    };
+  }
+
+  private toggleCodeModelExpanded() {
+    this.codeModelExpanded = !this.codeModelExpanded;
+  }
+
+  private async persistCodeModelConfig() {
+    if (this.codeModelSaving) {
+      return;
+    }
+    this.codeModelSaving = true;
+    this.codeModelError = null;
+    const credential = this.codeModelConfig.authToken || this.codeModelConfig.apiKey;
+    try {
+      const result = await this.adapter.request<{ settings: WorkbenchCodeModelSettings }>(
+        "power.code.settings.set",
+        {
+          baseUrl: this.codeModelConfig.baseUrl,
+          authToken: credential,
+          apiKey: credential,
+          model: this.codeModelConfig.model,
+          smallFastModel: this.codeModelConfig.smallFastModel || this.codeModelConfig.model,
+        },
+      );
+      this.codeModelConfig = {
+        ...createEmptyCodeModelSettings(),
+        ...result.settings,
+      };
+      this.lastError = null;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.codeModelError = message;
+      this.lastError = message;
+    } finally {
+      this.codeModelSaving = false;
+    }
+  }
+
   private updateGuardEnabled(id: GuardPluginId, enabled: boolean) {
     this.powerGuardDrafts = {
       ...this.powerGuardDrafts,
@@ -3067,6 +3155,8 @@ export class OpenClawPowerApp extends LitElement {
     this.openModal("settings");
     if (this.workbenchSettingsTab === "connectors") {
       void this.loadConnectorsPage();
+    } else if (this.workbenchSettingsTab === "code") {
+      void this.loadCodeModelSettings();
     } else if (this.workbenchSettingsTab === "dreaming") {
       void this.loadDreamingPage();
     } else if (this.workbenchSettingsTab === "statistics") {
@@ -3090,6 +3180,9 @@ export class OpenClawPowerApp extends LitElement {
     this.workbenchSettingsTab = value;
     if (value === "connectors" && this.workbenchSettingsOpen) {
       void this.loadConnectorsPage();
+      this.stopLogsAutoRefresh();
+    } else if (value === "code" && this.workbenchSettingsOpen) {
+      void this.loadCodeModelSettings();
       this.stopLogsAutoRefresh();
     } else if (value === "dreaming" && this.workbenchSettingsOpen) {
       void this.loadDreamingPage();
@@ -5225,12 +5318,26 @@ export class OpenClawPowerApp extends LitElement {
         },
         code: {
           showCodeNav: this.settings.showCodeNav ?? true,
+          modelConfig: this.codeModelConfig,
+          loading: this.codeModelLoading,
+          saving: this.codeModelSaving,
+          error: this.codeModelError,
+          expanded: this.codeModelExpanded,
           onToggleShowCodeNav: (value) => {
             this.persistSettings({ showCodeNav: value });
             if (!value && this.workbenchSection === "code") {
               this.workbenchSection = "newTask";
               this.stopCodeTerminalPolling();
             }
+          },
+          onToggleModelExpanded: () => {
+            this.toggleCodeModelExpanded();
+          },
+          onModelConfigChange: (field, value) => {
+            this.updateCodeModelConfig(field, value);
+          },
+          onSaveModelConfig: () => {
+            void this.persistCodeModelConfig();
           },
         },
         onLocaleChange: (value) => {

@@ -58,6 +58,15 @@ export type WorkbenchModelConfig = {
   model: string;
 };
 
+export type WorkbenchCodeModelSettings = {
+  path: string;
+  baseUrl: string;
+  authToken: string;
+  apiKey: string;
+  model: string;
+  smallFastModel: string;
+};
+
 export type WorkbenchStatisticsRange = 1 | 7 | 30;
 export type WorkbenchFileSortKey = "name" | "updatedAt" | "size" | "kind";
 
@@ -266,7 +275,18 @@ export type WorkbenchProps = {
     };
     code: {
       showCodeNav: boolean;
+      modelConfig: WorkbenchCodeModelSettings;
+      loading: boolean;
+      saving: boolean;
+      error: string | null;
+      expanded: boolean;
       onToggleShowCodeNav: (value: boolean) => void;
+      onToggleModelExpanded: () => void;
+      onModelConfigChange: (
+        field: "baseUrl" | "authToken" | "apiKey" | "model" | "smallFastModel",
+        value: string,
+      ) => void;
+      onSaveModelConfig: () => void;
     };
     onLocaleChange: (value: string) => void;
     onThemeChange: (value: string) => void;
@@ -2301,13 +2321,13 @@ function renderSettingsDialog(props: WorkbenchProps) {
                   <article class="workbench-setting-card">
                     <div class="workbench-settings-section">
                       <div class="workbench-settings-section__header">
-                        <span>Language</span>
+                        <span>${tLocale(locale, "Language", "语言")}</span>
                       </div>
                       <label class="workbench-settings-field">
-                        <span>Display language</span>
+                        <span>${tLocale(locale, "Display language", "显示语言")}</span>
                         <div class="workbench-settings-select">
                           <select
-                            .value=${props.settings.locale ?? ""}
+                            .value=${props.settings.locale ?? (locale || "zh-CN")}
                             @change=${(event: Event) =>
                               props.settingsView.onLocaleChange(
                                 (event.target as HTMLSelectElement).value,
@@ -2327,27 +2347,27 @@ function renderSettingsDialog(props: WorkbenchProps) {
 
                     <div class="workbench-settings-section">
                       <div class="workbench-settings-section__header">
-                        <span>Theme</span>
+                        <span>${tLocale(locale, "Theme", "主题")}</span>
                       </div>
                       <div class="workbench-settings-cards">
                         ${renderThemeCard(
                           "claw",
-                          "Claw",
-                          "OpenClaw default palette",
+                          tLocale(locale, "Claw", "Claw"),
+                          tLocale(locale, "OpenClaw default palette", "OpenClaw 默认配色"),
                           props.settings.theme === "claw",
                           () => props.settingsView.onThemeChange("claw"),
                         )}
                         ${renderThemeCard(
                           "knot",
-                          "Knot",
-                          "Teal editorial palette",
+                          tLocale(locale, "Knot", "Knot"),
+                          tLocale(locale, "Teal editorial palette", "青绿色编辑配色"),
                           props.settings.theme === "knot",
                           () => props.settingsView.onThemeChange("knot"),
                         )}
                         ${renderThemeCard(
                           "dash",
-                          "Dash",
-                          "Blue product palette",
+                          tLocale(locale, "Dash", "Dash"),
+                          tLocale(locale, "Blue product palette", "蓝色产品配色"),
                           props.settings.theme === "dash",
                           () => props.settingsView.onThemeChange("dash"),
                         )}
@@ -2356,45 +2376,28 @@ function renderSettingsDialog(props: WorkbenchProps) {
 
                     <div class="workbench-settings-section">
                       <div class="workbench-settings-section__header">
-                        <span>Mode</span>
+                        <span>${tLocale(locale, "Mode", "模式")}</span>
                       </div>
                       <div class="workbench-settings-cards">
                         ${renderAppearanceCard(
                           "light",
-                          "Light",
+                          tLocale(locale, "Light", "浅色"),
                           props.settings.themeMode === "light",
                           () => props.settingsView.onThemeModeChange("light"),
                         )}
                         ${renderAppearanceCard(
                           "dark",
-                          "Dark",
+                          tLocale(locale, "Dark", "深色"),
                           props.settings.themeMode === "dark",
                           () => props.settingsView.onThemeModeChange("dark"),
                         )}
                         ${renderAppearanceCard(
                           "system",
-                          "Follow System",
+                          tLocale(locale, "Follow System", "跟随系统"),
                           props.settings.themeMode === "system",
                           () => props.settingsView.onThemeModeChange("system"),
                         )}
                       </div>
-                    </div>
-
-                    <div class="workbench-settings-section">
-                      <div class="workbench-settings-section__header">
-                        <span>${tLocale(locale, "Skill Center", "技能中心")}</span>
-                      </div>
-                      <label class="workbench-settings-field">
-                        <span>${tLocale(locale, "Registry Base URL", "Registry 地址")}</span>
-                        <input
-                          .value=${props.settingsView.powerConfig.skillCenterBaseUrl}
-                          placeholder="http://127.0.0.1:3000"
-                          @input=${(event: Event) =>
-                            props.settingsView.onSkillCenterBaseUrlChange(
-                              (event.target as HTMLInputElement).value,
-                            )}
-                        />
-                      </label>
                     </div>
 
                     <div class="workbench-settings-section">
@@ -2508,6 +2511,17 @@ function renderSettingsDialog(props: WorkbenchProps) {
                             </label>
                           </div>
                         </article>
+                      </div>
+                      <div class="workbench-settings-model-shell">
+                        <div class="workbench-settings-model-shell__head"></div>
+                        <div class="workbench-settings-model-shell__list">
+                          ${props.settingsView.code.error
+                            ? html`<p class="skills-empty">${props.settingsView.code.error}</p>`
+                            : nothing}
+                          <div class="workbench-settings-models">
+                            ${renderCodeModelCard(props, locale)}
+                          </div>
+                        </div>
                       </div>
                     </article>
                   `
@@ -3222,6 +3236,128 @@ function renderModelCard(
                 (value) => props.settingsView.onModelConfigChange(config.id, "apiKey", value),
                 "password",
               )}
+            </div>
+          `
+        : nothing}
+    </section>
+  `;
+}
+
+function renderCodeModelCard(props: WorkbenchProps, locale: string | undefined) {
+  const config = props.settingsView.code.modelConfig;
+  const expanded = props.settingsView.code.expanded;
+  const credential = config.authToken.trim() || config.apiKey.trim();
+  const configured = Boolean(config.baseUrl.trim() && config.model.trim() && credential);
+  const badge = config.model.trim() || tLocale(locale, "Pending", "待配置");
+  return html`
+    <section class="workbench-model-card">
+      <div class="workbench-model-card__summary workbench-model-card__summary--code">
+        <button
+          type="button"
+          class="workbench-model-card__title"
+          @click=${props.settingsView.code.onToggleModelExpanded}
+        >
+          <span class="workbench-model-card__name"
+            >${tLocale(locale, "Coding Model", "Coding 模型")}</span
+          >
+          <span class="workbench-model-card__badge">${badge}</span>
+          ${!configured
+            ? html`
+                <span class="workbench-model-card__status"
+                  >${tLocale(locale, "Pending", "待配置")}</span
+                >
+              `
+            : nothing}
+        </button>
+        <div class="workbench-model-card__actions">
+          <button
+            type="button"
+            class="workbench-model-card__chevron ${expanded ? "is-expanded" : ""}"
+            aria-label=${expanded
+              ? tLocale(locale, "Collapse coding model", "收起 Coding 模型")
+              : tLocale(locale, "Expand coding model", "展开 Coding 模型")}
+            @click=${props.settingsView.code.onToggleModelExpanded}
+          >
+            ${icons.chevronDown}
+          </button>
+        </div>
+      </div>
+      ${expanded
+        ? html`
+            <div class="workbench-model-card__fields">
+              <p class="workbench-model-card__helper">
+                ${tLocale(locale, "Config file", "配置文件")}: ${config.path}
+              </p>
+              ${renderModelInputRow(
+                locale,
+                icons.globe,
+                "API URL",
+                "API URL",
+                config.baseUrl,
+                "https://api.anthropic.com",
+                "https://api.anthropic.com",
+                (value) => props.settingsView.code.onModelConfigChange("baseUrl", value),
+              )}
+              ${renderModelInputRow(
+                locale,
+                icons.zap,
+                "Model ID",
+                "Model ID",
+                config.model,
+                "claude-sonnet-4-5",
+                "claude-sonnet-4-5",
+                (value) => props.settingsView.code.onModelConfigChange("model", value),
+              )}
+              ${renderModelInputRow(
+                locale,
+                icons.tag,
+                "Small Model (optional)",
+                "轻量模型（可选）",
+                config.smallFastModel,
+                "Defaults to Model ID",
+                "默认使用 Model ID",
+                (value) => props.settingsView.code.onModelConfigChange("smallFastModel", value),
+              )}
+              <p class="workbench-model-card__helper">
+                ${tLocale(
+                  locale,
+                  "Small model maps to ANTHROPIC_SMALL_FAST_MODEL for lightweight Claude Code tasks.",
+                  "轻量模型对应 ANTHROPIC_SMALL_FAST_MODEL，用于 Claude Code 内部较轻任务。",
+                )}
+              </p>
+              ${renderModelInputRow(
+                locale,
+                icons.keyRound,
+                "API Key / Token",
+                "API Key / 访问令牌",
+                credential,
+                "sk-...",
+                "sk-...",
+                (value) => {
+                  props.settingsView.code.onModelConfigChange("authToken", value);
+                  props.settingsView.code.onModelConfigChange("apiKey", value);
+                },
+                "password",
+              )}
+              <p class="workbench-model-card__helper">
+                ${tLocale(
+                  locale,
+                  "Saved to both ANTHROPIC_AUTH_TOKEN and ANTHROPIC_API_KEY for provider compatibility.",
+                  "会同时写入 ANTHROPIC_AUTH_TOKEN 和 ANTHROPIC_API_KEY，兼容不同服务。",
+                )}
+              </p>
+              <div class="workbench-settings-actions workbench-settings-actions--code">
+                <button
+                  type="button"
+                  class="btn btn--primary"
+                  ?disabled=${props.settingsView.code.loading || props.settingsView.code.saving}
+                  @click=${props.settingsView.code.onSaveModelConfig}
+                >
+                  ${props.settingsView.code.saving
+                    ? tLocale(locale, "Saving...", "保存中...")
+                    : tLocale(locale, "Save Coding Model", "保存 Coding 模型")}
+                </button>
+              </div>
             </div>
           `
         : nothing}

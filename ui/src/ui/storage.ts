@@ -21,6 +21,7 @@ type PersistedUiSettings = Omit<UiSettings, "token" | "sessionKey" | "lastActive
 };
 
 import { isSupportedLocale } from "../i18n/index.ts";
+import { resolveNavigatorLocale } from "../i18n/lib/registry.ts";
 import { getSafeLocalStorage, getSafeSessionStorage } from "../local-storage.ts";
 import { inferBasePathFromPathname, normalizeBasePath } from "./navigation.ts";
 import { normalizeOptionalString } from "./string-coerce.ts";
@@ -180,6 +181,9 @@ function persistSessionToken(gatewayUrl: string, token: string) {
 export function loadSettings(): UiSettings {
   const { pageUrl: pageDerivedUrl, effectiveUrl: defaultUrl } = deriveDefaultGatewayUrl();
   const storage = getSafeLocalStorage();
+  const defaultLocale = resolveNavigatorLocale(
+    typeof globalThis.navigator?.language === "string" ? globalThis.navigator.language : "",
+  );
 
   const defaults: UiSettings = {
     gatewayUrl: defaultUrl,
@@ -197,6 +201,7 @@ export function loadSettings(): UiSettings {
     navGroupsCollapsed: {},
     showCodeNav: true,
     borderRadius: 50,
+    locale: defaultLocale,
   };
 
   try {
@@ -261,7 +266,7 @@ export function loadSettings(): UiSettings {
         parsed.borderRadius <= 100
           ? snapBorderRadius(parsed.borderRadius)
           : defaults.borderRadius,
-      locale: isSupportedLocale(parsed.locale) ? parsed.locale : undefined,
+      locale: isSupportedLocale(parsed.locale) ? parsed.locale : defaults.locale,
     };
     if ("token" in parsed) {
       persistSettings(settings);
