@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { WebSocketServer } from "ws";
+import { createGatewayCloseHandler } from "./server-close.js";
 
-const mocks = {
+const mocks = vi.hoisted(() => ({
   logWarn: vi.fn(),
   disposeAgentHarnesses: vi.fn(async () => undefined),
-};
+}));
 const WEBSOCKET_CLOSE_GRACE_MS = 1_000;
 const WEBSOCKET_CLOSE_FORCE_CONTINUE_MS = 250;
 
@@ -25,7 +27,12 @@ vi.mock("../logging/subsystem.js", () => ({
   })),
 }));
 
-const { createGatewayCloseHandler } = await import("./server-close.js");
+type GatewayWsClient = { socket: { close: (code: number, reason: string) => void } };
+
+const defaultTestWss = {
+  clients: new Set(),
+  close: (cb: () => void) => cb(),
+} as WebSocketServer;
 
 function createGatewayCloseTestDeps(
   overrides: Partial<Parameters<typeof createGatewayCloseHandler>[0]> = {},
@@ -52,12 +59,13 @@ function createGatewayCloseTestDeps(
     transcriptUnsub: null,
     lifecycleUnsub: null,
     chatRunState: { clear: vi.fn() },
-    clients: new Set(),
+    clients: new Set<GatewayWsClient>(),
     configReloader: { stop: vi.fn(async () => undefined) },
     httpServer: {
       close: (cb: (err?: Error | null) => void) => cb(null),
       closeIdleConnections: vi.fn(),
     } as never,
+    wss: defaultTestWss,
     ...overrides,
   };
 }
@@ -94,7 +102,7 @@ describe("createGatewayCloseHandler", () => {
       transcriptUnsub: null,
       lifecycleUnsub,
       chatRunState: { clear: vi.fn() },
-      clients: new Set(),
+      clients: new Set<GatewayWsClient>(),
       configReloader: { stop: vi.fn(async () => undefined) },
       wss: { close: (cb: () => void) => cb() } as never,
       httpServer: {

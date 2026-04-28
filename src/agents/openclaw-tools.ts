@@ -14,6 +14,7 @@ import type { SandboxFsBridge } from "./sandbox/fs-bridge.js";
 import type { SpawnedToolContext } from "./spawned-context.js";
 import type { ToolFsPolicy } from "./tool-fs-policy.js";
 import { createAgentsListTool } from "./tools/agents-list-tool.js";
+import { createAskDbTool } from "./tools/askdb-tool.js";
 import { createCanvasTool } from "./tools/canvas-tool.js";
 import type { AnyAgentTool } from "./tools/common.js";
 import { createCronTool } from "./tools/cron-tool.js";
@@ -228,6 +229,7 @@ export function createOpenClawTools(
     workspaceDir,
   });
   const tools: AnyAgentTool[] = [
+    createAskDbTool(),
     createCanvasTool({ config: options?.config }),
     nodesTool,
     createCronTool({

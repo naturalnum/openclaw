@@ -428,6 +428,11 @@ export const TOOL_DISPLAY_CONFIG: ToolDisplayConfig = {
       title: "Session Send",
       detailKeys: ["label", "sessionKey", "agentId", "timeoutSeconds"],
     },
+    askdb_query: {
+      emoji: "📊",
+      title: "AskDB Query",
+      detailKeys: ["command", "skillName", "commandName"],
+    },
     sessions_history: {
       emoji: "🧾",
       title: "Session History",

@@ -404,7 +404,7 @@ importers:
         version: link:../../packages/plugin-sdk
       openclaw:
         specifier: workspace:*
-        version: 2026.4.15(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(audio-decode@2.2.3)(hono@4.12.12)(node-llama-cpp@3.18.1(typescript@6.0.2))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@6.0.2)
+        version: link:../..
 
   extensions/brave:
     devDependencies:
@@ -561,7 +561,7 @@ importers:
         version: link:../../packages/plugin-sdk
       openclaw:
         specifier: workspace:*
-        version: 2026.4.15(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(audio-decode@2.2.3)(hono@4.12.12)(node-llama-cpp@3.18.1(typescript@6.0.2))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@6.0.2)
+        version: link:../..
     optionalDependencies:
       '@discordjs/opus':
         specifier: ^0.10.0
@@ -605,7 +605,7 @@ importers:
         version: link:../../packages/plugin-sdk
       openclaw:
         specifier: workspace:*
-        version: 2026.4.15(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(audio-decode@2.2.3)(hono@4.12.12)(node-llama-cpp@3.18.1(typescript@6.0.2))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@6.0.2)
+        version: link:../..
 
   extensions/firecrawl:
     devDependencies:
@@ -646,7 +646,7 @@ importers:
         version: link:../../packages/plugin-sdk
       openclaw:
         specifier: workspace:*
-        version: 2026.4.15(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(audio-decode@2.2.3)(hono@4.12.12)(node-llama-cpp@3.18.1(typescript@6.0.2))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@6.0.2)
+        version: link:../..
 
   extensions/groq:
     devDependencies:
@@ -697,7 +697,7 @@ importers:
         version: link:../../packages/plugin-sdk
       openclaw:
         specifier: workspace:*
-        version: 2026.4.15(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(audio-decode@2.2.3)(hono@4.12.12)(node-llama-cpp@3.18.1(typescript@6.0.2))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@6.0.2)
+        version: link:../..
 
   extensions/litellm:
     devDependencies:
@@ -757,7 +757,7 @@ importers:
         version: link:../../packages/plugin-sdk
       openclaw:
         specifier: workspace:*
-        version: 2026.4.15(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(audio-decode@2.2.3)(hono@4.12.12)(node-llama-cpp@3.18.1(typescript@6.0.2))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@6.0.2)
+        version: link:../..
 
   extensions/mattermost:
     dependencies:
@@ -773,7 +773,7 @@ importers:
         version: link:../../packages/plugin-sdk
       openclaw:
         specifier: workspace:*
-        version: 2026.4.15(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(audio-decode@2.2.3)(hono@4.12.12)(node-llama-cpp@3.18.1(typescript@6.0.2))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@6.0.2)
+        version: link:../..
 
   extensions/media-understanding-core:
     devDependencies:
@@ -788,7 +788,7 @@ importers:
         version: link:../../packages/plugin-sdk
       openclaw:
         specifier: workspace:*
-        version: 2026.4.15(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(audio-decode@2.2.3)(hono@4.12.12)(node-llama-cpp@3.18.1(typescript@6.0.2))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@6.0.2)
+        version: link:../..
 
   extensions/memory-lancedb:
     dependencies:
@@ -817,7 +817,7 @@ importers:
         version: link:../../packages/plugin-sdk
       openclaw:
         specifier: workspace:*
-        version: 2026.4.15(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(audio-decode@2.2.3)(hono@4.12.12)(node-llama-cpp@3.18.1(typescript@6.0.2))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@6.0.2)
+        version: link:../..
 
   extensions/microsoft:
     dependencies:
@@ -885,7 +885,7 @@ importers:
         version: 9.0.10
       openclaw:
         specifier: workspace:*
-        version: 2026.4.15(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(audio-decode@2.2.3)(hono@4.12.12)(node-llama-cpp@3.18.1(typescript@6.0.2))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@6.0.2)
+        version: link:../..
 
   extensions/nextcloud-talk:
     devDependencies:
@@ -894,7 +894,7 @@ importers:
         version: link:../../packages/plugin-sdk
       openclaw:
         specifier: workspace:*
-        version: 2026.4.15(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(audio-decode@2.2.3)(hono@4.12.12)(node-llama-cpp@3.18.1(typescript@6.0.2))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@6.0.2)
+        version: link:../..
 
   extensions/nostr:
     dependencies:
@@ -907,7 +907,7 @@ importers:
         version: link:../../packages/plugin-sdk
       openclaw:
         specifier: workspace:*
-        version: 2026.4.15(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(audio-decode@2.2.3)(hono@4.12.12)(node-llama-cpp@3.18.1(typescript@6.0.2))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@6.0.2)
+        version: link:../..
 
   extensions/nvidia:
     devDependencies:
@@ -974,7 +974,7 @@ importers:
         version: link:../../packages/plugin-sdk
       openclaw:
         specifier: workspace:*
-        version: 2026.4.15(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(audio-decode@2.2.3)(hono@4.12.12)(node-llama-cpp@3.18.1(typescript@6.0.2))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@6.0.2)
+        version: link:../..
 
   extensions/qa-lab:
     devDependencies:
@@ -983,7 +983,7 @@ importers:
         version: link:../../packages/plugin-sdk
       openclaw:
         specifier: workspace:*
-        version: 2026.4.15(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(audio-decode@2.2.3)(hono@4.12.12)(node-llama-cpp@3.18.1(typescript@6.0.2))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@6.0.2)
+        version: link:../..
 
   extensions/qianfan:
     devDependencies:
@@ -1011,7 +1011,7 @@ importers:
         version: 8.18.1
       openclaw:
         specifier: workspace:*
-        version: 2026.4.15(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(audio-decode@2.2.3)(hono@4.12.12)(node-llama-cpp@3.18.1(typescript@6.0.2))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@6.0.2)
+        version: link:../..
 
   extensions/qwen:
     devDependencies:
@@ -1125,7 +1125,7 @@ importers:
         version: link:../../packages/plugin-sdk
       openclaw:
         specifier: workspace:*
-        version: 2026.4.15(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(audio-decode@2.2.3)(hono@4.12.12)(node-llama-cpp@3.18.1(typescript@6.0.2))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@6.0.2)
+        version: link:../..
 
   extensions/together:
     devDependencies:
@@ -1190,7 +1190,7 @@ importers:
         version: link:../../packages/plugin-sdk
       openclaw:
         specifier: workspace:*
-        version: 2026.4.15(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(audio-decode@2.2.3)(hono@4.12.12)(node-llama-cpp@3.18.1(typescript@6.0.2))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@6.0.2)
+        version: link:../..
 
   extensions/volcengine:
     devDependencies:
@@ -1228,7 +1228,7 @@ importers:
         version: link:../../packages/plugin-sdk
       openclaw:
         specifier: workspace:*
-        version: 2026.4.15(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(audio-decode@2.2.3)(hono@4.12.12)(node-llama-cpp@3.18.1(typescript@6.0.2))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@6.0.2)
+        version: link:../..
 
   extensions/xai:
     devDependencies:
@@ -1259,7 +1259,7 @@ importers:
         version: link:../../packages/plugin-sdk
       openclaw:
         specifier: workspace:*
-        version: 2026.4.15(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(audio-decode@2.2.3)(hono@4.12.12)(node-llama-cpp@3.18.1(typescript@6.0.2))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@6.0.2)
+        version: link:../..
 
   extensions/zalouser:
     dependencies:
@@ -1275,7 +1275,7 @@ importers:
         version: link:../../packages/plugin-sdk
       openclaw:
         specifier: workspace:*
-        version: 2026.4.15(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(audio-decode@2.2.3)(hono@4.12.12)(node-llama-cpp@3.18.1(typescript@6.0.2))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@6.0.2)
+        version: link:../..
 
   packages/memory-host-sdk: {}
 
@@ -1294,6 +1294,9 @@ importers:
 
   power-ui:
     dependencies:
+      '@create-markdown/preview':
+        specifier: ^2.0.3
+        version: 2.0.3(shiki@3.23.0)
       lit:
         specifier: ^3.3.2
         version: 3.3.2
@@ -4499,8 +4502,8 @@ packages:
       link-preview-js:
         optional: true
 
-  '@whiskeysockets/libsignal-node@https://codeload.github.com/whiskeysockets/libsignal-node/tar.gz/1c30d7d7e76a3b0aa120b04dc6a26f5a12dccf67':
-    resolution: {tarball: https://codeload.github.com/whiskeysockets/libsignal-node/tar.gz/1c30d7d7e76a3b0aa120b04dc6a26f5a12dccf67}
+  '@whiskeysockets/libsignal-node@git+https://git@github.com:whiskeysockets/libsignal-node.git#1c30d7d7e76a3b0aa120b04dc6a26f5a12dccf67':
+    resolution: {commit: 1c30d7d7e76a3b0aa120b04dc6a26f5a12dccf67, repo: git@github.com:whiskeysockets/libsignal-node.git, type: git}
     version: 2.0.1
 
   '@zone-eu/mailsplit@5.4.8':
@@ -6563,17 +6566,6 @@ packages:
       ws:
         optional: true
       zod:
-        optional: true
-
-  openclaw@2026.4.15:
-    resolution: {integrity: sha512-vHH11WXuuHkTlA2Nfu+r7WzWo4uccraCgYjhMpzE+PjXUT4p+B3NMq0F24NbpBy+eNw5YjPPZyxxsY31qyFACw==}
-    engines: {node: '>=22.14.0'}
-    hasBin: true
-    peerDependencies:
-      '@napi-rs/canvas': ^0.1.89
-      node-llama-cpp: 3.18.1
-    peerDependenciesMeta:
-      node-llama-cpp:
         optional: true
 
   openshell@0.1.0:
@@ -10135,6 +10127,7 @@ snapshots:
       '@napi-rs/canvas-linux-x64-musl': 0.1.97
       '@napi-rs/canvas-win32-arm64-msvc': 0.1.97
       '@napi-rs/canvas-win32-x64-msvc': 0.1.97
+    optional: true
 
   '@napi-rs/wasm-runtime@1.1.3(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)':
     dependencies:
@@ -11808,7 +11801,7 @@ snapshots:
       '@cacheable/node-cache': 1.7.6
       '@hapi/boom': 9.1.4
       async-mutex: 0.5.0
-      libsignal: '@whiskeysockets/libsignal-node@https://codeload.github.com/whiskeysockets/libsignal-node/tar.gz/1c30d7d7e76a3b0aa120b04dc6a26f5a12dccf67'
+      libsignal: '@whiskeysockets/libsignal-node@git+https://git@github.com:whiskeysockets/libsignal-node.git#1c30d7d7e76a3b0aa120b04dc6a26f5a12dccf67'
       lru-cache: 11.3.3
       music-metadata: 11.12.3
       p-queue: 9.1.2
@@ -11824,7 +11817,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@whiskeysockets/libsignal-node@https://codeload.github.com/whiskeysockets/libsignal-node/tar.gz/1c30d7d7e76a3b0aa120b04dc6a26f5a12dccf67':
+  '@whiskeysockets/libsignal-node@git+https://git@github.com:whiskeysockets/libsignal-node.git#1c30d7d7e76a3b0aa120b04dc6a26f5a12dccf67':
     dependencies:
       curve25519-js: 0.0.4
       protobufjs: 6.8.8
@@ -14075,107 +14068,6 @@ snapshots:
     optionalDependencies:
       ws: 8.20.0
       zod: 4.3.6
-
-  openclaw@2026.4.15(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@napi-rs/canvas@0.1.97)(@types/express@5.0.6)(apache-arrow@18.1.0)(audio-decode@2.2.3)(hono@4.12.12)(node-llama-cpp@3.18.1(typescript@6.0.2))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@6.0.2):
-    dependencies:
-      '@agentclientprotocol/sdk': 0.18.2(zod@4.3.6)
-      '@anthropic-ai/vertex-sdk': 0.15.0(zod@4.3.6)
-      '@aws-sdk/client-bedrock': 3.1028.0
-      '@aws-sdk/client-bedrock-runtime': 3.1028.0
-      '@aws-sdk/credential-provider-node': 3.972.30
-      '@aws/bedrock-token-generator': 1.1.0
-      '@buape/carbon': 0.15.0(@discordjs/opus@0.10.0)(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(hono@4.12.12)(opusscript@0.1.1)
-      '@clack/prompts': 1.2.0
-      '@google/genai': 1.49.0(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))
-      '@grammyjs/runner': 2.0.3(grammy@1.42.0)
-      '@grammyjs/transformer-throttler': 1.2.1(grammy@1.42.0)
-      '@homebridge/ciao': 1.3.6
-      '@lancedb/lancedb': 0.27.2(apache-arrow@18.1.0)
-      '@larksuiteoapi/node-sdk': 1.60.0
-      '@lydell/node-pty': 1.2.0-beta.12
-      '@mariozechner/pi-agent-core': 0.66.1(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(ws@8.20.0)(zod@4.3.6)
-      '@mariozechner/pi-ai': 0.66.1(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(ws@8.20.0)(zod@4.3.6)
-      '@mariozechner/pi-coding-agent': 0.66.1(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(ws@8.20.0)(zod@4.3.6)
-      '@mariozechner/pi-tui': 0.66.1
-      '@matrix-org/matrix-sdk-crypto-wasm': 18.0.0
-      '@modelcontextprotocol/sdk': 1.29.0(zod@4.3.6)
-      '@mozilla/readability': 0.6.0
-      '@napi-rs/canvas': 0.1.97
-      '@pierre/diffs': 1.1.13(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
-      '@sinclair/typebox': 0.34.49
-      '@slack/bolt': 4.7.0(@types/express@5.0.6)
-      '@slack/web-api': 7.15.0
-      '@whiskeysockets/baileys': 7.0.0-rc.9(audio-decode@2.2.3)(jimp@1.6.1)(sharp@0.34.5)
-      ajv: 8.18.0
-      chalk: 5.6.2
-      chokidar: 5.0.0
-      cli-highlight: 2.1.11
-      commander: 14.0.3
-      croner: 10.0.1
-      discord-api-types: 0.38.45
-      dotenv: 17.4.1
-      express: 5.2.1
-      file-type: 22.0.1
-      gaxios: 7.1.4
-      google-auth-library: 10.6.2
-      grammy: 1.42.0
-      https-proxy-agent: 9.0.0
-      ipaddr.js: 2.3.0
-      jimp: 1.6.1
-      jiti: 2.6.1
-      json5: 2.2.3
-      jszip: 3.10.1
-      linkedom: 0.18.12
-      long: 5.3.2
-      markdown-it: 14.1.1
-      matrix-js-sdk: 41.3.0
-      mpg123-decoder: 1.0.3
-      node-edge-tts: 1.2.10
-      nostr-tools: 2.23.3(typescript@6.0.2)
-      openai: 6.34.0(ws@8.20.0)(zod@4.3.6)
-      opusscript: 0.1.1
-      osc-progress: 0.3.0
-      pdfjs-dist: 5.6.205
-      playwright-core: 1.59.1
-      proxy-agent: 8.0.1
-      qrcode-terminal: 0.12.0
-      sharp: 0.34.5
-      silk-wasm: 3.7.1
-      sqlite-vec: 0.1.9
-      tar: 7.5.13
-      tslog: 4.10.2
-      undici: 8.0.2
-      uuid: 13.0.0
-      ws: 8.20.0
-      yaml: 2.8.3
-      zod: 4.3.6
-    optionalDependencies:
-      '@discordjs/opus': 0.10.0
-      '@matrix-org/matrix-sdk-crypto-nodejs': 0.4.0
-      fake-indexeddb: 6.2.5
-      music-metadata: 11.12.3
-      node-llama-cpp: 3.18.1(typescript@6.0.2)
-    transitivePeerDependencies:
-      - '@cfworker/json-schema'
-      - '@emnapi/core'
-      - '@emnapi/runtime'
-      - '@types/express'
-      - apache-arrow
-      - audio-decode
-      - aws-crt
-      - bufferutil
-      - canvas
-      - debug
-      - encoding
-      - ffmpeg-static
-      - hono
-      - link-preview-js
-      - node-opus
-      - react
-      - react-dom
-      - supports-color
-      - typescript
-      - utf-8-validate
 
   openshell@0.1.0:
     dependencies:

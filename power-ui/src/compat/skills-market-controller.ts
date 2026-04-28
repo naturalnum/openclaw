@@ -89,6 +89,17 @@ function getErrorMessage(err: unknown): string {
   return String(err);
 }
 
+function isLocalSkillEnabled(item: SkillsRegistryCatalogItem): boolean {
+  const tags = new Set(item.tags.map((tag) => tag.trim().toLowerCase()));
+  if (tags.has("disabled")) {
+    return false;
+  }
+  if (tags.has("enabled")) {
+    return true;
+  }
+  return true;
+}
+
 function buildRegistryListParams(state: SkillsMarketState) {
   return {
     q: state.skillsFilter.trim() || undefined,
@@ -97,6 +108,131 @@ function buildRegistryListParams(state: SkillsMarketState) {
     page: state.skillsPagination.page,
     limit: state.skillsPagination.limit,
     installFilter: state.skillsInstallFilter,
+  };
+}
+
+function includesFilterText(item: SkillsRegistryCatalogItem, filter: string): boolean {
+  const needle = filter.trim().toLowerCase();
+  if (!needle) {
+    return true;
+  }
+  const haystack = [item.displayName, item.summary, item.slug, item.author ?? "", ...item.tags]
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(needle);
+}
+
+function buildLocalCatalogFromStatus(state: SkillsMarketState): SkillsRegistryListResult {
+  const report = state.skillsReport;
+  const allItems: SkillsRegistryCatalogItem[] = (report?.skills ?? []).map((skill) => ({
+    slug: skill.skillKey,
+    displayName: skill.name,
+    summary: skill.description,
+    category: "local",
+    tags: [
+      "local",
+      skill.eligible ? "ready" : "needs-setup",
+      skill.disabled ? "disabled" : "enabled",
+    ],
+    version: null,
+    downloads: 0,
+    installs: 0,
+    stars: 0,
+    updatedAt: null,
+    author: skill.source ?? "local",
+    installState: {
+      installed: true,
+      installedVersion: null,
+      latestVersion: null,
+      managed: true,
+      canUninstall: false,
+      source: "directory",
+    },
+  }));
+
+  let filtered = allItems.filter((item) => includesFilterText(item, state.skillsFilter));
+  if (state.skillsInstallFilter === "not_installed") {
+    filtered = [];
+  }
+  if (state.skillsCategory) {
+    filtered = filtered.filter((item) => item.category === state.skillsCategory);
+  }
+  if (state.skillsSortBy === "updated") {
+    filtered = filtered.toSorted((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+  } else if (state.skillsSortBy === "downloads") {
+    filtered = filtered.toSorted((a, b) => b.downloads - a.downloads);
+  } else {
+    filtered = filtered.toSorted((a, b) => a.displayName.localeCompare(b.displayName));
+  }
+
+  const page = Math.max(1, state.skillsPagination.page);
+  const limit = Math.max(1, state.skillsPagination.limit);
+  const total = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+  const safePage = Math.min(page, totalPages);
+  const start = (safePage - 1) * limit;
+  const items = filtered.slice(start, start + limit);
+
+  return {
+    baseUrl: "",
+    categories: [
+      {
+        id: "local",
+        name: "本地技能",
+        icon: "📦",
+      },
+    ],
+    items,
+    pagination: {
+      page: safePage,
+      limit,
+      total,
+      totalPages,
+    },
+  };
+}
+
+function mergeCatalogResults(
+  state: SkillsMarketState,
+  remote: SkillsRegistryListResult | null,
+  local: SkillsRegistryListResult,
+): SkillsRegistryListResult {
+  const page = Math.max(1, state.skillsPagination.page);
+  const limit = Math.max(1, state.skillsPagination.limit);
+
+  const mergedBySlug = new Map<string, SkillsRegistryCatalogItem>();
+  for (const item of remote?.items ?? []) {
+    mergedBySlug.set(item.slug, item);
+  }
+  for (const item of local.items) {
+    if (!mergedBySlug.has(item.slug)) {
+      mergedBySlug.set(item.slug, item);
+    }
+  }
+
+  const mergedItems = [...mergedBySlug.values()];
+  const total = mergedItems.length;
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+  const safePage = Math.min(page, totalPages);
+  const start = (safePage - 1) * limit;
+
+  const mergedCategories = [
+    ...(remote?.categories ?? []),
+    ...local.categories.filter(
+      (category) => !(remote?.categories ?? []).some((entry) => entry.id === category.id),
+    ),
+  ];
+
+  return {
+    baseUrl: remote?.baseUrl ?? "",
+    categories: mergedCategories,
+    items: mergedItems.slice(start, start + limit),
+    pagination: {
+      page: safePage,
+      limit,
+      total,
+      totalPages,
+    },
   };
 }
 
@@ -114,10 +250,30 @@ async function loadSkillsCatalog(state: SkillsMarketState): Promise<void> {
   if (!state.client || !state.connected) {
     return;
   }
-  const res = await state.client.request<SkillsRegistryListResult>(
-    "power.skills.catalog.list",
-    buildRegistryListParams(state),
-  );
+  const params = buildRegistryListParams(state);
+  let remoteRes: SkillsRegistryListResult | null = null;
+  try {
+    remoteRes = await state.client.request<SkillsRegistryListResult>(
+      "skills.registry.list",
+      params,
+    );
+  } catch (err) {
+    const message = getErrorMessage(err);
+    if (!/unknown method|not configured|unavailable/i.test(message)) {
+      throw err;
+    }
+    // Backward compatibility for older stacks that exposed a power-prefixed endpoint.
+    try {
+      remoteRes = await state.client.request<SkillsRegistryListResult>(
+        "power.skills.catalog.list",
+        params,
+      );
+    } catch {
+      remoteRes = null;
+    }
+  }
+  const localRes = buildLocalCatalogFromStatus(state);
+  const res = mergeCatalogResults(state, remoteRes, localRes);
   state.skillsCatalog = res.items;
   state.skillsCategories = res.categories;
   state.skillsRegistryBaseUrl = res.baseUrl || state.skillsRegistryBaseUrl;
@@ -222,18 +378,27 @@ export async function toggleRegistrySkillInstall(
   try {
     let message = "";
     if (item.installState.installed) {
-      if (!item.installState.canUninstall) {
+      if (item.installState.source === "directory") {
+        const currentlyEnabled = isLocalSkillEnabled(item);
+        const nextEnabled = !currentlyEnabled;
+        await state.client.request("skills.update", {
+          skillKey: item.slug,
+          enabled: nextEnabled,
+        });
+        message = nextEnabled ? "已启用" : "已禁用";
+      } else if (!item.installState.canUninstall) {
         throw new Error(
           "This skill was not installed from the registry and cannot be removed here.",
         );
+      } else {
+        const result = await state.client.request<SkillsRegistryUninstallResult>(
+          "skills.registry.uninstall",
+          {
+            slug: item.slug,
+          },
+        );
+        message = result.message || "Uninstalled";
       }
-      const result = await state.client.request<SkillsRegistryUninstallResult>(
-        "skills.registry.uninstall",
-        {
-          slug: item.slug,
-        },
-      );
-      message = result.message || "Uninstalled";
     } else {
       const result = await state.client.request<SkillsRegistryInstallResult>(
         "skills.registry.install",

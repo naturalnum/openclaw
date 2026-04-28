@@ -624,6 +624,114 @@ function formatModelRef(provider: string, model: string): string {
     : normalizedModel;
 }
 
+const PROVIDER_DEFAULT_BASE_URLS: Record<string, string> = {
+  anthropic: "https://api.anthropic.com",
+  deepseek: "https://api.deepseek.com/v1",
+  minimax: "https://api.minimax.chat/v1",
+  openai: "https://api.openai.com/v1",
+  openrouter: "https://openrouter.ai/api/v1",
+  qwen: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  xai: "https://api.x.ai/v1",
+};
+
+const PROVIDER_DEFAULT_MODEL_IDS: Record<string, string[]> = {
+  anthropic: ["claude-sonnet-4-5", "claude-3-7-sonnet-latest"],
+  deepseek: ["deepseek-chat", "deepseek-reasoner"],
+  google: ["gemini-2.5-pro", "gemini-2.5-flash"],
+  minimax: ["MiniMax-Text-01"],
+  openai: ["gpt-4o", "gpt-4.1"],
+  openrouter: ["openai/gpt-4o", "anthropic/claude-3.7-sonnet"],
+  qwen: ["qwen-plus", "qwen-max"],
+  xai: ["grok-3", "grok-3-mini"],
+};
+
+const REDACTED_SENTINEL = "__OPENCLAW_REDACTED__";
+
+function normalizeApiBaseUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return "";
+  }
+  return trimmed.endsWith("/") ? trimmed.slice(0, -1) : trimmed;
+}
+
+function inferProviderFromBaseUrl(baseUrl: string): string {
+  const normalized = normalizeApiBaseUrl(baseUrl).toLowerCase();
+  if (!normalized) {
+    return "";
+  }
+  if (normalized.includes("anthropic")) {
+    return "anthropic";
+  }
+  if (normalized.includes("deepseek")) {
+    return "deepseek";
+  }
+  if (normalized.includes("minimax")) {
+    return "minimax";
+  }
+  if (normalized.includes("openrouter")) {
+    return "openrouter";
+  }
+  if (normalized.includes("openai")) {
+    return "openai";
+  }
+  if (normalized.includes("x.ai")) {
+    return "xai";
+  }
+  if (normalized.includes("dashscope") || normalized.includes("aliyuncs")) {
+    return "qwen";
+  }
+  return "";
+}
+
+function findProviderForModelId(modelId: string, catalog: ModelCatalogEntry[]): string {
+  const normalizedModel = modelId.trim();
+  if (!normalizedModel) {
+    return "";
+  }
+  const matchedProviders = new Set(
+    catalog
+      .filter((entry) => entry.id.trim() === normalizedModel)
+      .map((entry) => entry.provider.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  if (matchedProviders.size !== 1) {
+    return "";
+  }
+  return Array.from(matchedProviders)[0] ?? "";
+}
+
+function resolveSuggestedModelId(provider: string, catalog: ModelCatalogEntry[]): string {
+  const normalizedProvider = provider.trim().toLowerCase();
+  if (!normalizedProvider) {
+    return "";
+  }
+  const fromCatalog =
+    catalog
+      .find((entry) => entry.provider.trim().toLowerCase() === normalizedProvider)
+      ?.id.trim() ?? "";
+  if (fromCatalog) {
+    return fromCatalog;
+  }
+  return PROVIDER_DEFAULT_MODEL_IDS[normalizedProvider]?.[0] ?? "";
+}
+
+function shouldApplySuggestedValue(params: {
+  currentValue: string;
+  suggestedValue: string;
+}): boolean {
+  const current = params.currentValue.trim();
+  const suggested = params.suggestedValue.trim();
+  if (!suggested) {
+    return false;
+  }
+  return !current || current === suggested;
+}
+
+function isRedactedSentinelValue(value: string): boolean {
+  return value.trim() === REDACTED_SENTINEL;
+}
+
 function sanitizeProviderId(raw: string, fallbackSeed: string): string {
   const normalized = raw
     .trim()
@@ -776,7 +884,11 @@ function buildNextGlobalModelConfig(params: {
       } as Record<string, unknown> & { models: Array<{ id: string; name: string }> });
 
     providerEntry.baseUrl = modelConfig.baseUrl.trim();
-    providerEntry.apiKey = modelConfig.apiKey;
+    providerEntry.apiKey = isRedactedSentinelValue(modelConfig.apiKey)
+      ? typeof existingProvider.apiKey === "string"
+        ? existingProvider.apiKey
+        : ""
+      : modelConfig.apiKey;
     if (modelId) {
       providerEntry.models.push({
         id: modelId,
@@ -1148,6 +1260,9 @@ export class OpenClawPowerApp extends LitElement {
   @state() unreadSessionKeys: string[] = [];
   @state() modelConfigs: WorkbenchModelConfig[] = [createEmptyModelConfig()];
   @state() expandedModelConfigId: string | null = null;
+  @state() modelProviderHintTimestamps: Record<string, number> = {};
+  @state() modelConfigPersistState: "idle" | "saving" | "saved" | "error" = "idle";
+  @state() modelConfigPersistMessage: string | null = null;
   @state() codeModelConfig: WorkbenchCodeModelSettings = createEmptyCodeModelSettings();
   @state() codeModelExpanded = true;
   @state() codeModelLoading = false;
@@ -1262,6 +1377,7 @@ export class OpenClawPowerApp extends LitElement {
   private readonly chatRuntimeBySessionKey = new Map<string, SessionRuntimeState>();
   private readonly chatUploadTasks = new Map<string, Promise<void>>();
   private readonly autoTitlingSessionKeys = new Set<string>();
+  private readonly modelProviderHintTimers = new Map<string, number>();
   private readonly initialSessionKeyFromUrl = INITIAL_SETTINGS.urlSessionKey;
   private pendingProjectFileUploadAgentId: string | null = null;
   private pendingProjectFileUploadPath: string | null = null;
@@ -1269,6 +1385,7 @@ export class OpenClawPowerApp extends LitElement {
   private modelConfigPersistTimer: number | null = null;
   private modelConfigPersistInFlight = false;
   private modelConfigPersistQueued = false;
+  private modelConfigPersistFeedbackTimer: number | null = null;
   private logsRefreshTimer: number | null = null;
   private codeTerminalPollTimer: number | null = null;
   private codeTerminalPollInFlight = false;
@@ -2341,6 +2458,39 @@ export class OpenClawPowerApp extends LitElement {
     return first ? formatModelRef(first.provider, first.id) : normalizedRequested;
   }
 
+  private getConfiguredModelRefs() {
+    return this.modelConfigs
+      .filter((entry) => entry.enabled)
+      .map((entry) => formatModelRef(entry.provider, entry.model))
+      .filter((ref) => Boolean(ref));
+  }
+
+  private getComposerModelCatalog(): ModelCatalogEntry[] {
+    const configuredRefs = this.getConfiguredModelRefs();
+    if (configuredRefs.length === 0) {
+      return this.chatModelCatalog;
+    }
+    const catalogByRef = new Map(
+      this.chatModelCatalog.map(
+        (entry) => [formatModelRef(entry.provider, entry.id), entry] as const,
+      ),
+    );
+    return configuredRefs.map((ref) => {
+      const fromCatalog = catalogByRef.get(ref);
+      if (fromCatalog) {
+        return fromCatalog;
+      }
+      const slashIndex = ref.indexOf("/");
+      const provider = slashIndex >= 0 ? ref.slice(0, slashIndex) : "";
+      const modelId = slashIndex >= 0 ? ref.slice(slashIndex + 1) : ref;
+      return {
+        id: modelId,
+        name: modelId,
+        provider,
+      };
+    });
+  }
+
   private async loadGlobalModelSettings() {
     return await this.adapter.request<ConfigSnapshot>("config.get", {});
   }
@@ -2568,10 +2718,32 @@ export class OpenClawPowerApp extends LitElement {
     if (this.modelConfigPersistTimer != null) {
       window.clearTimeout(this.modelConfigPersistTimer);
     }
+    this.setModelConfigPersistFeedback("saving", null);
     this.modelConfigPersistTimer = window.setTimeout(() => {
       this.modelConfigPersistTimer = null;
       void this.persistGlobalModelConfig();
     }, 400);
+  }
+
+  private setModelConfigPersistFeedback(
+    state: "idle" | "saving" | "saved" | "error",
+    message: string | null,
+  ) {
+    this.modelConfigPersistState = state;
+    this.modelConfigPersistMessage = message;
+    if (this.modelConfigPersistFeedbackTimer != null) {
+      window.clearTimeout(this.modelConfigPersistFeedbackTimer);
+      this.modelConfigPersistFeedbackTimer = null;
+    }
+    if (state === "saved") {
+      this.modelConfigPersistFeedbackTimer = window.setTimeout(() => {
+        this.modelConfigPersistFeedbackTimer = null;
+        if (this.modelConfigPersistState === "saved") {
+          this.modelConfigPersistState = "idle";
+          this.modelConfigPersistMessage = null;
+        }
+      }, 2000);
+    }
   }
 
   private async persistGlobalModelConfig() {
@@ -2597,8 +2769,11 @@ export class OpenClawPowerApp extends LitElement {
       });
       await this.refreshSnapshot(this.workbenchSelectedSessionKey, this.workbenchSelectedProjectId);
       this.lastError = null;
+      this.setModelConfigPersistFeedback("saved", null);
     } catch (error) {
-      this.lastError = error instanceof Error ? error.message : String(error);
+      const message = error instanceof Error ? error.message : String(error);
+      this.lastError = message;
+      this.setModelConfigPersistFeedback("error", message);
     } finally {
       this.modelConfigPersistInFlight = false;
       if (this.modelConfigPersistQueued) {
@@ -2882,7 +3057,6 @@ export class OpenClawPowerApp extends LitElement {
       ...this.connectorState,
       loading: true,
       error: null,
-      testResult: null,
     };
     try {
       const [catalog, instances] = await Promise.all([
@@ -3148,9 +3322,7 @@ export class OpenClawPowerApp extends LitElement {
 
   private openSettingsDialog(tab?: WorkbenchSettingsTab) {
     if (tab) {
-      this.workbenchSettingsTab = tab === "connectors" ? "general" : tab;
-    } else if (this.workbenchSettingsTab === "connectors") {
-      this.workbenchSettingsTab = "general";
+      this.workbenchSettingsTab = tab;
     }
     this.openModal("settings");
     if (this.workbenchSettingsTab === "connectors") {
@@ -3172,11 +3344,6 @@ export class OpenClawPowerApp extends LitElement {
   }
 
   private changeSettingsTab(value: WorkbenchSettingsTab) {
-    if (value === "connectors") {
-      this.workbenchSettingsTab = "general";
-      this.stopLogsAutoRefresh();
-      return;
-    }
     this.workbenchSettingsTab = value;
     if (value === "connectors" && this.workbenchSettingsOpen) {
       void this.loadConnectorsPage();
@@ -3296,18 +3463,72 @@ export class OpenClawPowerApp extends LitElement {
 
   private updateModelConfig(
     id: string,
-    field: "name" | "baseUrl" | "apiKey" | "model",
+    field: "name" | "provider" | "baseUrl" | "apiKey" | "model",
     value: string,
   ) {
     let nextCurrentModelId = this.currentModelId;
+    let shouldMarkProviderHint = false;
     this.modelConfigs = this.modelConfigs.map((entry) => {
       if (entry.id !== id) {
         return entry;
       }
       const previousRef = formatModelRef(entry.provider, entry.model);
       const nextEntry = { ...entry, [field]: value };
+      if (field === "provider") {
+        const providerChanged = entry.provider.trim().toLowerCase() !== value.trim().toLowerCase();
+        shouldMarkProviderHint = shouldMarkProviderHint || providerChanged;
+        const normalizedProvider = value.trim().toLowerCase();
+        const suggestedBaseUrl = PROVIDER_DEFAULT_BASE_URLS[normalizedProvider];
+        if (suggestedBaseUrl && providerChanged) {
+          nextEntry.baseUrl = suggestedBaseUrl;
+        }
+        const suggestedModelId = resolveSuggestedModelId(normalizedProvider, this.chatModelCatalog);
+        if (suggestedModelId && providerChanged) {
+          nextEntry.model = suggestedModelId;
+        }
+      } else if (field === "baseUrl") {
+        const normalizedBaseUrl = normalizeApiBaseUrl(value);
+        nextEntry.baseUrl = normalizedBaseUrl;
+        const inferredProvider = inferProviderFromBaseUrl(normalizedBaseUrl);
+        if (inferredProvider) {
+          const providerChanged = entry.provider.trim().toLowerCase() !== inferredProvider;
+          nextEntry.provider = inferredProvider;
+          shouldMarkProviderHint = shouldMarkProviderHint || providerChanged;
+          const suggestedModelId = resolveSuggestedModelId(inferredProvider, this.chatModelCatalog);
+          if (
+            suggestedModelId &&
+            shouldApplySuggestedValue({
+              currentValue: entry.model,
+              suggestedValue: suggestedModelId,
+            })
+          ) {
+            nextEntry.model = suggestedModelId;
+          }
+        }
+      } else if (field === "model") {
+        const inferredProvider = findProviderForModelId(value, this.chatModelCatalog);
+        if (inferredProvider) {
+          const providerChanged = entry.provider.trim().toLowerCase() !== inferredProvider;
+          nextEntry.provider = inferredProvider;
+          shouldMarkProviderHint = shouldMarkProviderHint || providerChanged;
+          const suggestedBaseUrl = PROVIDER_DEFAULT_BASE_URLS[inferredProvider];
+          if (
+            suggestedBaseUrl &&
+            (shouldApplySuggestedValue({
+              currentValue: entry.baseUrl,
+              suggestedValue: suggestedBaseUrl,
+            }) ||
+              normalizeApiBaseUrl(entry.baseUrl) ===
+                normalizeApiBaseUrl(
+                  PROVIDER_DEFAULT_BASE_URLS[entry.provider.trim().toLowerCase()] ?? "",
+                ))
+          ) {
+            nextEntry.baseUrl = suggestedBaseUrl;
+          }
+        }
+      }
       const nextRef = formatModelRef(nextEntry.provider, nextEntry.model);
-      if (field === "model" && this.currentModelId === previousRef) {
+      if ((field === "model" || field === "provider") && this.currentModelId === previousRef) {
         nextCurrentModelId = nextRef;
       }
       return nextEntry;
@@ -3315,7 +3536,34 @@ export class OpenClawPowerApp extends LitElement {
     if (nextCurrentModelId !== this.currentModelId) {
       this.currentModelId = nextCurrentModelId;
     }
+    if (
+      (field === "provider" || field === "baseUrl" || field === "model") &&
+      shouldMarkProviderHint
+    ) {
+      this.markModelProviderHint(id);
+    }
     this.scheduleGlobalModelConfigPersist();
+  }
+
+  private markModelProviderHint(modelConfigId: string) {
+    this.modelProviderHintTimestamps = {
+      ...this.modelProviderHintTimestamps,
+      [modelConfigId]: Date.now(),
+    };
+    const existingTimer = this.modelProviderHintTimers.get(modelConfigId);
+    if (existingTimer != null) {
+      window.clearTimeout(existingTimer);
+    }
+    const timeoutId = window.setTimeout(() => {
+      this.modelProviderHintTimers.delete(modelConfigId);
+      if (!(modelConfigId in this.modelProviderHintTimestamps)) {
+        return;
+      }
+      const next = { ...this.modelProviderHintTimestamps };
+      delete next[modelConfigId];
+      this.modelProviderHintTimestamps = next;
+    }, 2000);
+    this.modelProviderHintTimers.set(modelConfigId, timeoutId);
   }
 
   private toggleModelConfigEnabled(id: string, enabled: boolean) {
@@ -4778,6 +5026,11 @@ export class OpenClawPowerApp extends LitElement {
     const dreamingNextCycle = resolveDreamingNextCycle(this.dreamingState.dreamingStatus);
     const memoryWikiEnabled = isPluginExplicitlyEnabled(this.configSnapshot, "memory-wiki");
 
+    const composerModelCatalog = this.getComposerModelCatalog();
+    const resolvedComposerModelId = this.resolveAvailableModelRef(
+      this.currentModelId,
+      composerModelCatalog,
+    );
     return renderWorkbench({
       basePath: this.basePath,
       assistantName: this.assistantName,
@@ -4786,7 +5039,7 @@ export class OpenClawPowerApp extends LitElement {
       currentSessionKey: this.workbenchSelectedSessionKey ?? "",
       showToolCalls: this.settings.chatShowToolCalls,
       treeMenuOpenKey: this.treeMenuOpenKey,
-      currentModelId: this.currentModelId,
+      currentModelId: resolvedComposerModelId,
       newTaskProjectId: this.workbenchSelectedProjectId,
       newTaskProjectMenuOpen: this.newTaskProjectMenuOpen,
       sidebarCollapsed: this.effectiveSidebarCollapsed,
@@ -5055,7 +5308,7 @@ export class OpenClawPowerApp extends LitElement {
           this.handleLogsScroll(event);
         },
       },
-      modelCatalog: this.chatModelCatalog,
+      modelCatalog: composerModelCatalog,
       modelsLoading: false,
       themeResolved: this.themeResolved,
       settings: {
@@ -5171,6 +5424,11 @@ export class OpenClawPowerApp extends LitElement {
         localeOptions: SETTINGS_LOCALE_OPTIONS.map((option) => ({ ...option })),
         modelConfigs: this.modelConfigs,
         expandedModelConfigId: this.expandedModelConfigId,
+        providerHintTimestamps: this.modelProviderHintTimestamps,
+        modelPersist: {
+          state: this.modelConfigPersistState,
+          message: this.modelConfigPersistMessage,
+        },
         statistics: {
           loading: this.statisticsState.loading,
           error: this.statisticsState.error,
@@ -5524,7 +5782,7 @@ export class OpenClawPowerApp extends LitElement {
       onWorkbenchShellScroll: this.handleWorkbenchShellScroll,
       onWorkbenchScrollbarScroll: this.handleWorkbenchScrollbarScroll,
       onModelChange: (value) => {
-        this.currentModelId = this.resolveAvailableModelRef(value);
+        this.currentModelId = this.resolveAvailableModelRef(value, composerModelCatalog);
         this.scheduleGlobalModelConfigPersist();
       },
       onCreateProject: () => {

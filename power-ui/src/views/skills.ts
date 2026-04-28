@@ -127,21 +127,30 @@ function renderInstallToggle(props: SkillsProps, item: SkillsRegistryCatalogItem
   const busy = props.busyKey === item.slug;
   const installed = item.installState.installed;
   const isLocalInstall = installed && item.installState.source === "directory";
-  const disabled = busy || (installed && !item.installState.canUninstall);
-  const thumbOffset = installed ? 20 : 0;
-  const label = installed ? (isLocalInstall ? "本地" : "已安装") : "安装";
+  const localEnabled = !item.tags.some((tag) => tag.trim().toLowerCase() === "disabled");
+  const toggledOn = isLocalInstall ? localEnabled : installed;
+  const disabled = busy || (installed && !item.installState.canUninstall && !isLocalInstall);
+  const thumbOffset = toggledOn ? 20 : 0;
+  const label = isLocalInstall
+    ? localEnabled
+      ? "已启用"
+      : "已禁用"
+    : installed
+      ? "已安装"
+      : "安装";
   const background = disabled
     ? "rgba(148, 163, 184, 0.55)"
-    : installed
+    : toggledOn
       ? isLocalInstall
         ? "linear-gradient(135deg, #7dd3fc, #38bdf8)"
         : "linear-gradient(135deg, #22c55e, #15803d)"
       : "rgba(148, 163, 184, 0.75)";
-  const toggleTitle =
-    installed && item.installState.canUninstall
-      ? isLocalInstall
-        ? "卸载本地技能"
-        : "卸载技能"
+  const toggleTitle = isLocalInstall
+    ? localEnabled
+      ? "禁用技能"
+      : "启用技能"
+    : installed && item.installState.canUninstall
+      ? "卸载技能"
       : "安装技能";
   return html`
     <div style="display: inline-flex; align-items: center; gap: 10px;">
@@ -150,8 +159,8 @@ function renderInstallToggle(props: SkillsProps, item: SkillsRegistryCatalogItem
       >
       <button
         type="button"
-        aria-label=${installed ? "卸载技能" : "安装技能"}
-        aria-pressed=${String(installed)}
+        aria-label=${toggleTitle}
+        aria-pressed=${String(toggledOn)}
         class="btn"
         style=${`padding: 0; width: 48px; height: 28px; border-radius: 999px; border: none; background: ${background}; position: relative; cursor: ${disabled ? "not-allowed" : "pointer"};`}
         ?disabled=${disabled}

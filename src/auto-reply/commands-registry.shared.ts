@@ -213,6 +213,32 @@ export function buildBuiltinChatCommands(): ChatCommandDefinition[] {
       category: "status",
     }),
     defineChatCommand({
+      key: "askdb",
+      nativeName: "askdb",
+      description: "Ask database stats using your PostgreSQL connector.",
+      textAlias: "/askdb",
+      category: "tools",
+      args: [
+        {
+          name: "action",
+          description: "summary | schema | count",
+          type: "string",
+          choices: [
+            { value: "summary", label: "Summary" },
+            { value: "schema", label: "Schema" },
+            { value: "count", label: "Count table rows" },
+          ],
+        },
+        {
+          name: "target",
+          description: "table name for count (for example users or public.users)",
+          type: "string",
+          captureRemaining: true,
+        },
+      ],
+      argsMenu: "auto",
+    }),
+    defineChatCommand({
       key: "btw",
       nativeName: "btw",
       description: "Ask a side question without changing future session context.",

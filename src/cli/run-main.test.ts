@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { PluginManifestRegistry } from "../plugins/manifest-registry.js";
 import {
   rewriteUpdateFlagArgv,
   resolveMissingPluginCommandMessage,
@@ -13,7 +14,8 @@ const memoryWikiCommandAliasRegistry = {
       commandAliases: [{ name: "wiki" }],
     },
   ],
-};
+  diagnostics: [],
+} as unknown as PluginManifestRegistry;
 
 describe("rewriteUpdateFlagArgv", () => {
   it("leaves argv unchanged when --update is absent", () => {

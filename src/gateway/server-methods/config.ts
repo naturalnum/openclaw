@@ -1,5 +1,7 @@
 import { execFile } from "node:child_process";
 import { isDeepStrictEqual } from "node:util";
+import { resolveAgentDir, resolveDefaultAgentId } from "../../agents/agent-scope.js";
+import { upsertAuthProfileWithLock } from "../../agents/auth-profiles/profiles.js";
 import {
   createConfigIO,
   parseConfigJson5,
@@ -14,6 +16,7 @@ import { applyMergePatch } from "../../config/merge-patch.js";
 import {
   redactConfigObject,
   redactConfigSnapshot,
+  REDACTED_SENTINEL,
   restoreRedactedValues,
 } from "../../config/redact-snapshot.js";
 import { loadGatewayRuntimeConfigSchema } from "../../config/runtime-schema.js";
@@ -393,6 +396,50 @@ function loadSchemaWithPlugins(): ConfigSchemaResponse {
   return loadGatewayRuntimeConfigSchema();
 }
 
+async function syncModelProviderApiKeysToDefaultAgentAuthProfiles(
+  config: OpenClawConfig,
+  context?: GatewayRequestContext,
+): Promise<void> {
+  const providers = config.models?.providers;
+  if (!providers || typeof providers !== "object") {
+    return;
+  }
+
+  const defaultAgentId = resolveDefaultAgentId(config);
+  const agentDir = resolveAgentDir(config, defaultAgentId);
+  let syncedCount = 0;
+
+  for (const [providerId, providerConfig] of Object.entries(providers)) {
+    if (!providerConfig || typeof providerConfig !== "object") {
+      continue;
+    }
+    const apiKeyValue = (providerConfig as { apiKey?: unknown }).apiKey;
+    if (typeof apiKeyValue !== "string") {
+      continue;
+    }
+    const normalizedApiKey = apiKeyValue.trim();
+    if (!normalizedApiKey || normalizedApiKey === REDACTED_SENTINEL) {
+      continue;
+    }
+    await upsertAuthProfileWithLock({
+      agentDir,
+      profileId: `${providerId}:default`,
+      credential: {
+        type: "api_key",
+        provider: providerId,
+        key: normalizedApiKey,
+      },
+    });
+    syncedCount += 1;
+  }
+
+  if (syncedCount > 0) {
+    context?.logGateway?.info(
+      `config auth-profile sync: synced ${syncedCount} model provider key(s) to default agent (${defaultAgentId})`,
+    );
+  }
+}
+
 export const configHandlers: GatewayRequestHandlers = {
   "config.get": async ({ params, respond }) => {
     if (!assertValidParams(params, validateConfigGetParams, "config.get", respond)) {
@@ -457,6 +504,7 @@ export const configHandlers: GatewayRequestHandlers = {
       return;
     }
     await writeConfigFile(parsed.config, writeOptions);
+    await syncModelProviderApiKeysToDefaultAgentAuthProfiles(parsed.config, context);
     respond(
       true,
       {
@@ -577,6 +625,7 @@ export const configHandlers: GatewayRequestHandlers = {
       validated.config,
     );
     await writeConfigFile(validated.config, writeOptions);
+    await syncModelProviderApiKeysToDefaultAgentAuthProfiles(validated.config, context);
 
     const { sessionKey, note, restartDelayMs, deliveryContext, threadId } =
       resolveConfigRestartRequest(params);
@@ -650,6 +699,7 @@ export const configHandlers: GatewayRequestHandlers = {
     // previous shared secret immediately after the config update succeeds.
     const disconnectSharedAuthClients = didSharedGatewayAuthChange(snapshot.config, parsed.config);
     await writeConfigFile(parsed.config, writeOptions);
+    await syncModelProviderApiKeysToDefaultAgentAuthProfiles(parsed.config, context);
 
     const { sessionKey, note, restartDelayMs, deliveryContext, threadId } =
       resolveConfigRestartRequest(params);

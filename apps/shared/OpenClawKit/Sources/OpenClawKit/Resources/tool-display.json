@@ -644,6 +644,15 @@
         "timeoutSeconds"
       ]
     },
+    "askdb_query": {
+      "emoji": "📊",
+      "title": "AskDB Query",
+      "detailKeys": [
+        "command",
+        "skillName",
+        "commandName"
+      ]
+    },
     "sessions_history": {
       "emoji": "🧾",
       "title": "Session History",

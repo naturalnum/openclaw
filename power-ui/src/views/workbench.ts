@@ -216,6 +216,11 @@ export type WorkbenchProps = {
     localeOptions: Array<{ value: string; label: string }>;
     modelConfigs: WorkbenchModelConfig[];
     expandedModelConfigId: string | null;
+    providerHintTimestamps: Record<string, number>;
+    modelPersist: {
+      state: "idle" | "saving" | "saved" | "error";
+      message: string | null;
+    };
     statistics: {
       loading: boolean;
       error: string | null;
@@ -295,7 +300,7 @@ export type WorkbenchProps = {
     onToggleModelConfigExpanded: (id: string) => void;
     onModelConfigChange: (
       id: string,
-      field: "name" | "baseUrl" | "apiKey" | "model",
+      field: "name" | "provider" | "baseUrl" | "apiKey" | "model",
       value: string,
     ) => void;
     onAddModelConfig: () => void;
@@ -2172,6 +2177,14 @@ function renderSettingsDialog(props: WorkbenchProps) {
             </button>
             <button
               type="button"
+              class="${props.settingsTab === "connectors" ? "is-active" : ""}"
+              @click=${() => props.onSettingsTabChange("connectors")}
+            >
+              <span class="workbench-settings-nav__icon">${icons.plug}</span>
+              ${tLocale(locale, "Connectors", "连接器")}
+            </button>
+            <button
+              type="button"
               class="${props.settingsTab === "dreaming" ? "is-active" : ""}"
               @click=${() => props.onSettingsTabChange("dreaming")}
             >
@@ -2529,7 +2542,9 @@ function renderSettingsDialog(props: WorkbenchProps) {
                   ? html`
                       <article class="workbench-setting-card workbench-setting-card--models">
                         <div class="workbench-settings-model-shell">
-                          <div class="workbench-settings-model-shell__head"></div>
+                          <div class="workbench-settings-model-shell__head">
+                            ${renderModelPersistHint(props, locale)}
+                          </div>
                           <div class="workbench-settings-model-shell__list">
                             <div class="workbench-settings-models">
                               ${repeat(
@@ -2721,14 +2736,25 @@ function renderConnectorInstanceCard(
   instance: ConnectorInstance,
   locale: string | undefined,
 ) {
+  const healthStatus = (instance.health.status || "unknown").toLowerCase();
+  const healthLabel =
+    healthStatus === "healthy"
+      ? tLocale(locale, "Healthy", "健康")
+      : healthStatus === "error"
+        ? tLocale(locale, "Error", "异常")
+        : tLocale(locale, "Unknown", "未知");
   return html`
-    <section class="workbench-model-card ${instance.enabled ? "" : "is-disabled"}">
-      <div class="workbench-model-card__header">
-        <div class="workbench-model-card__title-group">
-          <strong>${instance.displayName}</strong>
-          <span>${instance.providerId}</span>
+    <section
+      class="workbench-model-card workbench-connector-instance ${instance.enabled
+        ? ""
+        : "is-disabled"}"
+    >
+      <div class="workbench-connector-instance__header">
+        <div class="workbench-connector-instance__title-group">
+          <strong class="workbench-connector-instance__name">${instance.displayName}</strong>
+          <span class="workbench-connector-instance__provider">${instance.providerId}</span>
         </div>
-        <div class="workbench-model-card__actions">
+        <div class="workbench-connector-instance__actions">
           <label class="dreams__phase-toggle ${instance.enabled ? "dreams__phase-toggle--on" : ""}">
             <input
               type="checkbox"
@@ -2760,9 +2786,15 @@ function renderConnectorInstanceCard(
           </button>
         </div>
       </div>
-      <div class="workbench-model-card__summary">
-        <span>${instance.description || tLocale(locale, "No description", "暂无描述")}</span>
-        <span>${instance.health.status}</span>
+      <div class="workbench-connector-instance__body">
+        <p class="workbench-connector-instance__description">
+          ${instance.description || tLocale(locale, "No description", "暂无描述")}
+        </p>
+        <span
+          class="workbench-connector-instance__health workbench-connector-instance__health--${healthStatus}"
+        >
+          ${healthLabel}
+        </span>
       </div>
     </section>
   `;
@@ -2774,7 +2806,7 @@ function renderConnectorEditor(
   locale: string | undefined,
 ) {
   return html`
-    <section class="workbench-model-card">
+    <section class="workbench-model-card workbench-connector-editor">
       <div class="workbench-model-card__header">
         <div class="workbench-model-card__title-group">
           <strong>${provider.displayName}</strong>
@@ -2793,19 +2825,22 @@ function renderConnectorEditor(
           tLocale(locale, "Description", "描述"),
           connectors.draft.description,
           (value) => connectors.onDraftChange("meta", "description", value),
+          "workbench-settings-field--span-2",
         )}
-        <label class="workbench-settings-field">
+        <label class="workbench-settings-field workbench-settings-field--checkbox">
           <span>${tLocale(locale, "Enabled", "启用")}</span>
-          <input
-            type="checkbox"
-            .checked=${connectors.draft.enabled}
-            @change=${(event: Event) =>
-              connectors.onDraftChange(
-                "meta",
-                "enabled",
-                (event.target as HTMLInputElement).checked,
-              )}
-          />
+          <div class="workbench-settings-checkbox-row">
+            <input
+              type="checkbox"
+              .checked=${connectors.draft.enabled}
+              @change=${(event: Event) =>
+                connectors.onDraftChange(
+                  "meta",
+                  "enabled",
+                  (event.target as HTMLInputElement).checked,
+                )}
+            />
+          </div>
         </label>
         <label class="workbench-settings-field">
           <span>${tLocale(locale, "Policy", "权限模式")}</span>
@@ -2835,7 +2870,7 @@ function renderConnectorEditor(
           renderConnectorField(connectors, field, "secret", locale),
         )}
 
-        <div class="workbench-model-card__summary">
+        <div class="workbench-model-card__summary workbench-model-card__summary--span-2">
           ${repeat(
             provider.actions,
             (action) => action.name,
@@ -2844,10 +2879,12 @@ function renderConnectorEditor(
         </div>
 
         ${connectors.testResult
-          ? html`<p class="skills-empty">${connectors.testResult}</p>`
+          ? html`<p class="skills-empty workbench-model-card__feedback--span-2">
+              ${connectors.testResult}
+            </p>`
           : nothing}
 
-        <div class="dreaming-header-controls">
+        <div class="dreaming-header-controls workbench-model-card__controls--span-2">
           <button
             type="button"
             class="btn btn--subtle btn--sm"
@@ -2884,24 +2921,30 @@ function renderConnectorField(
   const value = values[field.key] ?? "";
   if (field.kind === "boolean") {
     return html`
-      <label class="workbench-settings-field">
+      <label class="workbench-settings-field workbench-settings-field--checkbox">
         <span>${field.label}</span>
-        <input
-          type="checkbox"
-          .checked=${value === "true"}
-          @change=${(event: Event) =>
-            connectors.onDraftChange(
-              section,
-              field.key,
-              (event.target as HTMLInputElement).checked,
-            )}
-        />
+        <div class="workbench-settings-checkbox-row">
+          <input
+            type="checkbox"
+            .checked=${value === "true"}
+            @change=${(event: Event) =>
+              connectors.onDraftChange(
+                section,
+                field.key,
+                (event.target as HTMLInputElement).checked,
+              )}
+          />
+        </div>
       </label>
     `;
   }
   if (field.kind === "textarea") {
-    return renderConnectorTextareaField(locale, field.label, value, (next) =>
-      connectors.onDraftChange(section, field.key, next),
+    return renderConnectorTextareaField(
+      locale,
+      field.label,
+      value,
+      (next) => connectors.onDraftChange(section, field.key, next),
+      "workbench-settings-field--span-2",
     );
   }
   return renderConnectorMetaField(locale, field.label, value, (next) =>
@@ -2931,9 +2974,10 @@ function renderConnectorTextareaField(
   label: string,
   value: string,
   onInput: (value: string) => void,
+  className?: string,
 ) {
   return html`
-    <label class="workbench-settings-field">
+    <label class="workbench-settings-field ${className ?? ""}">
       <span>${label}</span>
       <textarea
         rows="3"
@@ -3138,6 +3182,17 @@ function renderModelCard(
   );
   const title = config.name.trim() || tLocale(locale, "Untitled model", "未命名模型");
   const badge = config.model.trim() || tLocale(locale, "Pending", "待配置");
+  const providerSuggestions = resolveProviderSuggestions(config, props);
+  const apiUrlSuggestions = resolveApiUrlSuggestions(config.baseUrl, config.provider);
+  const modelIdSuggestions = resolveModelIdSuggestions(config, props.modelCatalog);
+  const providerHintAt = props.settingsView.providerHintTimestamps[config.id] ?? 0;
+  const providerHintActive = Date.now() - providerHintAt < 2000;
+  const normalizedProvider = config.provider.trim().toLowerCase();
+  const suggestedBaseUrl = PROVIDER_DEFAULT_BASE_URLS[normalizedProvider] ?? "";
+  const showSuggestedBaseUrl = Boolean(
+    suggestedBaseUrl &&
+    normalizeApiBaseUrl(config.baseUrl) !== normalizeApiBaseUrl(suggestedBaseUrl),
+  );
   return html`
     <section class="workbench-model-card ${config.enabled ? "" : "is-disabled"}">
       <div class="workbench-model-card__summary">
@@ -3205,25 +3260,65 @@ function renderModelCard(
                 "例如: GPT-4o",
                 (value) => props.settingsView.onModelConfigChange(config.id, "name", value),
               )}
-              ${renderModelInputRow(
+              ${renderModelProviderInputRow(
+                locale,
+                config.provider,
+                (value) => props.settingsView.onModelConfigChange(config.id, "provider", value),
+                providerSuggestions,
+              )}
+              ${renderModelSelectRow(
                 locale,
                 icons.globe,
                 "API URL",
                 "API URL",
-                config.baseUrl,
-                "https://api.openai.com/v1",
-                "https://api.openai.com/v1",
-                (value) => props.settingsView.onModelConfigChange(config.id, "baseUrl", value),
+                normalizeApiBaseUrl(config.baseUrl),
+                "Select API URL...",
+                "选择 API URL...",
+                (value) =>
+                  props.settingsView.onModelConfigChange(
+                    config.id,
+                    "baseUrl",
+                    normalizeApiBaseUrl(value),
+                  ),
+                Array.from(
+                  new Set(
+                    [normalizeApiBaseUrl(config.baseUrl), ...apiUrlSuggestions].filter(Boolean),
+                  ),
+                ),
               )}
-              ${renderModelInputRow(
+              ${showSuggestedBaseUrl
+                ? html`
+                    <div
+                      class="workbench-settings-actions workbench-model-helper-actions ${providerHintActive
+                        ? "workbench-model-helper-actions--highlight"
+                        : ""}"
+                    >
+                      <button
+                        type="button"
+                        class="btn btn--subtle btn--sm"
+                        @click=${() =>
+                          props.settingsView.onModelConfigChange(
+                            config.id,
+                            "baseUrl",
+                            suggestedBaseUrl,
+                          )}
+                      >
+                        ${tLocale(locale, "Use recommended URL", "使用推荐 URL")}
+                        (${suggestedBaseUrl})
+                      </button>
+                    </div>
+                  `
+                : nothing}
+              ${renderModelSelectRow(
                 locale,
                 icons.zap,
                 "Model ID",
                 "Model ID",
-                config.model,
-                "gpt-4o",
-                "gpt-4o",
+                config.model.trim(),
+                "Select model ID...",
+                "选择模型 ID...",
                 (value) => props.settingsView.onModelConfigChange(config.id, "model", value),
+                Array.from(new Set([config.model.trim(), ...modelIdSuggestions].filter(Boolean))),
               )}
               ${renderModelInputRow(
                 locale,
@@ -3241,6 +3336,24 @@ function renderModelCard(
         : nothing}
     </section>
   `;
+}
+
+function renderModelPersistHint(props: WorkbenchProps, locale: string | undefined) {
+  const persistState = props.settingsView.modelPersist.state;
+  if (persistState === "idle") {
+    return nothing;
+  }
+  const label =
+    persistState === "saving"
+      ? tLocale(locale, "Saving model settings...", "模型设置保存中...")
+      : persistState === "saved"
+        ? tLocale(locale, "Model settings saved", "模型设置已保存")
+        : tLocale(locale, "Save failed", "保存失败");
+  const detail =
+    persistState === "error" ? (props.settingsView.modelPersist.message?.trim() ?? "") : "";
+  return html`<p class="workbench-model-persist-hint workbench-model-persist-hint--${persistState}">
+    ${label}${detail ? html`：${detail}` : nothing}
+  </p>`;
 }
 
 function renderCodeModelCard(props: WorkbenchProps, locale: string | undefined) {
@@ -3375,6 +3488,11 @@ function renderModelInputRow(
   placeholderZh: string,
   onInput: (value: string) => void,
   type = "text",
+  options?: {
+    datalistId?: string;
+    datalistOptions?: string[];
+    onBlur?: (value: string) => void;
+  },
 ) {
   return html`
     <label class="workbench-model-row">
@@ -3386,10 +3504,214 @@ function renderModelInputRow(
         type=${type}
         .value=${value}
         placeholder=${tLocale(locale, placeholderEn, placeholderZh)}
+        ?hasDatalist=${Boolean(options?.datalistId)}
+        list=${options?.datalistId ?? ""}
         @input=${(event: Event) => onInput((event.target as HTMLInputElement).value)}
+        @blur=${(event: Event) => options?.onBlur?.((event.target as HTMLInputElement).value)}
       />
+      ${options?.datalistId && (options?.datalistOptions?.length ?? 0) > 0
+        ? html`<datalist id=${options.datalistId}>
+            ${repeat(
+              options.datalistOptions ?? [],
+              (entry) => entry,
+              (entry) => html`<option value=${entry}></option>`,
+            )}
+          </datalist>`
+        : nothing}
     </label>
   `;
+}
+
+function renderModelSelectRow(
+  locale: string | undefined,
+  icon: unknown,
+  labelEn: string,
+  labelZh: string,
+  value: string,
+  placeholderEn: string,
+  placeholderZh: string,
+  onChange: (value: string) => void,
+  options: string[],
+) {
+  const normalizedValue = value.trim();
+  const normalizedOptions = Array.from(
+    new Set([normalizedValue, ...options.map((entry) => entry.trim())]),
+  ).filter(Boolean);
+  return html`
+    <label class="workbench-model-row">
+      <span class="workbench-model-row__field">
+        <span class="workbench-model-row__icon">${icon}</span>
+        ${tLocale(locale, labelEn, labelZh)}
+      </span>
+      <div class="workbench-settings-select workbench-settings-select--compact">
+        <select @change=${(event: Event) => onChange((event.target as HTMLSelectElement).value)}>
+          <option value="">${tLocale(locale, placeholderEn, placeholderZh)}</option>
+          ${normalizedOptions.map(
+            (entry) =>
+              html`<option value=${entry} ?selected=${entry === normalizedValue}>${entry}</option>`,
+          )}
+        </select>
+        <span class="workbench-settings-select__chevron">${icons.chevronDown}</span>
+      </div>
+    </label>
+  `;
+}
+
+function renderModelProviderInputRow(
+  locale: string | undefined,
+  value: string,
+  onInput: (value: string) => void,
+  suggestions: string[],
+) {
+  const normalizedValue = value.trim();
+  const normalizedOptions = Array.from(
+    new Set([value.trim(), ...suggestions.map((entry) => entry.trim())].filter(Boolean)),
+  );
+  return html`
+    <label class="workbench-model-row">
+      <span class="workbench-model-row__field">
+        <span class="workbench-model-row__icon">${icons.puzzle}</span>
+        ${tLocale(locale, "Provider type", "模型类型")}
+      </span>
+      <div class="workbench-settings-select workbench-settings-select--compact">
+        <select @change=${(event: Event) => onInput((event.target as HTMLSelectElement).value)}>
+          <option value="">${tLocale(locale, "Choose provider...", "选择模型类型...")}</option>
+          ${normalizedOptions.map(
+            (provider) =>
+              html`<option value=${provider} ?selected=${provider === normalizedValue}>
+                ${provider}
+              </option>`,
+          )}
+        </select>
+        <span class="workbench-settings-select__chevron">${icons.chevronDown}</span>
+      </div>
+    </label>
+  `;
+}
+
+const COMMON_API_URL_SUGGESTIONS = [
+  "https://api.openai.com/v1",
+  "https://api.anthropic.com",
+  "https://api.deepseek.com/v1",
+  "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "https://openrouter.ai/api/v1",
+];
+
+const PROVIDER_DEFAULT_BASE_URLS: Record<string, string> = {
+  anthropic: "https://api.anthropic.com",
+  deepseek: "https://api.deepseek.com/v1",
+  minimax: "https://api.minimax.chat/v1",
+  openai: "https://api.openai.com/v1",
+  openrouter: "https://openrouter.ai/api/v1",
+  qwen: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  xai: "https://api.x.ai/v1",
+};
+
+const PROVIDER_DEFAULT_MODEL_IDS: Record<string, string[]> = {
+  anthropic: ["claude-sonnet-4-5", "claude-3-7-sonnet-latest"],
+  deepseek: ["deepseek-chat", "deepseek-reasoner"],
+  google: ["gemini-2.5-pro", "gemini-2.5-flash"],
+  minimax: ["MiniMax-Text-01"],
+  openai: ["gpt-4o", "gpt-4.1"],
+  openrouter: ["openai/gpt-4o", "anthropic/claude-3.7-sonnet"],
+  qwen: ["qwen-plus", "qwen-max"],
+  xai: ["grok-3", "grok-3-mini"],
+};
+
+function normalizeApiBaseUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return "";
+  }
+  return trimmed.endsWith("/") ? trimmed.slice(0, -1) : trimmed;
+}
+
+function resolveApiUrlSuggestions(currentValue: string, provider: string): string[] {
+  const normalized = normalizeApiBaseUrl(currentValue);
+  const providerDefault = PROVIDER_DEFAULT_BASE_URLS[provider.trim().toLowerCase()] ?? "";
+  const merged = normalized
+    ? [normalized, providerDefault, ...COMMON_API_URL_SUGGESTIONS]
+    : [providerDefault, ...COMMON_API_URL_SUGGESTIONS];
+  return Array.from(
+    new Set(merged.map((entry) => normalizeApiBaseUrl(entry)).filter(Boolean)),
+  ).slice(0, 8);
+}
+
+function inferProviderFromBaseUrl(baseUrl: string): string | null {
+  const normalized = normalizeApiBaseUrl(baseUrl).toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  if (normalized.includes("deepseek")) {
+    return "deepseek";
+  }
+  if (normalized.includes("anthropic")) {
+    return "anthropic";
+  }
+  if (normalized.includes("openrouter")) {
+    return "openrouter";
+  }
+  if (normalized.includes("openai")) {
+    return "openai";
+  }
+  if (normalized.includes("dashscope") || normalized.includes("aliyuncs")) {
+    return "qwen";
+  }
+  return null;
+}
+
+function resolveProviderSuggestions(config: WorkbenchModelConfig, props: WorkbenchProps): string[] {
+  const commonProviders = [
+    "openai",
+    "anthropic",
+    "deepseek",
+    "qwen",
+    "minimax",
+    "google",
+    "xai",
+    "openrouter",
+  ];
+  const fromCatalog = props.modelCatalog.map((entry) => entry.provider.trim()).filter(Boolean);
+  const fromConfigs = props.settingsView.modelConfigs
+    .map((entry) => entry.provider.trim())
+    .filter(Boolean);
+  const inferredProvider = inferProviderFromBaseUrl(config.baseUrl) ?? "";
+  return Array.from(
+    new Set(
+      [
+        config.provider.trim(),
+        inferredProvider,
+        ...commonProviders,
+        ...fromCatalog,
+        ...fromConfigs,
+      ].filter(Boolean),
+    ),
+  ).slice(0, 20);
+}
+
+function resolveModelIdSuggestions(
+  config: WorkbenchModelConfig,
+  catalog: ModelCatalogEntry[],
+): string[] {
+  const configuredProvider = config.provider.trim().toLowerCase();
+  const inferredProvider = inferProviderFromBaseUrl(config.baseUrl);
+  const providerCandidates = new Set([configuredProvider, inferredProvider].filter(Boolean));
+  const fromCatalog = catalog
+    .filter(
+      (entry) =>
+        providerCandidates.size === 0 || providerCandidates.has(entry.provider.toLowerCase()),
+    )
+    .map((entry) => entry.id.trim())
+    .filter(Boolean);
+  const fromDefaults: string[] = [];
+  for (const provider of providerCandidates) {
+    if (typeof provider !== "string") {
+      continue;
+    }
+    fromDefaults.push(...(PROVIDER_DEFAULT_MODEL_IDS[provider.toLowerCase()] ?? []));
+  }
+  const merged = [config.model.trim(), ...fromDefaults, ...fromCatalog];
+  return Array.from(new Set(merged.filter(Boolean))).slice(0, 20);
 }
 
 function resolveProjects(props: WorkbenchProps): WorkbenchProject[] {
