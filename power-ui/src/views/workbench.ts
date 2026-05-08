@@ -2680,7 +2680,8 @@ function renderConnectorsPanel(props: WorkbenchProps) {
               (provider) => html`
                 <button
                   type="button"
-                  class="workbench-theme-card workbench-connector-provider-card ${provider.id === connectors.selectedProviderId
+                  class="workbench-theme-card workbench-connector-provider-card ${provider.id ===
+                  connectors.selectedProviderId
                     ? "is-active"
                     : ""}"
                   @click=${() => connectors.onSelectProvider(provider.id)}
@@ -3266,25 +3267,35 @@ function renderModelCard(
                 (value) => props.settingsView.onModelConfigChange(config.id, "provider", value),
                 providerSuggestions,
               )}
-              ${renderModelSelectRow(
+              ${renderModelInputRow(
                 locale,
                 icons.globe,
                 "API URL",
                 "API URL",
                 normalizeApiBaseUrl(config.baseUrl),
-                "Select API URL...",
-                "选择 API URL...",
+                "Select or enter API URL...",
+                "选择或输入 API URL...",
                 (value) =>
                   props.settingsView.onModelConfigChange(
                     config.id,
                     "baseUrl",
                     normalizeApiBaseUrl(value),
                   ),
-                Array.from(
-                  new Set(
-                    [normalizeApiBaseUrl(config.baseUrl), ...apiUrlSuggestions].filter(Boolean),
+                "text",
+                {
+                  datalistId: `model-base-url-${config.id}`,
+                  datalistOptions: Array.from(
+                    new Set(
+                      [normalizeApiBaseUrl(config.baseUrl), ...apiUrlSuggestions].filter(Boolean),
+                    ),
                   ),
-                ),
+                  onBlur: (value) =>
+                    props.settingsView.onModelConfigChange(
+                      config.id,
+                      "baseUrl",
+                      normalizeApiBaseUrl(value),
+                    ),
+                },
               )}
               ${showSuggestedBaseUrl
                 ? html`
