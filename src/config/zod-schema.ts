@@ -230,6 +230,18 @@ const McpConfigSchema = z
   .strict()
   .optional();
 
+const ConfigMetaTimestampSchema = z.union([
+  z.string(),
+  z.number().transform((n, ctx) => {
+    const d = new Date(n);
+    if (Number.isNaN(d.getTime())) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid timestamp" });
+      return z.NEVER;
+    }
+    return d.toISOString();
+  }),
+]);
+
 export const OpenClawSchema = z
   .object({
     $schema: z.string().optional(),
@@ -238,19 +250,9 @@ export const OpenClawSchema = z
         lastTouchedVersion: z.string().optional(),
         // Accept any string unchanged (backwards-compatible) and coerce numeric Unix
         // timestamps to ISO strings (agent file edits may write Date.now()).
-        lastTouchedAt: z
-          .union([
-            z.string(),
-            z.number().transform((n, ctx) => {
-              const d = new Date(n);
-              if (Number.isNaN(d.getTime())) {
-                ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid timestamp" });
-                return z.NEVER;
-              }
-              return d.toISOString();
-            }),
-          ])
-          .optional(),
+        lastTouchedAt: ConfigMetaTimestampSchema.optional(),
+        migratedFrom: z.string().optional(),
+        migratedAt: ConfigMetaTimestampSchema.optional(),
       })
       .strict()
       .optional(),

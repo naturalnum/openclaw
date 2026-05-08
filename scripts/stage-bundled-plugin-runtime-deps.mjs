@@ -67,6 +67,28 @@ const stagedRuntimeDepPruneRules = new Map([
   ["@larksuiteoapi/node-sdk", ["types"]],
 ]);
 const runtimeDepsStagingVersion = 2;
+export const RUNTIME_DEPS_INSTALL_NPM_ARGS = [
+  "install",
+  "--omit=dev",
+  "--silent",
+  "--ignore-scripts",
+  "--no-audit",
+  "--@larksuiteoapi:registry=https://registry.npmjs.org",
+  "--legacy-peer-deps",
+  "--package-lock=false",
+];
+
+export function createRuntimeDepsInstallEnv(env = process.env) {
+  const installEnv = {
+    ...env,
+    npm_config_audit: "false",
+  };
+  const registryOverride = env.OPENCLAW_RUNTIME_DEPS_NPM_REGISTRY?.trim();
+  if (registryOverride) {
+    installEnv.npm_config_registry = registryOverride;
+  }
+  return installEnv;
+}
 
 function collectInstalledRuntimeClosure(rootNodeModulesDir, dependencySpecs) {
   const packageCache = new Map();
@@ -257,22 +279,17 @@ function installPluginRuntimeDeps(params) {
     os.tmpdir(),
     `openclaw-runtime-deps-${sanitizeTempPrefixSegment(pluginId)}-`,
   );
+  const installEnv = createRuntimeDepsInstallEnv();
   const npmRunner = resolveNpmRunner({
-    npmArgs: [
-      "install",
-      "--omit=dev",
-      "--silent",
-      "--ignore-scripts",
-      "--legacy-peer-deps",
-      "--package-lock=false",
-    ],
+    env: installEnv,
+    npmArgs: RUNTIME_DEPS_INSTALL_NPM_ARGS,
   });
   try {
     writeJson(path.join(tempInstallDir, "package.json"), packageJson);
     const result = spawnSync(npmRunner.command, npmRunner.args, {
       cwd: tempInstallDir,
       encoding: "utf8",
-      env: npmRunner.env,
+      env: npmRunner.env ?? installEnv,
       stdio: "pipe",
       shell: npmRunner.shell,
       windowsVerbatimArguments: npmRunner.windowsVerbatimArguments,

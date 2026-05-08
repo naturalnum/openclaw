@@ -12,11 +12,11 @@ if [[ -f "${BUILD_ENV_FILE}" ]]; then
   set +a
 fi
 
-OPENCLAW_IMAGE="${OPENCLAW_IMAGE:-openclaw-power:20260412-v1.0}"
+OPENCLAW_IMAGE="${OPENCLAW_IMAGE:-openclaw-power:20260412-v1.1}"
 OPENCLAW_DOCKERFILE="${OPENCLAW_DOCKERFILE:-${SCRIPT_DIR}/Dockerfile}"
 OPENCLAW_BUILD_CONTEXT="${OPENCLAW_BUILD_CONTEXT:-${PROJECT_ROOT}}"
-OPENCLAW_NODE_IMAGE="${OPENCLAW_NODE_IMAGE:-swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/node:24-bookworm-slim-linuxarm64}"
-OPENCLAW_PLATFORM="${OPENCLAW_PLATFORM:-linux/arm64}"
+OPENCLAW_NODE_IMAGE="${OPENCLAW_NODE_IMAGE:-node:24-bookworm-slim}"
+OPENCLAW_PLATFORM="${OPENCLAW_PLATFORM:-linux/amd64}"
 OPENCLAW_NPM_REGISTRY="${OPENCLAW_NPM_REGISTRY:-https://registry.npmmirror.com}"
 
 CTX_DIR="$(mktemp -d /tmp/openclaw-deploy-build.XXXXXX)"

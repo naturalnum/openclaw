@@ -1,4 +1,4 @@
-ARG OPENCLAW_NODE_IMAGE="swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/node:24-bookworm-slim-linuxarm64"
+ARG OPENCLAW_NODE_IMAGE="node:24-bookworm-slim"
 ARG OPENCLAW_CLAUDE_CODE_VERSION="latest"
 ARG OPENCLAW_APT_MIRROR="http://mirrors.aliyun.com"
 ARG OPENCLAW_PYPI_INDEX_URL="https://mirrors.aliyun.com/pypi/simple"

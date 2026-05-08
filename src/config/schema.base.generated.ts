@@ -25,6 +25,22 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
             title: "Config Last Touched At",
             description: "ISO timestamp of the last config write (auto-set).",
           },
+          migratedFrom: {
+            type: "string",
+            title: "Config Migrated From",
+            description:
+              "Previous config/source identifier recorded when OpenClaw migrates a config file.",
+          },
+          migratedAt: {
+            anyOf: [
+              {
+                type: "string",
+              },
+              {},
+            ],
+            title: "Config Migrated At",
+            description: "ISO timestamp of the config migration (auto-set).",
+          },
         },
         additionalProperties: false,
         title: "Metadata",
@@ -22151,6 +22167,23 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
             },
             additionalProperties: false,
           },
+          registry: {
+            type: "object",
+            properties: {
+              enabled: {
+                type: "boolean",
+              },
+              baseUrl: {
+                type: "string",
+              },
+              timeoutMs: {
+                type: "integer",
+                minimum: 1000,
+                maximum: 9007199254740991,
+              },
+            },
+            additionalProperties: false,
+          },
           limits: {
             type: "object",
             properties: {
@@ -22781,6 +22814,16 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       label: "Config Last Touched At",
       help: "ISO timestamp of the last config write (auto-set).",
       tags: ["media"],
+    },
+    "meta.migratedFrom": {
+      label: "Config Migrated From",
+      help: "Previous config/source identifier recorded when OpenClaw migrates a config file.",
+      tags: ["advanced"],
+    },
+    "meta.migratedAt": {
+      label: "Config Migrated At",
+      help: "ISO timestamp of the config migration (auto-set).",
+      tags: ["advanced"],
     },
     env: {
       label: "Environment",
@@ -27256,6 +27299,9 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       tags: ["media", "tools", "url-secret"],
     },
     "mcp.servers.*.url": {
+      tags: ["advanced", "url-secret"],
+    },
+    "skills.registry.baseUrl": {
       tags: ["advanced", "url-secret"],
     },
   },

@@ -58,4 +58,32 @@ describe("meta.lastTouchedAt numeric timestamp coercion", () => {
     });
     expect(res.ok).toBe(true);
   });
+
+  it("accepts migration metadata written by deploy migration", () => {
+    const migratedAt = "2026-04-27T12:00:00.000Z";
+    const res = validateConfigObject({
+      meta: {
+        migratedFrom: "internal_deploy",
+        migratedAt,
+      },
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.config.meta?.migratedFrom).toBe("internal_deploy");
+      expect(res.config.meta?.migratedAt).toBe(migratedAt);
+    }
+  });
+
+  it("coerces numeric migration timestamps to ISO strings", () => {
+    const numericTimestamp = 1770394758161;
+    const res = validateConfigObject({
+      meta: {
+        migratedAt: numericTimestamp,
+      },
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.config.meta?.migratedAt).toBe(new Date(numericTimestamp).toISOString());
+    }
+  });
 });
