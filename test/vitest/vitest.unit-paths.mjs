@@ -3,6 +3,7 @@ import { BUNDLED_PLUGIN_ROOT_DIR } from "../../scripts/lib/bundled-plugin-paths.
 
 export const unitTestIncludePatterns = [
   "src/**/*.test.ts",
+  "power-backend/**/*.test.ts",
   "packages/**/*.test.ts",
   "test/**/*.test.ts",
   "ui/src/ui/app-chat.test.ts",

@@ -200,6 +200,18 @@ function applyClaudeEnvValue(env: Record<string, unknown>, key: string, value: u
   delete env[key];
 }
 
+function applyClaudeEnvValueIfProvided(
+  env: Record<string, unknown>,
+  params: Record<string, unknown>,
+  paramKey: string,
+  envKey: string,
+) {
+  if (!Object.prototype.hasOwnProperty.call(params, paramKey)) {
+    return;
+  }
+  applyClaudeEnvValue(env, envKey, params[paramKey]);
+}
+
 async function writeClaudeSettingsFile(
   params: Record<string, unknown>,
 ): Promise<PowerClaudeSettings> {
@@ -220,11 +232,11 @@ async function writeClaudeSettingsFile(
     raw.env && typeof raw.env === "object" && !Array.isArray(raw.env)
       ? { ...(raw.env as Record<string, unknown>) }
       : {};
-  applyClaudeEnvValue(env, "ANTHROPIC_BASE_URL", params.baseUrl);
-  applyClaudeEnvValue(env, "ANTHROPIC_AUTH_TOKEN", params.authToken);
-  applyClaudeEnvValue(env, "ANTHROPIC_API_KEY", params.apiKey);
-  applyClaudeEnvValue(env, "ANTHROPIC_MODEL", params.model);
-  applyClaudeEnvValue(env, "ANTHROPIC_SMALL_FAST_MODEL", params.smallFastModel);
+  applyClaudeEnvValueIfProvided(env, params, "baseUrl", "ANTHROPIC_BASE_URL");
+  applyClaudeEnvValueIfProvided(env, params, "authToken", "ANTHROPIC_AUTH_TOKEN");
+  applyClaudeEnvValueIfProvided(env, params, "apiKey", "ANTHROPIC_API_KEY");
+  applyClaudeEnvValueIfProvided(env, params, "model", "ANTHROPIC_MODEL");
+  applyClaudeEnvValueIfProvided(env, params, "smallFastModel", "ANTHROPIC_SMALL_FAST_MODEL");
 
   const next = {
     ...raw,
