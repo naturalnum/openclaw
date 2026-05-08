@@ -2680,7 +2680,7 @@ function renderConnectorsPanel(props: WorkbenchProps) {
               (provider) => html`
                 <button
                   type="button"
-                  class="workbench-theme-card ${provider.id === connectors.selectedProviderId
+                  class="workbench-theme-card workbench-connector-provider-card ${provider.id === connectors.selectedProviderId
                     ? "is-active"
                     : ""}"
                   @click=${() => connectors.onSelectProvider(provider.id)}

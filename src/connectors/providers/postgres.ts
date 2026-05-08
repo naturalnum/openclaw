@@ -61,7 +61,7 @@ export const postgresConnectorProvider: ConnectorProviderRuntime = {
   definition: {
     id: "postgres",
     displayName: "PostgreSQL",
-    description: "Connect to a PostgreSQL database for schema inspection and SQL execution.",
+    description: "Schema tools and policy-gated SQL.",
     category: "database",
     authType: "basic",
     configFields: [

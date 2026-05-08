@@ -4592,6 +4592,18 @@ power-code-terminal-pane {
   gap: 16px;
 }
 
+/* Connector type picker: keep cards short even with long provider descriptions. */
+.workbench-connector-provider-card > span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #4b5563;
+  word-break: break-word;
+}
+
 .workbench-settings-guard-cards {
   display: grid;
   gap: 16px;
