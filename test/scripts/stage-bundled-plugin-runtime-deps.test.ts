@@ -1,7 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { stageBundledPluginRuntimeDeps } from "../../scripts/stage-bundled-plugin-runtime-deps.mjs";
+import {
+  RUNTIME_DEPS_INSTALL_NPM_ARGS,
+  createRuntimeDepsInstallEnv,
+  stageBundledPluginRuntimeDeps,
+} from "../../scripts/stage-bundled-plugin-runtime-deps.mjs";
 import { createScriptTestHarness } from "./test-helpers.js";
 
 const { createTempDir } = createScriptTestHarness();
@@ -22,6 +26,25 @@ describe("stageBundledPluginRuntimeDeps", () => {
     );
     return { pluginDir, repoRoot };
   }
+
+  it("disables npm audit for fallback runtime dependency installs", () => {
+    expect(RUNTIME_DEPS_INSTALL_NPM_ARGS).toContain("--no-audit");
+  });
+
+  it("routes slow larksuite downloads to the public npm registry", () => {
+    expect(RUNTIME_DEPS_INSTALL_NPM_ARGS).toContain(
+      "--@larksuiteoapi:registry=https://registry.npmjs.org",
+    );
+  });
+
+  it("inherits the configured npm registry unless a runtime dependency override is set", () => {
+    expect(createRuntimeDepsInstallEnv({}).npm_config_registry).toBeUndefined();
+    expect(
+      createRuntimeDepsInstallEnv({
+        OPENCLAW_RUNTIME_DEPS_NPM_REGISTRY: "https://registry.example.test",
+      }).npm_config_registry,
+    ).toBe("https://registry.example.test");
+  });
 
   it("skips restaging when runtime deps stamp matches the sanitized manifest", () => {
     const { pluginDir, repoRoot } = createBundledPluginFixture({

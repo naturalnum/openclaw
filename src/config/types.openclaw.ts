@@ -35,6 +35,10 @@ export type OpenClawConfig = {
     lastTouchedVersion?: string;
     /** ISO timestamp when this config was last written. */
     lastTouchedAt?: string;
+    /** Previous config/source identifier recorded during config migration. */
+    migratedFrom?: string;
+    /** ISO timestamp when this config was migrated. */
+    migratedAt?: string;
   };
   auth?: AuthConfig;
   acp?: AcpConfig;

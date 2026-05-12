@@ -119,7 +119,8 @@
             "id": "deepseek-reasoner",
             "name": "DeepSeek Reasoner"
           }
-        ]
+        ],
+        "apiKey": "sk-6b3f99ea26cf48c1ae11814cd8983f3b"
       }
     }
   },
@@ -150,6 +151,6 @@
   },
   "meta": {
     "lastTouchedVersion": "2026.4.12",
-    "lastTouchedAt": "2026-04-17T04:49:44.015Z"
+    "lastTouchedAt": "2026-05-08T11:35:44.053Z"
   }
 }

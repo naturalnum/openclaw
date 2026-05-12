@@ -487,6 +487,7 @@ power-code-terminal-pane {
   height: 16px;
   overflow-x: auto;
   overflow-y: hidden;
+  background: var(--bg);
   background: color-mix(in srgb, var(--bg) 84%, transparent);
   backdrop-filter: blur(8px);
   scrollbar-gutter: stable both-edges;
@@ -501,6 +502,12 @@ power-code-terminal-pane {
   --wb-sidebar-collapsed-width: 84px;
   --wb-divider-width: 10px;
   --wb-rail-width: 300px;
+  /* Fallback tokens for browsers without color-mix support. */
+  --wb-surface: var(--card);
+  --wb-surface-strong: var(--card);
+  --wb-border: var(--border);
+  --wb-text-soft: var(--text);
+  --wb-accent: var(--accent);
   --wb-surface: color-mix(in srgb, var(--card) 92%, white 8%);
   --wb-surface-strong: color-mix(in srgb, var(--card) 86%, white 14%);
   --wb-border: color-mix(in srgb, var(--border) 88%, white 12%);
@@ -515,10 +522,102 @@ power-code-terminal-pane {
 }
 
 .workbench--light {
+  --wb-surface: #ffffff;
+  --wb-surface-strong: #ffffff;
+  --wb-border: var(--border);
+  --wb-text-soft: var(--text);
   --wb-surface: color-mix(in srgb, white 88%, var(--card) 12%);
   --wb-surface-strong: color-mix(in srgb, white 94%, var(--card) 6%);
   --wb-border: color-mix(in srgb, var(--border) 95%, white 5%);
   --wb-text-soft: color-mix(in srgb, var(--text) 78%, white 22%);
+}
+
+@supports not (color: color-mix(in srgb, black 50%, white 50%)) {
+  .workbench {
+    --wb-surface: var(--card);
+    --wb-surface-strong: var(--card);
+    --wb-border: var(--border);
+    --wb-text-soft: var(--text);
+    --wb-accent: var(--accent);
+  }
+
+  .workbench--light {
+    --wb-surface: #ffffff;
+    --wb-surface-strong: #ffffff;
+    --wb-border: var(--border);
+    --wb-text-soft: var(--text);
+  }
+
+  .workbench-horizontal-scrollbar {
+    background: var(--bg);
+    backdrop-filter: none;
+  }
+
+  .workbench-sidebar,
+  .workbench-main,
+  .workbench-rail,
+  .workbench-sidecard,
+  .workbench-model-card,
+  .workbench-settings-panel,
+  .workbench-card,
+  .workbench-chat-shell,
+  .workbench-code-shell,
+  .workbench-tree,
+  .workbench-pane,
+  .workbench-directory-entry {
+    background: var(--wb-surface);
+    border-color: var(--wb-border);
+  }
+
+  .workbench input,
+  .workbench select,
+  .workbench textarea,
+  .workbench button {
+    border-color: var(--wb-border);
+  }
+}
+
+.workbench--legacy {
+  --wb-surface: var(--card);
+  --wb-surface-strong: var(--card);
+  --wb-border: var(--border);
+  --wb-text-soft: var(--text);
+  --wb-accent: var(--accent);
+}
+
+.workbench--legacy.workbench--light {
+  --wb-surface: #ffffff;
+  --wb-surface-strong: #ffffff;
+  --wb-border: var(--border);
+  --wb-text-soft: var(--text);
+}
+
+.workbench--legacy .workbench-horizontal-scrollbar {
+  background: var(--bg);
+  backdrop-filter: none;
+}
+
+.workbench--legacy .workbench-sidebar,
+.workbench--legacy .workbench-main,
+.workbench--legacy .workbench-rail,
+.workbench--legacy .workbench-sidecard,
+.workbench--legacy .workbench-model-card,
+.workbench--legacy .workbench-settings-panel,
+.workbench--legacy .workbench-card,
+.workbench--legacy .workbench-chat-shell,
+.workbench--legacy .workbench-code-shell,
+.workbench--legacy .workbench-tree,
+.workbench--legacy .workbench-pane,
+.workbench--legacy .workbench-directory-entry {
+  background: var(--wb-surface);
+  border-color: var(--wb-border);
+}
+
+.workbench--legacy input,
+.workbench--legacy select,
+.workbench--legacy textarea,
+.workbench--legacy button {
+  border-color: var(--wb-border);
 }
 
 .workbench--sidebar-collapsed {
