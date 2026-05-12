@@ -15,27 +15,26 @@ fi
 OPENCLAW_IMAGE="${OPENCLAW_IMAGE:-openclaw-power:20260412-v1.1}"
 OPENCLAW_DOCKERFILE="${OPENCLAW_DOCKERFILE:-${SCRIPT_DIR}/Dockerfile}"
 OPENCLAW_BUILD_CONTEXT="${OPENCLAW_BUILD_CONTEXT:-${PROJECT_ROOT}}"
-OPENCLAW_NODE_IMAGE="${OPENCLAW_NODE_IMAGE:-node:24-bookworm-slim}"
+OPENCLAW_NODE_IMAGE="${OPENCLAW_NODE_IMAGE:-docker.m.daocloud.io/library/node:24-bookworm-slim}"
 OPENCLAW_PLATFORM="${OPENCLAW_PLATFORM:-linux/amd64}"
 OPENCLAW_NPM_REGISTRY="${OPENCLAW_NPM_REGISTRY:-https://registry.npmmirror.com}"
+OPENCLAW_BUILD_MODE="${OPENCLAW_BUILD_MODE:-full}"
+OPENCLAW_BUILD_TMP_ROOT="${OPENCLAW_BUILD_TMP_ROOT:-${PROJECT_ROOT}/.tmp}"
 
-CTX_DIR="$(mktemp -d /tmp/openclaw-deploy-build.XXXXXX)"
+if [[ "${OPENCLAW_DOCKERFILE}" != /* ]]; then
+  OPENCLAW_DOCKERFILE="${PROJECT_ROOT}/${OPENCLAW_DOCKERFILE#./}"
+fi
+if [[ "${OPENCLAW_BUILD_CONTEXT}" != /* ]]; then
+  OPENCLAW_BUILD_CONTEXT="${PROJECT_ROOT}/${OPENCLAW_BUILD_CONTEXT#./}"
+fi
+
+mkdir -p "${OPENCLAW_BUILD_TMP_ROOT}"
+CTX_DIR="$(mktemp -d "${OPENCLAW_BUILD_TMP_ROOT%/}/openclaw-deploy-build.XXXXXX")"
+SHOULD_RESTORE_DEPS=0
 
 cleanup() {
   rm -rf "${CTX_DIR}"
 }
-trap cleanup EXIT
-
-echo "==> Building local runtime assets"
-(
-  cd "${PROJECT_ROOT}"
-  export npm_config_registry="${OPENCLAW_NPM_REGISTRY}"
-  export NPM_CONFIG_REGISTRY="${OPENCLAW_NPM_REGISTRY}"
-  CI=true pnpm install --registry "${OPENCLAW_NPM_REGISTRY}" --no-frozen-lockfile --reporter=silent
-  pnpm build:docker
-  pnpm qa:lab:build
-  CI=true pnpm install --registry "${OPENCLAW_NPM_REGISTRY}" --prod --no-frozen-lockfile --reporter=silent
-)
 
 restore_deps() {
   (
@@ -45,8 +44,47 @@ restore_deps() {
     CI=true pnpm install --registry "${OPENCLAW_NPM_REGISTRY}" --no-frozen-lockfile --reporter=silent
   )
 }
-trap 'restore_deps; cleanup' EXIT
 
+finalize() {
+  if [[ "${SHOULD_RESTORE_DEPS}" == "1" ]]; then
+    restore_deps
+  fi
+  cleanup
+}
+trap finalize EXIT
+
+echo "==> Building local runtime assets (mode: ${OPENCLAW_BUILD_MODE})"
+(
+  cd "${PROJECT_ROOT}"
+  export npm_config_registry="${OPENCLAW_NPM_REGISTRY}"
+  export NPM_CONFIG_REGISTRY="${OPENCLAW_NPM_REGISTRY}"
+  case "${OPENCLAW_BUILD_MODE}" in
+    full)
+      CI=true pnpm install --registry "${OPENCLAW_NPM_REGISTRY}" --no-frozen-lockfile --reporter=silent
+      pnpm build:docker
+      pnpm qa:lab:build
+      CI=true pnpm install --registry "${OPENCLAW_NPM_REGISTRY}" --prod --no-frozen-lockfile --reporter=silent
+      ;;
+    frontend-only)
+      if [[ ! -f "dist/index.js" || ! -f "dist/extensions/power-backend/index.mjs" ]]; then
+        echo "ERROR: frontend-only mode requires existing runtime assets (dist/index.js and dist/extensions/power-backend/index.mjs)." >&2
+        echo "Run once with OPENCLAW_BUILD_MODE=full, then retry frontend-only." >&2
+        exit 1
+      fi
+      pnpm power-ui:build
+      ;;
+    *)
+      echo "ERROR: unsupported OPENCLAW_BUILD_MODE=${OPENCLAW_BUILD_MODE}. Use 'full' or 'frontend-only'." >&2
+      exit 2
+      ;;
+  esac
+)
+
+if [[ "${OPENCLAW_BUILD_MODE}" == "full" ]]; then
+  SHOULD_RESTORE_DEPS=1
+fi
+
+DOCKER_CONTEXT="${CTX_DIR}"
 mkdir -p "${CTX_DIR}"
 for item in dist node_modules extensions skills docs qa deploy package.json openclaw.mjs; do
   cp -R "${PROJECT_ROOT}/${item}" "${CTX_DIR}/${item}"
@@ -61,12 +99,11 @@ for key in OPENCLAW_NODE_IMAGE OPENCLAW_EXTENSIONS OPENCLAW_INSTALL_DOCKER_CLI O
 done
 
 echo "==> Building Docker image ${OPENCLAW_IMAGE}"
+echo "==> Base image: ${OPENCLAW_NODE_IMAGE}"
+echo "==> Docker context: ${DOCKER_CONTEXT}"
 docker build \
   --platform "${OPENCLAW_PLATFORM}" \
   -f "${OPENCLAW_DOCKERFILE}" \
   -t "${OPENCLAW_IMAGE}" \
   "${BUILD_ARGS[@]}" \
-  "${CTX_DIR}"
-
-restore_deps
-trap cleanup EXIT
+  "${DOCKER_CONTEXT}"

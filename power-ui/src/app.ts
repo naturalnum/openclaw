@@ -398,6 +398,13 @@ function resolveDreamingNextCycle(
   return formatDreamNextCycle(nextRunAtMs);
 }
 
+function supportsLegacySafeWorkbenchUi(): boolean {
+  if (typeof CSS === "undefined" || typeof CSS.supports !== "function") {
+    return false;
+  }
+  return CSS.supports("color", "color-mix(in srgb, black 50%, white 50%)");
+}
+
 function isPluginExplicitlyEnabled(snapshot: ConfigSnapshot | null, pluginId: string): boolean {
   const config = snapshot?.config;
   if (!config || typeof config !== "object" || Array.isArray(config)) {
@@ -1389,6 +1396,7 @@ export class OpenClawPowerApp extends LitElement {
   private logsRefreshTimer: number | null = null;
   private codeTerminalPollTimer: number | null = null;
   private codeTerminalPollInFlight = false;
+  private legacyCssMode = false;
   private readonly codeTerminalSizes = new Map<string, CodeTerminalSize>();
   private syncingWorkbenchShellScroll = false;
   private syncingWorkbenchScrollbarScroll = false;
@@ -1430,6 +1438,7 @@ export class OpenClawPowerApp extends LitElement {
 
   connectedCallback() {
     super.connectedCallback();
+    this.legacyCssMode = !supportsLegacySafeWorkbenchUi();
     document.addEventListener("pointerdown", this.handleDocumentPointerDown, true);
     window.addEventListener("resize", this.handleWindowResize);
     this.handleWindowResize();
@@ -1676,7 +1685,12 @@ export class OpenClawPowerApp extends LitElement {
         (terminal) => terminal.terminalId === terminalId,
       );
       const nextTerminals =
-        terminalIndex >= 0 ? this.codeTerminals.toSpliced(terminalIndex, 1) : this.codeTerminals;
+        terminalIndex >= 0
+          ? [
+              ...this.codeTerminals.slice(0, terminalIndex),
+              ...this.codeTerminals.slice(terminalIndex + 1),
+            ]
+          : this.codeTerminals;
       const { [terminalId]: _removedBuffer, ...restBuffers } = this.codeTerminalBuffers;
       const { [terminalId]: _removedCursor, ...restCursors } = this.codeTerminalCursors;
       this.codeTerminalBuffers = restBuffers;
@@ -4332,8 +4346,9 @@ export class OpenClawPowerApp extends LitElement {
     try {
       this.projectDirectoryError = null;
       this.projectDirectorySelectedPath = normalizedPath;
+      const pathParts = normalizedPath.split("/").filter(Boolean);
       this.projectDirectorySelectedName =
-        normalizedPath.split("/").findLast(Boolean) ?? normalizedPath;
+        pathParts.length > 0 ? pathParts[pathParts.length - 1] : normalizedPath;
       const isExpanded = this.projectDirectoryExpandedPaths.includes(normalizedPath);
       if (isExpanded) {
         this.toggleProjectDirectoryExpanded(normalizedPath, false);
@@ -5311,6 +5326,7 @@ export class OpenClawPowerApp extends LitElement {
       modelCatalog: composerModelCatalog,
       modelsLoading: false,
       themeResolved: this.themeResolved,
+      legacyCssMode: this.legacyCssMode,
       settings: {
         gatewayUrl: this.settings.gatewayUrl,
         theme: this.settings.theme,

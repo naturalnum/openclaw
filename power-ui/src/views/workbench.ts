@@ -196,6 +196,7 @@ export type WorkbenchProps = {
   modelCatalog: ModelCatalogEntry[];
   modelsLoading: boolean;
   themeResolved: string;
+  legacyCssMode: boolean;
   settings: {
     gatewayUrl: string;
     theme: string;
@@ -525,7 +526,9 @@ export function renderWorkbench(props: WorkbenchProps) {
           ? "workbench--sidebar-collapsed"
           : ""} ${props.sidebarNarrowScrollable
           ? "workbench--sidebar-narrow-scrollable"
-          : ""} ${props.sidebarResizeActive ? "workbench--sidebar-resizing" : ""}"
+          : ""} ${props.sidebarResizeActive
+          ? "workbench--sidebar-resizing"
+          : ""} ${props.legacyCssMode ? "workbench--legacy" : ""}"
         style=${`--wb-sidebar-width: ${props.sidebarWidthPx}px;`}
       >
         <aside class="workbench-sidebar">
@@ -3320,16 +3323,22 @@ function renderModelCard(
                     </div>
                   `
                 : nothing}
-              ${renderModelSelectRow(
+              ${renderModelInputRow(
                 locale,
                 icons.zap,
                 "Model ID",
                 "Model ID",
                 config.model.trim(),
-                "Select model ID...",
-                "选择模型 ID...",
+                "Enter model ID...",
+                "输入模型 ID...",
                 (value) => props.settingsView.onModelConfigChange(config.id, "model", value),
-                Array.from(new Set([config.model.trim(), ...modelIdSuggestions].filter(Boolean))),
+                "text",
+                {
+                  datalistId: `model-id-${config.id}`,
+                  datalistOptions: Array.from(
+                    new Set([config.model.trim(), ...modelIdSuggestions].filter(Boolean)),
+                  ),
+                },
               )}
               ${renderModelInputRow(
                 locale,
@@ -3533,41 +3542,6 @@ function renderModelInputRow(
   `;
 }
 
-function renderModelSelectRow(
-  locale: string | undefined,
-  icon: unknown,
-  labelEn: string,
-  labelZh: string,
-  value: string,
-  placeholderEn: string,
-  placeholderZh: string,
-  onChange: (value: string) => void,
-  options: string[],
-) {
-  const normalizedValue = value.trim();
-  const normalizedOptions = Array.from(
-    new Set([normalizedValue, ...options.map((entry) => entry.trim())]),
-  ).filter(Boolean);
-  return html`
-    <label class="workbench-model-row">
-      <span class="workbench-model-row__field">
-        <span class="workbench-model-row__icon">${icon}</span>
-        ${tLocale(locale, labelEn, labelZh)}
-      </span>
-      <div class="workbench-settings-select workbench-settings-select--compact">
-        <select @change=${(event: Event) => onChange((event.target as HTMLSelectElement).value)}>
-          <option value="">${tLocale(locale, placeholderEn, placeholderZh)}</option>
-          ${normalizedOptions.map(
-            (entry) =>
-              html`<option value=${entry} ?selected=${entry === normalizedValue}>${entry}</option>`,
-          )}
-        </select>
-        <span class="workbench-settings-select__chevron">${icons.chevronDown}</span>
-      </div>
-    </label>
-  `;
-}
-
 function renderModelProviderInputRow(
   locale: string | undefined,
   value: string,
@@ -3761,7 +3735,7 @@ function resolveProjects(props: WorkbenchProps): WorkbenchProject[] {
   return agents
     .map((agent) => {
       const identity = props.agentIdentityById[agent.id];
-      const sessions = (sessionsByAgent.get(agent.id) ?? []).toSorted(
+      const sessions = [...(sessionsByAgent.get(agent.id) ?? [])].toSorted(
         (left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0),
       );
       const updatedAt = sessions[0]?.updatedAt ?? null;
@@ -3799,7 +3773,8 @@ function resolveProjects(props: WorkbenchProps): WorkbenchProject[] {
 
 function shortSessionLabel(sessionKey: string) {
   const parsed = parseAgentSessionKey(sessionKey);
-  const last = parsed?.rest?.split(":").findLast(Boolean);
+  const parts = parsed?.rest?.split(":").filter(Boolean) ?? [];
+  const last = parts.length > 0 ? parts[parts.length - 1] : "";
   const candidate = (last || sessionKey).trim();
   if (!candidate) {
     return "";
