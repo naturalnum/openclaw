@@ -1,0 +1,19 @@
+{
+  "unit": [
+    { "key": "总部", "content": "总部" },
+    { "key": "公司总部", "content": "总部" },
+    { "key": "全公司", "content": "全公司" }
+  ],
+  "award": [],
+  "domain": [
+    { "key": "人工智能", "content": "人工智能,AI" },
+    { "key": "新能源", "content": "新能源" },
+    { "key": "大电网规划运行", "content": "大电网规划运行" }
+  ],
+  "term": [
+    { "key": "项目金额", "content": "project amount total_amount payment_amount gmv" },
+    { "key": "技术领域", "content": "tech domain technology_domain tech_field" },
+    { "key": "总部项目", "content": "headquarter hq project" }
+  ],
+  "example": []
+}

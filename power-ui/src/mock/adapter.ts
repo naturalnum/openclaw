@@ -692,7 +692,7 @@ export class MockWorkbenchAdapter implements WorkbenchAdapter {
       }));
     return {
       path: currentPath,
-      name: currentPath.split("/").findLast(Boolean) ?? currentPath,
+      name: currentPath.split("/").filter(Boolean).slice(-1)[0] ?? currentPath,
       parentPath:
         currentPath === "/workspace"
           ? null
@@ -722,7 +722,7 @@ export class MockWorkbenchAdapter implements WorkbenchAdapter {
     return {
       ok: true,
       path: normalizedPath,
-      name: normalizedPath.split("/").findLast(Boolean) ?? normalizedPath,
+      name: normalizedPath.split("/").filter(Boolean).slice(-1)[0] ?? normalizedPath,
     };
   }
 
@@ -752,10 +752,10 @@ export class MockWorkbenchAdapter implements WorkbenchAdapter {
       agentId,
       workspace: project.workspace,
       path: currentPath,
-      name: currentPath.split("/").findLast(Boolean) ?? currentPath,
+      name: currentPath.split("/").filter(Boolean).slice(-1)[0] ?? currentPath,
       parentPath:
         currentPath === project.workspace ? null : currentPath.split("/").slice(0, -1).join("/"),
-      entries: entries.toSorted((left, right) => left.name.localeCompare(right.name)),
+      entries: [...entries].toSorted((left, right) => left.name.localeCompare(right.name)),
     };
   }
 

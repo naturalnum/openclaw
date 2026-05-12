@@ -1,4 +1,22 @@
 import {
+  ASKDB_DATE_ANCHOR_SQL,
+  buildAskDbHeuristicPlan,
+  buildAskDbTimeFilterSql,
+  buildReadOnlySqlFromPrompt,
+  enrichAskDbHeuristicPlanWithRetrieve,
+  formatColumnDescribeLines,
+  parseAskDbSubcommand,
+  parseQualifiedTableName,
+  pickAskDbAmountColumn,
+  pickAskDbOrgColumn,
+  pickAskDbProjectColumn,
+  pickAskDbTechDomainColumn,
+  pickAskDbTimeColumn,
+  quoteIdentifier,
+  scoreTablesForSearch,
+  validateReadOnlySelectSql,
+} from "../../connectors/askdb-command-core.js";
+import {
   listOwnedConnectorInstances,
   invokeConnectorActionForAccount,
 } from "../../connectors/runtime.js";
@@ -8,110 +26,12 @@ import { resolveChannelAccountId } from "./channel-context.js";
 import { rejectUnauthorizedCommand } from "./command-gates.js";
 import type { CommandHandler } from "./commands-types.js";
 
-type AskDbSubcommand =
-  | { kind: "summary" }
-  | { kind: "schema" }
-  | { kind: "count"; table: string }
-  | { kind: "query"; prompt: string };
-
-function parseAskDbSubcommand(commandBodyNormalized: string): AskDbSubcommand {
-  const argText = commandBodyNormalized.replace(/^\/askdb\b/i, "").trim();
-  if (!argText) {
-    return { kind: "summary" };
-  }
-  if (argText === "schema") {
-    return { kind: "schema" };
-  }
-  if (argText.startsWith("count ")) {
-    const table = argText.slice("count ".length).trim();
-    if (table) {
-      return { kind: "count", table };
-    }
-  }
-  return { kind: "query", prompt: argText };
-}
-
-function quoteIdentifier(identifier: string): string {
-  return `"${identifier.replaceAll('"', '""')}"`;
-}
-
-function parseQualifiedTableName(tableInput: string): { schema: string; table: string } | null {
-  const trimmed = tableInput.trim();
-  if (!trimmed) {
-    return null;
-  }
-  const [left, right] = trimmed.split(".", 2);
-  if (right) {
-    return {
-      schema: left.trim() || "public",
-      table: right.trim(),
-    };
-  }
-  return { schema: "public", table: left.trim() };
-}
-
 function pickActivePostgresInstance(instances: ConnectorInstance[]): ConnectorInstance | null {
   return instances.find((item) => item.providerId === "postgres" && item.enabled) ?? null;
 }
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function normalizeNaturalPrompt(prompt: string): string {
-  return prompt.trim().toLowerCase();
-}
-
-function buildReadOnlySqlFromPrompt(prompt: string): string | null {
-  const text = normalizeNaturalPrompt(prompt);
-  const mentionsTask = text.includes("task") || text.includes("任务");
-  const asksDone =
-    text.includes("done") ||
-    text.includes("完成") ||
-    text.includes("已完成") ||
-    text.includes("completed");
-  const asksToday = text.includes("今天") || text.includes("today");
-  const asksLast7Days =
-    text.includes("近7天") ||
-    text.includes("最近7天") ||
-    text.includes("last 7 days") ||
-    text.includes("7天");
-  const asksTrend =
-    text.includes("趋势") ||
-    text.includes("按天") ||
-    text.includes("daily") ||
-    text.includes("每一天");
-  const asksTopProjects =
-    text.includes("project") ||
-    text.includes("项目") ||
-    text.includes("top") ||
-    text.includes("排行");
-
-  if (mentionsTask && asksDone && asksToday) {
-    return "select count(*)::bigint as total_done_today from tasks where done = true and created_at::date = current_date";
-  }
-  if (mentionsTask && asksDone && asksLast7Days && asksTrend) {
-    return "select created_at::date as day, count(*)::bigint as total_done from tasks where done = true and created_at >= now() - interval '7 day' group by day order by day";
-  }
-  if (mentionsTask && asksDone && asksLast7Days) {
-    return "select count(*)::bigint as total_done_last_7_days from tasks where done = true and created_at >= now() - interval '7 day'";
-  }
-  if (mentionsTask && asksLast7Days && asksTrend) {
-    return "select created_at::date as day, count(*)::bigint as total_tasks from tasks where created_at >= now() - interval '7 day' group by day order by day";
-  }
-  if (mentionsTask && asksLast7Days) {
-    return "select count(*)::bigint as total_tasks_last_7_days from tasks where created_at >= now() - interval '7 day'";
-  }
-  if (mentionsTask && asksDone) {
-    return "select count(*)::bigint as total_done from tasks where done = true";
-  }
-  if (mentionsTask) {
-    return "select count(*)::bigint as total_tasks from tasks";
-  }
-  if (asksTopProjects) {
-    return "select p.name as project, count(t.id)::bigint as task_count from projects p left join tasks t on t.project_id = p.id group by p.id, p.name order by task_count desc, p.name asc limit 10";
-  }
-  return null;
 }
 
 async function runSchemaList(params: {
@@ -222,8 +142,49 @@ export const handleAskDbCommand: CommandHandler = async (params, allowTextComman
     };
   }
 
+  const argText = commandBodyNormalized.replace(/^\/askdb\b/i, "").trim();
+  const subcommand = parseAskDbSubcommand(argText);
+
   try {
-    const subcommand = parseAskDbSubcommand(commandBodyNormalized);
+    if (subcommand.kind === "summary") {
+      const tables = await runSchemaList({ ownerAccountId: accountId, instanceId: postgres.id });
+      if (tables.length === 0) {
+        return { shouldContinue: false, reply: { text: "Connected, but no user tables found." } };
+      }
+      const lines = [
+        `Connected to ${postgres.displayName} (${postgres.providerId})`,
+        `Found ${tables.length} table(s).`,
+        "",
+        "Suggested workflow:",
+        "1) `/askdb date` — anchor dates on DB clock",
+        "2) `/askdb search <topic>` — shortlist tables",
+        "3) `/askdb context <topic>` — top 5 tables + columns",
+        "4) `/askdb sql SELECT ...` — read-only query",
+        "",
+        "Table row counts:",
+      ];
+      for (const item of tables.slice(0, 8)) {
+        const schema = normalizeOptionalString(item.table_schema) ?? "public";
+        const table = normalizeOptionalString(item.table_name) ?? "<unknown>";
+        try {
+          const total = await runTableCount({
+            ownerAccountId: accountId,
+            instanceId: postgres.id,
+            schema,
+            table,
+          });
+          lines.push(`- ${schema}.${table}: ${total}`);
+        } catch (error) {
+          lines.push(`- ${schema}.${table}: failed (${toErrorMessage(error)})`);
+        }
+      }
+      if (tables.length > 8) {
+        lines.push(`...and ${tables.length - 8} more tables.`);
+      }
+      lines.push("", "Try: /askdb schema", "/askdb search 订单", "/askdb context 订单");
+      return { shouldContinue: false, reply: { text: lines.join("\n") } };
+    }
+
     if (subcommand.kind === "schema") {
       const tables = await runSchemaList({ ownerAccountId: accountId, instanceId: postgres.id });
       if (tables.length === 0) {
@@ -238,6 +199,110 @@ export const handleAskDbCommand: CommandHandler = async (params, allowTextComman
       if (tables.length > 50) {
         lines.push(`...and ${tables.length - 50} more.`);
       }
+      return { shouldContinue: false, reply: { text: lines.join("\n") } };
+    }
+
+    if (subcommand.kind === "date") {
+      const result = await runReadQuery({
+        ownerAccountId: accountId,
+        instanceId: postgres.id,
+        sql: ASKDB_DATE_ANCHOR_SQL,
+      });
+      const lines = [
+        "AskDB date anchor (from database server clock; use before interpreting “昨天/上周/近7天”):",
+      ];
+      lines.push(...renderQueryResultRows(result.rows, 24));
+      return { shouldContinue: false, reply: { text: lines.join("\n") } };
+    }
+
+    if (subcommand.kind === "describe") {
+      const qualified = parseQualifiedTableName(subcommand.table);
+      if (!qualified || !qualified.table) {
+        return {
+          shouldContinue: false,
+          reply: { text: "Usage: /askdb describe <table> or /askdb describe <schema.table>" },
+        };
+      }
+      const desc = await invokeConnectorActionForAccount({
+        ownerAccountId: accountId,
+        instanceId: postgres.id,
+        action: "db.table.describe",
+        args: { schema: qualified.schema, table: qualified.table },
+      });
+      if (!desc.ok) {
+        return { shouldContinue: false, reply: { text: `AskDB failed: ${desc.error ?? "describe"}` } };
+      }
+      const rows = Array.isArray(desc.data)
+        ? (desc.data as Array<Record<string, unknown>>)
+        : [];
+      const lines = [`Columns for ${qualified.schema}.${qualified.table}:`];
+      lines.push(...formatColumnDescribeLines(rows));
+      return { shouldContinue: false, reply: { text: lines.join("\n") } };
+    }
+
+    if (subcommand.kind === "search") {
+      const tables = await runSchemaList({ ownerAccountId: accountId, instanceId: postgres.id });
+      if (tables.length === 0) {
+        return { shouldContinue: false, reply: { text: "Schema is empty." } };
+      }
+      const ranked = scoreTablesForSearch(tables, subcommand.query);
+      const top = ranked.slice(0, 20);
+      const lines = [
+        `Table candidates for "${subcommand.query}" (up to 20, scored by name match):`,
+      ];
+      for (const row of top) {
+        lines.push(`- ${row.fullName} (score=${row.score})`);
+      }
+      if (ranked.length > 20) {
+        lines.push(`(${ranked.length} tables total.)`);
+      }
+      lines.push("", "Next: /askdb context <same query> or /askdb describe schema.table");
+      return { shouldContinue: false, reply: { text: lines.join("\n") } };
+    }
+
+    if (subcommand.kind === "context") {
+      const tables = await runSchemaList({ ownerAccountId: accountId, instanceId: postgres.id });
+      if (tables.length === 0) {
+        return { shouldContinue: false, reply: { text: "Schema is empty." } };
+      }
+      const ranked = scoreTablesForSearch(tables, subcommand.query);
+      const topFive = ranked.slice(0, 5);
+      const lines = [
+        `Top ${topFive.length} table(s) for "${subcommand.query}" with column shapes:`,
+      ];
+      for (const t of topFive) {
+        lines.push("", `## ${t.fullName} (score=${t.score})`);
+        const desc = await invokeConnectorActionForAccount({
+          ownerAccountId: accountId,
+          instanceId: postgres.id,
+          action: "db.table.describe",
+          args: { schema: t.schema, table: t.table },
+        });
+        if (!desc.ok) {
+          lines.push(`(describe failed: ${desc.error ?? "unknown"})`);
+          continue;
+        }
+        const rows = Array.isArray(desc.data)
+          ? (desc.data as Array<Record<string, unknown>>)
+          : [];
+        lines.push(...formatColumnDescribeLines(rows, 60));
+      }
+      lines.push("", "Then: /askdb sql SELECT ... (read-only, single statement)");
+      return { shouldContinue: false, reply: { text: lines.join("\n") } };
+    }
+
+    if (subcommand.kind === "sql") {
+      const checked = validateReadOnlySelectSql(subcommand.sql);
+      if (!checked.ok) {
+        return { shouldContinue: false, reply: { text: `Rejected SQL: ${checked.reason}` } };
+      }
+      const result = await runReadQuery({
+        ownerAccountId: accountId,
+        instanceId: postgres.id,
+        sql: checked.sql,
+      });
+      const lines = [`AskDB query result (${result.rowCount} row(s)):`];
+      lines.push(...renderQueryResultRows(result.rows));
       return { shouldContinue: false, reply: { text: lines.join("\n") } };
     }
 
@@ -262,65 +327,94 @@ export const handleAskDbCommand: CommandHandler = async (params, allowTextComman
     }
 
     if (subcommand.kind === "query") {
-      const sql = buildReadOnlySqlFromPrompt(subcommand.prompt);
-      if (!sql) {
+      const heuristicSql = await (async () => {
+        const plan = enrichAskDbHeuristicPlanWithRetrieve(
+          subcommand.prompt,
+          buildAskDbHeuristicPlan(subcommand.prompt),
+        );
+        const tables = await runSchemaList({ ownerAccountId: accountId, instanceId: postgres.id });
+        if (tables.length === 0) {
+          return null;
+        }
+        const ranked = scoreTablesForSearch(tables, plan.searchQuery);
+        const target = ranked[0];
+        if (!target || target.score <= 0) {
+          return null;
+        }
+        const desc = await invokeConnectorActionForAccount({
+          ownerAccountId: accountId,
+          instanceId: postgres.id,
+          action: "db.table.describe",
+          args: { schema: target.schema, table: target.table },
+        });
+        if (!desc.ok) {
+          return null;
+        }
+        const columns = Array.isArray(desc.data)
+          ? (desc.data as Array<Record<string, unknown>>)
+          : [];
+        const timeColumn = pickAskDbTimeColumn(columns);
+        const amountColumn = pickAskDbAmountColumn(columns);
+        const projectColumn = pickAskDbProjectColumn(columns);
+        const techDomainColumn = pickAskDbTechDomainColumn(columns);
+        const orgColumn = pickAskDbOrgColumn(columns);
+        const tableSql = `${quoteIdentifier(target.schema)}.${quoteIdentifier(target.table)}`;
+        const whereParts: string[] = [];
+        if (timeColumn) {
+          whereParts.push(buildAskDbTimeFilterSql(quoteIdentifier(timeColumn), plan.window));
+        }
+        if (plan.orgConstraint && orgColumn) {
+          whereParts.push(`${quoteIdentifier(orgColumn)} like '%${plan.orgConstraint.replaceAll("'", "''")}%'`);
+        }
+        if (plan.domainConstraint && techDomainColumn) {
+          whereParts.push(
+            `${quoteIdentifier(techDomainColumn)} like '%${plan.domainConstraint.replaceAll("'", "''")}%'`,
+          );
+        }
+        const whereSql = whereParts.length > 0 ? whereParts.join(" and ") : "true";
+
+        if (plan.metric === "sum_amount" && plan.topN && projectColumn && amountColumn) {
+          if (plan.asksTechDomain && techDomainColumn) {
+            return `with ranked_projects as (select ${quoteIdentifier(projectColumn)} as project_name, ${quoteIdentifier(
+              techDomainColumn,
+            )} as tech_domain, coalesce(sum(${quoteIdentifier(amountColumn)}), 0)::numeric as total_amount from ${tableSql} where ${whereSql} group by 1, 2 order by total_amount desc limit ${plan.topN}) select tech_domain, project_name, total_amount from ranked_projects order by total_amount desc`;
+          }
+          return `select ${quoteIdentifier(projectColumn)} as project_name, coalesce(sum(${quoteIdentifier(amountColumn)}), 0)::numeric as total_amount from ${tableSql} where ${whereSql} group by 1 order by total_amount desc limit ${plan.topN}`;
+        }
+
+        if (plan.trendByDay && timeColumn) {
+          if (plan.metric === "sum_amount" && amountColumn) {
+            return `select ${quoteIdentifier(timeColumn)}::date as day, coalesce(sum(${quoteIdentifier(amountColumn)}), 0)::numeric as total_amount from ${tableSql} where ${whereSql} group by day order by day`;
+          }
+          return `select ${quoteIdentifier(timeColumn)}::date as day, count(*)::bigint as total_count from ${tableSql} where ${whereSql} group by day order by day`;
+        }
+        if (plan.metric === "sum_amount" && amountColumn) {
+          return `select coalesce(sum(${quoteIdentifier(amountColumn)}), 0)::numeric as total_amount from ${tableSql} where ${whereSql}`;
+        }
+        return `select count(*)::bigint as total_count from ${tableSql} where ${whereSql}`;
+      })();
+      const resolvedSql = heuristicSql ?? buildReadOnlySqlFromPrompt(subcommand.prompt);
+      if (!resolvedSql) {
         return {
           shouldContinue: false,
           reply: {
             text:
-              "I couldn't map that request to a safe read-only query yet.\n" +
-              "Try examples:\n" +
-              "- /askdb 近7天完成任务数\n" +
-              "- /askdb 近7天任务趋势\n" +
-              "- /askdb 项目任务排行\n" +
-              "- /askdb count users",
+              "No query strategy matched.\n" +
+              "Try: /askdb date → /askdb search <topic> → /askdb context <topic> → /askdb sql SELECT ...",
           },
         };
       }
       const result = await runReadQuery({
         ownerAccountId: accountId,
         instanceId: postgres.id,
-        sql,
+        sql: resolvedSql,
       });
       const lines = [`AskDB query result (${result.rowCount} row(s)):`];
       lines.push(...renderQueryResultRows(result.rows));
       return { shouldContinue: false, reply: { text: lines.join("\n") } };
     }
 
-    const tables = await runSchemaList({ ownerAccountId: accountId, instanceId: postgres.id });
-    if (tables.length === 0) {
-      return { shouldContinue: false, reply: { text: "Connected, but no user tables found." } };
-    }
-
-    const lines = [
-      `Connected to ${postgres.displayName} (${postgres.providerId})`,
-      `Found ${tables.length} table(s).`,
-      "",
-      "Table row counts:",
-    ];
-    for (const item of tables.slice(0, 8)) {
-      const schema = normalizeOptionalString(item.table_schema) ?? "public";
-      const table = normalizeOptionalString(item.table_name) ?? "<unknown>";
-      try {
-        const total = await runTableCount({
-          ownerAccountId: accountId,
-          instanceId: postgres.id,
-          schema,
-          table,
-        });
-        lines.push(`- ${schema}.${table}: ${total}`);
-      } catch (error) {
-        lines.push(`- ${schema}.${table}: failed (${toErrorMessage(error)})`);
-      }
-    }
-    if (tables.length > 8) {
-      lines.push(`...and ${tables.length - 8} more tables.`);
-    }
-    lines.push("", "Try: /askdb schema", "Try: /askdb count users");
-    return {
-      shouldContinue: false,
-      reply: { text: lines.join("\n") },
-    };
+    return { shouldContinue: false, reply: { text: "Unsupported AskDB command." } };
   } catch (error) {
     return {
       shouldContinue: false,

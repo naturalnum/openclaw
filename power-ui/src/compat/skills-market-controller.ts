@@ -158,11 +158,11 @@ function buildLocalCatalogFromStatus(state: SkillsMarketState): SkillsRegistryLi
     filtered = filtered.filter((item) => item.category === state.skillsCategory);
   }
   if (state.skillsSortBy === "updated") {
-    filtered = filtered.toSorted((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+    filtered = [...filtered].toSorted((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
   } else if (state.skillsSortBy === "downloads") {
-    filtered = filtered.toSorted((a, b) => b.downloads - a.downloads);
+    filtered = [...filtered].toSorted((a, b) => b.downloads - a.downloads);
   } else {
-    filtered = filtered.toSorted((a, b) => a.displayName.localeCompare(b.displayName));
+    filtered = [...filtered].toSorted((a, b) => a.displayName.localeCompare(b.displayName));
   }
 
   const page = Math.max(1, state.skillsPagination.page);

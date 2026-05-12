@@ -39,20 +39,32 @@ Prefer these commands in this order:
 ```text
 /askdb
 /askdb schema
+/askdb date
+/askdb search <keywords>
+/askdb context <keywords>
+/askdb describe <schema.table>
+/askdb sql SELECT ...
 /askdb count <table>
-/askdb <natural language prompt>
+/askdb <natural language prompt>   # demo templates only (tasks/projects)
 ```
 
 ## Suggested workflow
 
-1. Start with `/askdb` for high-level summary.
-2. If schema is unclear, run `/askdb schema`.
-3. For concrete table metrics, run `/askdb count <table>`.
-4. For natural-language analytics, use `/askdb <question>`.
-5. Return concise findings, then suggest one or two follow-up queries.
+1. `/askdb` — connector summary + first table row counts.
+2. `/askdb date` — anchor “today / rolling 7d / ISO week” on the **database server** clock (fixes “昨天/上周” mistakes).
+3. `/askdb search <topic>` — rank imported tables by name (shortlist ~20).
+4. `/askdb context <topic>` — top 5 tables with **columns** from `information_schema` (lightweight “data dictionary” from the DB).
+5. `/askdb describe schema.table` — full column list for one table.
+6. `/askdb sql SELECT ...` — single read-only statement after you know the grain.
+7. `/askdb count <table>` — quick row count sanity check.
+8. Demo NL (`/askdb 近7天…`) only applies when those demo tables exist.
 
 ## Prompt templates
 
+- `/askdb date`
+- `/askdb search 订单`
+- `/askdb context 订单`
+- `/askdb sql select current_date`
 - `/askdb 近7天完成任务数`
 - `/askdb 近7天任务趋势`
 - `/askdb 项目任务排行`
