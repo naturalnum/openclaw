@@ -1004,4 +1004,47 @@ describe("resolveGatewayModelSupportsImages", () => {
       }),
     ).resolves.toBe(true);
   });
+
+  test("treats catalog rows with missing input as image-capable (do not drop attachments)", async () => {
+    await expect(
+      resolveGatewayModelSupportsImages({
+        model: "deepseek-reasoner",
+        provider: "deepseek",
+        loadGatewayModelCatalog: async () => [
+          {
+            id: "deepseek-reasoner",
+            name: "DeepSeek Reasoner",
+            provider: "deepseek",
+          },
+        ],
+      }),
+    ).resolves.toBe(true);
+  });
+
+  test("treats unknown models as image-capable when absent from catalog", async () => {
+    await expect(
+      resolveGatewayModelSupportsImages({
+        model: "custom-local-model",
+        provider: "openai",
+        loadGatewayModelCatalog: async () => [{ id: "gpt-5.4", name: "GPT-5.4", provider: "openai", input: ["text", "image"] }],
+      }),
+    ).resolves.toBe(true);
+  });
+
+  test("respects explicit text-only modality lists in catalog", async () => {
+    await expect(
+      resolveGatewayModelSupportsImages({
+        model: "text-only-mini",
+        provider: "openai",
+        loadGatewayModelCatalog: async () => [
+          {
+            id: "text-only-mini",
+            name: "Text Only Mini",
+            provider: "openai",
+            input: ["text"],
+          },
+        ],
+      }),
+    ).resolves.toBe(false);
+  });
 });

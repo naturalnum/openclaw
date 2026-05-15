@@ -68,6 +68,7 @@ type MockTerminal = {
 type MockSnapshotArgs = {
   projectId: string | null;
   sessionKey: string | null;
+  skipProjectDefault?: boolean;
 };
 
 export type MockWorkbenchSnapshot = {
@@ -575,15 +576,15 @@ export class MockWorkbenchAdapter implements WorkbenchAdapter {
   }
 
   async snapshot(args: MockSnapshotArgs): Promise<WorkbenchSnapshot> {
-    const selectedProject =
-      this.projects.find((project) => project.id === args.projectId) ??
-      this.projects.find((project) =>
-        args.sessionKey
-          ? project.sessions.some((session) => session.key === args.sessionKey)
-          : false,
-      ) ??
-      this.projects[0] ??
-      null;
+    const byId = args.projectId ? this.projects.find((project) => project.id === args.projectId) : undefined;
+    const bySession =
+      args.sessionKey?.trim() && !byId
+        ? this.projects.find((project) =>
+            project.sessions.some((session) => session.key === args.sessionKey),
+          )
+        : undefined;
+    const fallbackFirst = args.skipProjectDefault ? null : (this.projects[0] ?? null);
+    const selectedProject = byId ?? bySession ?? fallbackFirst;
     const currentSessionKey = args.sessionKey ?? "";
     const currentSession =
       this.projects

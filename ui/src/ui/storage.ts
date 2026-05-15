@@ -60,6 +60,8 @@ export type UiSettings = {
   showCodeNav?: boolean; // Whether to show the Code entry in the main navigation
   borderRadius: number; // Corner roundness (0–100, default 50)
   locale?: string;
+  /** Power UI React：对话首选模型 ref（如 `openai/gpt-5.4`），空则用网关目录首项 */
+  chatPreferredModelRef?: string;
 };
 
 function isViteDevPage(): boolean {
@@ -202,6 +204,7 @@ export function loadSettings(): UiSettings {
     showCodeNav: true,
     borderRadius: 50,
     locale: defaultLocale,
+    chatPreferredModelRef: "",
   };
 
   try {
@@ -267,6 +270,10 @@ export function loadSettings(): UiSettings {
           ? snapBorderRadius(parsed.borderRadius)
           : defaults.borderRadius,
       locale: isSupportedLocale(parsed.locale) ? parsed.locale : defaults.locale,
+      chatPreferredModelRef:
+        typeof (parsed as { chatPreferredModelRef?: unknown }).chatPreferredModelRef === "string"
+          ? ((parsed as { chatPreferredModelRef: string }).chatPreferredModelRef ?? "").trim()
+          : (defaults.chatPreferredModelRef ?? ""),
     };
     if ("token" in parsed) {
       persistSettings(settings);
@@ -328,6 +335,7 @@ function persistSettings(next: UiSettings) {
     showCodeNav: next.showCodeNav,
     borderRadius: next.borderRadius,
     sessionsByGateway,
+    chatPreferredModelRef: next.chatPreferredModelRef?.trim() ?? "",
     ...(next.locale ? { locale: next.locale } : {}),
   };
   const serialized = JSON.stringify(persisted);

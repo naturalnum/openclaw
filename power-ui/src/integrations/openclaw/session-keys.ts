@@ -10,12 +10,41 @@ export function buildPowerSessionKey(projectId: string) {
   return `agent:${normalizedProjectId}:power:${generateUUID()}`;
 }
 
+const SESSION_LABEL_MAX_LENGTH = 64;
+
 export function buildSessionLabelFromPrompt(prompt: string) {
   const collapsed = prompt.replace(/\s+/g, " ").trim();
   if (!collapsed) {
     return "New task";
   }
-  return truncateWords(collapsed, 8).slice(0, 80);
+  return truncateWords(collapsed, 8).slice(0, SESSION_LABEL_MAX_LENGTH);
+}
+
+function normalizeSessionLabelInput(value: string | null | undefined): string {
+  return typeof value === "string" ? value.trim().slice(0, SESSION_LABEL_MAX_LENGTH) : "";
+}
+
+/** Avoid duplicate session labels within the same agent (same logic as Lit workbench). */
+export function buildUniqueSessionLabel(
+  base: string,
+  existingLabels: Iterable<string | null | undefined>,
+): string {
+  const normalizedBase = normalizeSessionLabelInput(base) || "New task";
+  const taken = new Set(
+    Array.from(existingLabels, (label) => normalizeSessionLabelInput(label)).filter(Boolean),
+  );
+  if (!taken.has(normalizedBase)) {
+    return normalizedBase;
+  }
+  let suffix = 2;
+  while (suffix < 1000) {
+    const candidate = normalizeSessionLabelInput(`${normalizedBase} ${suffix}`);
+    if (candidate && !taken.has(candidate)) {
+      return candidate;
+    }
+    suffix += 1;
+  }
+  return normalizeSessionLabelInput(`${normalizedBase} ${Date.now().toString().slice(-4)}`);
 }
 
 export function looksLikeOpaqueSessionId(value: string) {

@@ -92,8 +92,15 @@ function resolveSelection(
     ? rawSessionKey
     : "";
   const sessionProjectId = sessionKey ? (parseAgentSessionKey(sessionKey)?.agentId ?? null) : null;
+  const mergedProjectId = args.projectId ?? sessionProjectId ?? null;
+  if (args.skipProjectDefault) {
+    return {
+      projectId: mergedProjectId,
+      sessionKey,
+    };
+  }
   return {
-    projectId: resolveProjectId(args.projectId ?? sessionProjectId ?? null, agentsList),
+    projectId: resolveProjectId(mergedProjectId, agentsList),
     sessionKey,
   };
 }

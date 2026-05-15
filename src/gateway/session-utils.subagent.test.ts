@@ -795,7 +795,7 @@ describe("listSessionsFromStore subagent metadata", () => {
     expect(timeout?.runtimeMs).toBe(0);
   });
 
-  test("fails closed when model lookup misses", async () => {
+  test("treats catalog misses as permissive when resolving image support", async () => {
     await expect(
       resolveGatewayModelSupportsImages({
         model: "gpt-5.4",
@@ -804,10 +804,10 @@ describe("listSessionsFromStore subagent metadata", () => {
           { id: "gpt-5.4", name: "GPT-5.4", provider: "other", input: ["text", "image"] },
         ],
       }),
-    ).resolves.toBe(false);
+    ).resolves.toBe(true);
   });
 
-  test("fails closed when model catalog load throws", async () => {
+  test("treats catalog load failures as permissive when resolving image support", async () => {
     await expect(
       resolveGatewayModelSupportsImages({
         model: "gpt-5.4",
@@ -816,7 +816,7 @@ describe("listSessionsFromStore subagent metadata", () => {
           throw new Error("catalog unavailable");
         },
       }),
-    ).resolves.toBe(false);
+    ).resolves.toBe(true);
   });
 });
 

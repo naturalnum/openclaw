@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 选中文本：中性灰蓝，不用品牌绿 */
+#root ::selection {
+  background-color: rgba(71, 85, 105, 0.22);
+  color: inherit;
+}
+
+#root ::-moz-selection {
+  background-color: rgba(71, 85, 105, 0.22);
+  color: inherit;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 对话线程：加宽滚动条，便于拖动查看历史（仅聊天滚动区） */
+#root .power-chat-scroll {
+  scrollbar-gutter: stable;
+  scrollbar-width: auto;
+  scrollbar-color: #cbd5e1 #f1f5f9;
+}
+
+#root .power-chat-scroll::-webkit-scrollbar {
+  width: 14px;
+}
+
+#root .power-chat-scroll::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 8px;
+}
+
+#root .power-chat-scroll::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 8px;
+  border: 3px solid #f1f5f9;
+}
+
+#root .power-chat-scroll::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}

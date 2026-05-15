@@ -4,6 +4,11 @@ import type { WorkbenchSnapshot } from "../mock/adapter.ts";
 export type WorkbenchSelection = {
   projectId: string | null;
   sessionKey: string | null;
+  /**
+   * When true, do not fall back to the default/first agent when `projectId` is null.
+   * Used for「新增对话」等需要明确停留在无项目（全局）上下文的场景。
+   */
+  skipProjectDefault?: boolean;
 };
 
 export type WorkbenchChatState = "delta" | "final" | "aborted" | "error";

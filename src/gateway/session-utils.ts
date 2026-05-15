@@ -1040,7 +1040,13 @@ export async function resolveGatewayModelSupportsImages(params: {
       ) {
         return true;
       }
-      return false;
+      // Catalog row exists but does not list `image` and is not covered by shims above.
+      // If modalities are explicitly enumerated without image, treat as text-only.
+      if (Array.isArray(modelEntry.input) && modelEntry.input.length > 0) {
+        return false;
+      }
+      // Missing or empty `input`: do not drop inbound images (many catalogs omit modalities).
+      return true;
     }
     if (
       normalizedProvider === "claude-cli" &&
@@ -1054,9 +1060,11 @@ export async function resolveGatewayModelSupportsImages(params: {
     ) {
       return true;
     }
-    return false;
+    // No catalog match: assume image-capable unless the runtime proves otherwise.
+    return true;
   } catch {
-    return false;
+    // Catalog failures should not silently strip user attachments at parse time.
+    return true;
   }
 }
 

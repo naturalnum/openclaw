@@ -5,6 +5,7 @@ export type { ChannelsState } from "../../../ui/src/ui/controllers/channels.type
 export {
   abortChatRun,
   handleChatEvent,
+  loadChatHistory,
   sendChatMessage,
 } from "../../../ui/src/ui/controllers/chat.ts";
 export type { ChatState } from "../../../ui/src/ui/controllers/chat.ts";
