@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 
 import type { GatewayWorkbenchAdapter } from "../../../adapters/gateway-workbench-adapter";
 import type { ConfigSnapshot } from "../../../compat/types";
+import { modelOptionLabel } from "../../lib/configured-chat-models";
+import type { ModelCatalogEntry } from "../../../compat/types";
 import {
   createEmptyModelConfig,
   formatModelRef,
@@ -52,6 +54,14 @@ export function SettingsModelsPanel({ adapter, canUseGateway }: Props) {
   }, [load]);
 
   const configuredRefs = listConfiguredModelRefs(modelConfigs);
+
+  const labelPool: ModelCatalogEntry[] = modelConfigs
+    .filter((r) => r.enabled && r.provider.trim() && r.model.trim())
+    .map((r) => ({
+      id: r.model.trim(),
+      name: r.name.trim() || r.model.trim(),
+      provider: r.provider.trim(),
+    }));
 
   const updateRow = (id: string, patch: Partial<WorkbenchModelConfig>) => {
     setModelConfigs((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
@@ -120,6 +130,32 @@ export function SettingsModelsPanel({ adapter, canUseGateway }: Props) {
 
       {error ? <Alert type="error" showIcon message={error} className="text-sm" /> : null}
 
+      <Alert
+        type="info"
+        showIcon
+        className="text-sm"
+        message="模型配置分三层"
+        description={
+          <ul className="m-0 list-disc space-y-1 pl-4 text-xs leading-relaxed text-slate-600">
+            <li>
+              <strong>下方条目</strong>：写入{" "}
+              <code className="rounded bg-slate-100 px-1">models.providers</code>
+              ，决定 API、密钥与可选模型 ID（对话顶栏下拉列表来源）。
+            </li>
+            <li>
+              <strong>默认主模型</strong>：写入{" "}
+              <code className="rounded bg-slate-100 px-1">agents.defaults.model.primary</code>
+              ，新会话或未单独绑定时的默认值。
+            </li>
+            <li>
+              <strong>对话顶栏切换</strong>：对已选会话调用{" "}
+              <code className="rounded bg-slate-100 px-1">sessions.patch</code>
+              ，绑定到该会话后<strong>运行时以此为准</strong>（优先于本地偏好显示）。
+            </li>
+          </ul>
+        }
+      />
+
       <Card
         size="small"
         className={`${cardSurface} overflow-hidden rounded-xl`}
@@ -140,7 +176,10 @@ export function SettingsModelsPanel({ adapter, canUseGateway }: Props) {
               placeholder="选择 provider/model"
               value={currentModelId || undefined}
               onChange={(v) => setCurrentModelId(v)}
-              options={configuredRefs.map((ref) => ({ label: ref, value: ref }))}
+              options={configuredRefs.map((ref) => ({
+                label: modelOptionLabel(ref, modelConfigs, labelPool),
+                value: ref,
+              }))}
               allowClear
             />
           </div>

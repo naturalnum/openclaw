@@ -84,6 +84,8 @@ export type MockWorkbenchSnapshot = {
   cronJobs: CronJob[];
   modelCatalog: ModelCatalogEntry[];
   toolsCatalogResult: ToolsCatalogResult | null;
+  /** Gateway `config.get` payload; drives chat model picker from `models.providers`. */
+  openclawConfig?: Record<string, unknown> | null;
 };
 
 export type WorkbenchSnapshot = MockWorkbenchSnapshot;

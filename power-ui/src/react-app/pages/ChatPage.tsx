@@ -1,3 +1,4 @@
+import { App } from "antd";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
@@ -8,7 +9,11 @@ import { usePowerWorkbenchChat } from "../hooks/usePowerWorkbenchChat";
 import { ChatModelPicker } from "../components/chat/ChatModelPicker";
 import { ChatMarkdownBody } from "../components/chat/ChatMarkdownBody";
 import { ChatWorkspaceFilesPanel } from "../components/chat/ChatWorkspaceFilesPanel";
-import { resolveChatModelPool } from "../lib/configured-chat-models";
+import {
+  resolveChatModelPool,
+  resolveEffectiveChatModelRef,
+  resolveSessionModelRef,
+} from "../lib/configured-chat-models";
 import { formatCatalogModelRef } from "../lib/model-catalog";
 import { CHAT_ATTACHMENT_ACCEPT, isSupportedChatAttachmentMimeType } from "../../../../ui/src/ui/chat/attachment-support";
 import { parseAgentSessionKey } from "../../../../ui/src/ui/session-key";
@@ -57,6 +62,20 @@ function fileToChatAttachment(file: File): Promise<ChatAttachment | null> {
   });
 }
 
+function TypingDots({ className }: { className?: string }) {
+  return (
+    <span className={cn("inline-flex items-center gap-1", className)} aria-hidden>
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400"
+          style={{ animationDelay: `${i * 0.15}s` }}
+        />
+      ))}
+    </span>
+  );
+}
+
 function ClipIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -77,6 +96,7 @@ function ClipIcon({ className }: { className?: string }) {
 }
 
 export function ChatPage() {
+  const { message } = App.useApp();
   const { settings, patchSettings } = usePowerUiSettings();
   const adapter = useGatewayWorkbenchAdapter(settings);
   const {
@@ -89,7 +109,6 @@ export function ChatPage() {
     sendUserMessage,
     stopGeneration,
     setActiveAgent,
-    startNewConversation,
     refreshSnapshot,
   } = usePowerWorkbenchChat(adapter, patchSettings);
 
@@ -111,25 +130,41 @@ export function ChatPage() {
     [snapshot, selectedProjectId, selectedSessionKey],
   );
 
-  const effectiveModelRef = useMemo(() => {
-    const pref = settings.chatPreferredModelRef?.trim() ?? "";
-    if (pref && configuredModels.some((m) => formatCatalogModelRef(m) === pref || m.id === pref)) {
-      const m = configuredModels.find((x) => formatCatalogModelRef(x) === pref || x.id === pref);
-      return m ? formatCatalogModelRef(m) || pref : pref;
-    }
-    return configuredModels[0] ? formatCatalogModelRef(configuredModels[0]) : "";
-  }, [configuredModels, settings.chatPreferredModelRef]);
+  const sessionBoundModelRef = useMemo(
+    () => resolveSessionModelRef(snapshot, selectedSessionKey),
+    [snapshot, selectedSessionKey],
+  );
+
+  const effectiveModelRef = useMemo(
+    () =>
+      resolveEffectiveChatModelRef({
+        snapshot,
+        sessionKey: selectedSessionKey,
+        chatPreferredModelRef: settings.chatPreferredModelRef,
+        configuredModels,
+      }),
+    [configuredModels, selectedSessionKey, settings.chatPreferredModelRef, snapshot],
+  );
 
   const handleModelChange = async (ref: string) => {
-    patchSettings({ chatPreferredModelRef: ref });
+    const nextRef = ref.trim();
+    if (!nextRef) {
+      return;
+    }
     const sk = selectedSessionKey.trim();
-    if (sk && adapter) {
-      try {
-        await adapter.request("sessions.patch", { key: sk, model: ref });
-        await refreshSnapshot();
-      } catch {
-        // best-effort
-      }
+    if (!sk || !adapter) {
+      patchSettings({ chatPreferredModelRef: nextRef });
+      message.info("已记录模型偏好；发送首条消息后将绑定到该会话。");
+      return;
+    }
+    try {
+      await adapter.request("sessions.patch", { key: sk, model: nextRef });
+      patchSettings({ chatPreferredModelRef: nextRef });
+      message.success("已切换当前会话模型");
+      await refreshSnapshot();
+    } catch (e) {
+      const errText = e instanceof Error ? e.message : String(e);
+      message.error(`切换模型失败：${errText}`);
     }
   };
 
@@ -188,9 +223,12 @@ export function ChatPage() {
   }, [workspaceFilesEligible, selectedSessionKey]);
 
   const showStream = Boolean(activeRuntime?.chatStream?.trim());
-  const busy = Boolean(activeRuntime?.chatSending || showStream);
+  const runActive = Boolean(activeRuntime?.chatRunId);
+  const busy = Boolean(sending || runActive || activeRuntime?.chatSending || showStream);
   /** 已发起请求但尚未收到可见文本（首 token 等待） */
-  const awaitingFirstToken = Boolean(activeRuntime?.chatSending && !activeRuntime?.chatStream?.trim());
+  const awaitingFirstToken = Boolean(
+    (sending || runActive || activeRuntime?.chatSending) && !activeRuntime?.chatStream?.trim(),
+  );
   const showAssistantOutput = Boolean(awaitingFirstToken || showStream);
   const errorText = snapshotError ?? activeRuntime?.lastError ?? null;
 
@@ -317,23 +355,6 @@ export function ChatPage() {
     t.style.height = `${Math.min(Math.max(t.scrollHeight, 44), 200)}px`;
   };
 
-  useEffect(() => {
-    if (searchParams.get("newChat") !== "1") {
-      return;
-    }
-    if (!agents.length) {
-      return;
-    }
-    const next = new URLSearchParams(searchParams);
-    next.delete("newChat");
-    setSearchParams(next, { replace: true });
-    startNewConversation(undefined, { preferQuickChat: true });
-    requestAnimationFrame(() => {
-      resetComposerHeight();
-      textareaRef.current?.focus();
-    });
-  }, [agents.length, searchParams, setSearchParams, startNewConversation]);
-
   const addFilesFromList = useCallback(async (files: FileList | File[] | null | undefined) => {
     if (!files?.length) {
       return;
@@ -406,18 +427,21 @@ export function ChatPage() {
               <p className="truncate text-sm text-slate-500">新建或选择会话以开始</p>
             )}
             <p className="mt-1 text-[11px] leading-snug text-slate-500">
-              {workspaceFilesEligible
-                ? "当前为项目上下文：对话里上传的图片只随消息走，不会出现在下方「工作区文件」列表；落盘请在本页「工作区文件」标签上传，或在侧栏同名项目右侧点文件夹打开抽屉。"
-                : "对话里上传的图片只随消息走，不会进入项目工作区文件列表；落盘可在侧栏「项目」列表右侧点文件夹打开工作区，或进入该项目对话后切换到「工作区文件」上传。"}
+              对话里的图片只随本条消息发送，不会进入工作区文件；要写入工作区请用侧栏项目旁的文件夹或「工作区文件」标签。
             </p>
           </div>
-          <div className="shrink-0">
+          <div className="shrink-0 text-right">
             <ChatModelPicker
               models={configuredModels}
               valueRef={effectiveModelRef}
               onChange={handleModelChange}
               disabled={!agents.length}
             />
+            {selectedSessionKey.trim() && sessionBoundModelRef ? (
+              <p className="mt-1 max-w-[min(100vw-2rem,20rem)] truncate text-[10px] text-slate-400">
+                会话已绑定：{sessionBoundModelRef}
+              </p>
+            ) : null}
           </div>
         </header>
 
@@ -558,15 +582,12 @@ export function ChatPage() {
                       <div className="max-w-[min(100%,32rem)] rounded-2xl rounded-bl-md border border-dashed border-slate-300/90 bg-slate-50/90 px-4 py-2.5 text-[15px] text-slate-800 shadow-sm">
                         {awaitingFirstToken ? (
                           <div
-                            className="mb-2 flex items-center gap-2 text-xs font-medium text-slate-500"
+                            className="mb-2 flex items-center gap-2 text-sm text-slate-500"
                             aria-live="polite"
                             aria-busy="true"
                           >
-                            <span
-                              className="inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-[#0d6b52]/80"
-                              aria-hidden
-                            />
-                            正在生成回复…
+                            <TypingDots />
+                            <span className="font-medium">正在回复</span>
                           </div>
                         ) : (
                           <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-slate-400">
@@ -672,11 +693,7 @@ export function ChatPage() {
                 >
                   <button
                     type="button"
-                    title={
-                      workspaceFilesEligible
-                        ? `添加仅随本条消息发送的图片（${CHAT_ATTACHMENT_ACCEPT}，最多 ${MAX_CHAT_ATTACHMENT_COUNT} 张，单张 ≤8MB）；不会出现在「工作区文件」列表。写入工作区请切到该标签上传。`
-                        : `添加仅随消息发送的图片（${CHAT_ATTACHMENT_ACCEPT}，最多 ${MAX_CHAT_ATTACHMENT_COUNT} 张，单张 ≤8MB）；不会进入工作区文件列表。写入工作区可从侧栏项目旁文件夹打开，或进入项目后切「工作区文件」。`
-                    }
+                    title={`仅随本条消息发送（${CHAT_ATTACHMENT_ACCEPT}，最多 ${MAX_CHAT_ATTACHMENT_COUNT} 张）；不会写入工作区文件`}
                     disabled={
                       !agents.length ||
                       pendingAttachments.length >= MAX_CHAT_ATTACHMENT_COUNT ||

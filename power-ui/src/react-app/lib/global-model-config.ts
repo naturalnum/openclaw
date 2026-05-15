@@ -60,6 +60,41 @@ function sanitizeProviderId(raw: string, fallbackSeed: string): string {
   return fallback || `${DEFAULT_PROVIDER_PREFIX}-${createLocalId().slice(0, 8)}`;
 }
 
+/** 侧栏「新建项目」用的子目录名（仅字母数字与连字符）。 */
+export function slugifyProjectFolderName(name: string): string {
+  const slug = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || "project";
+}
+
+/** 在默认 agent workspace 下为新建项目解析目录路径（由网关 resolveUserPath）。 */
+export function resolveProjectWorkspacePath(
+  config: Record<string, unknown> | null | undefined,
+  projectName: string,
+): string {
+  const base =
+    readDefaultAgentWorkspace(config)?.replace(/\/+$/, "") ?? "~/.openclaw/workspace";
+  return `${base}/${slugifyProjectFolderName(projectName)}`;
+}
+
+export function readDefaultAgentWorkspace(
+  config: Record<string, unknown> | null | undefined,
+): string | null {
+  const workspace = (
+    config as {
+      agents?: {
+        defaults?: {
+          workspace?: unknown;
+        };
+      };
+    } | null
+  )?.agents?.defaults?.workspace;
+  return typeof workspace === "string" && workspace.trim() ? workspace.trim() : null;
+}
+
 export function resolvePrimaryModelFromConfig(config: Record<string, unknown> | null | undefined): string {
   const modelConfig = (config as { agents?: { defaults?: { model?: unknown } } } | null)?.agents?.defaults?.model;
   if (typeof modelConfig === "string") {

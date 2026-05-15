@@ -23,8 +23,7 @@ import {
   trimCommittedPrefixFromChatMessage,
   trimCommittedPrefixFromText,
 } from "../lib/chat-stream-prefix";
-import { resolveChatModelPool } from "../lib/configured-chat-models";
-import { formatCatalogModelRef } from "../lib/model-catalog";
+import { resolveChatModelPool, resolveEffectiveChatModelRef } from "../lib/configured-chat-models";
 import { parseAgentSessionKey } from "../../../../ui/src/ui/session-key";
 import type { ChatAttachment } from "../../../../ui/src/ui/ui-types";
 
@@ -82,19 +81,13 @@ function resolveModelIdForSend(
   projectId: string | null,
 ): string {
   const pool = resolveChatModelPool(snapshot, projectId, sessionKey);
-  const prefRaw = loadSettings().chatPreferredModelRef?.trim() ?? "";
-  if (prefRaw && pool.length > 0) {
-    const hit = pool.find((m) => formatCatalogModelRef(m) === prefRaw || m.id.trim() === prefRaw);
-    if (hit) {
-      const ref = formatCatalogModelRef(hit);
-      return ref || hit.id.trim() || pickModelId(snapshot, fallback);
-    }
-  }
-  if (pool[0]) {
-    const ref = formatCatalogModelRef(pool[0]);
-    return ref || pool[0].id.trim() || pickModelId(snapshot, fallback);
-  }
-  return pickModelId(snapshot, fallback);
+  const ref = resolveEffectiveChatModelRef({
+    snapshot,
+    sessionKey,
+    chatPreferredModelRef: loadSettings().chatPreferredModelRef,
+    configuredModels: pool,
+  });
+  return ref.trim() || pickModelId(snapshot, fallback);
 }
 
 export function usePowerWorkbenchChat(
@@ -343,6 +336,19 @@ export function usePowerWorkbenchChat(
       selectedSessionKeyRef.current = key;
       selectedProjectIdRef.current = projectId;
       await refreshSnapshot({ projectId, sessionKey: key });
+      const snap = snapshotRef.current;
+      if (snap) {
+        const pool = resolveChatModelPool(snap, projectId, key);
+        const effective = resolveEffectiveChatModelRef({
+          snapshot: snap,
+          sessionKey: key,
+          chatPreferredModelRef: loadSettings().chatPreferredModelRef,
+          configuredModels: pool,
+        });
+        if (effective) {
+          patchSettings({ chatPreferredModelRef: effective });
+        }
+      }
     },
     [adapter, patchSettings, refreshSnapshot],
   );
@@ -393,6 +399,9 @@ export function usePowerWorkbenchChat(
       rt.sessionKey = sessionKey;
       rt.client = clientRef.current;
       rt.connected = connected;
+      if (modelId.trim()) {
+        await adapter.request("sessions.patch", { key: sessionKey, model: modelId.trim() });
+      }
       await sendChatMessage(rt, trimmed, hasAttachments ? attachments : undefined);
       bumpRuntime();
       void refreshSnapshot({ projectId, sessionKey }, { reloadChatHistory: false });

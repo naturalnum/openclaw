@@ -188,6 +188,10 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
     const selection = resolveSelection(args, agentsList, sessionsResult);
     const requests: Array<Promise<unknown>> = [
       safeRequest(this.gateway.request<ModelsListResult>("models.list", {}), { models: [] }),
+      safeRequest(
+        this.gateway.request<{ config?: Record<string, unknown> }>("config.get", {}),
+        null,
+      ),
     ];
 
     if (selection.projectId) {
@@ -226,14 +230,14 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
       requests.push(Promise.resolve({ messages: [] }));
     }
 
-    const [modelsResult, agentFilesList, toolsCatalogResult, chatHistory] = (await Promise.all(
-      requests,
-    )) as [
-      ModelsListResult,
-      AgentsFilesListResult | null,
-      ToolsCatalogResult | null,
-      { messages?: unknown[] },
-    ];
+    const [modelsResult, configSnapshot, agentFilesList, toolsCatalogResult, chatHistory] =
+      (await Promise.all(requests)) as [
+        ModelsListResult,
+        { config?: Record<string, unknown> } | null,
+        AgentsFilesListResult | null,
+        ToolsCatalogResult | null,
+        { messages?: unknown[] },
+      ];
 
     if (agentFilesList?.agentId && agentFilesList.workspace) {
       this.workspaceRootByAgentId.set(agentFilesList.agentId, agentFilesList.workspace);
@@ -252,6 +256,7 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
       cronJobs: [],
       modelCatalog: Array.isArray(modelsResult.models) ? modelsResult.models : [],
       toolsCatalogResult,
+      openclawConfig: configSnapshot?.config ?? null,
     };
   }
 
@@ -545,10 +550,11 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
   ): Promise<WorkbenchSendResult> {
     const sessionKey = buildPowerSessionKey(projectId);
     const label = options?.label?.trim() || buildSessionLabelFromPrompt(text);
-    void modelId;
+    const model = modelId.trim();
     await this.gateway.request("sessions.patch", {
       key: sessionKey,
       label,
+      ...(model ? { model } : {}),
     });
     return { sessionKey, runId: null };
   }

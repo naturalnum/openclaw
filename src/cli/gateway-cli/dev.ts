@@ -6,13 +6,11 @@ import { resolveDefaultAgentWorkspaceDir } from "../../agents/workspace.js";
 import { handleReset } from "../../commands/onboard-helpers.js";
 import { createConfigIO, writeConfigFile } from "../../config/config.js";
 import { defaultRuntime } from "../../runtime.js";
-import { normalizeOptionalLowercaseString } from "../../shared/string-coerce.js";
 import { resolveUserPath, shortenHomePath } from "../../utils.js";
 
 const DEV_IDENTITY_NAME = "C3-PO";
 const DEV_IDENTITY_THEME = "protocol droid";
 const DEV_IDENTITY_EMOJI = "🤖";
-const DEV_AGENT_WORKSPACE_SUFFIX = "dev";
 
 async function loadDevTemplate(name: string, fallback: string): Promise<string> {
   try {
@@ -31,14 +29,12 @@ async function loadDevTemplate(name: string, fallback: string): Promise<string> 
   }
 }
 
-const resolveDevWorkspaceDir = (env: NodeJS.ProcessEnv = process.env): string => {
-  const baseDir = resolveDefaultAgentWorkspaceDir(env, os.homedir);
-  const profile = normalizeOptionalLowercaseString(env.OPENCLAW_PROFILE);
-  if (profile === "dev") {
-    return baseDir;
-  }
-  return `${baseDir}-${DEV_AGENT_WORKSPACE_SUFFIX}`;
-};
+/** Dev gateway bootstrap uses the same default workspace as normal installs. */
+export function resolveDevWorkspaceDir(env: NodeJS.ProcessEnv = process.env): string {
+  const neutralEnv = { ...env };
+  delete neutralEnv.OPENCLAW_PROFILE;
+  return resolveDefaultAgentWorkspaceDir(neutralEnv, os.homedir);
+}
 
 async function writeFileIfMissing(filePath: string, content: string) {
   try {

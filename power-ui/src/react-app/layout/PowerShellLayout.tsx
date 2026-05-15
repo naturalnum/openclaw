@@ -12,7 +12,7 @@ import {
 } from "@ant-design/icons";
 import { Drawer } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import type { GatewayWorkbenchAdapter } from "../../adapters/gateway-workbench-adapter";
 import type { AgentsListResult } from "../../compat/types";
@@ -23,6 +23,8 @@ import { usePowerUiSettings } from "../hooks/usePowerUiSettings";
 import type { RecentSessionNavItem } from "../hooks/useRecentSessionsForNav";
 import { useRecentSessionsForNav } from "../hooks/useRecentSessionsForNav";
 import { ChatWorkspaceFilesPanel } from "../components/chat/ChatWorkspaceFilesPanel";
+import { PowerBrandMark } from "../components/ui/PowerBrandMark";
+import { resolveProjectWorkspacePath } from "../lib/global-model-config";
 import { ROUTES } from "../router/paths";
 import { SETTINGS_NAV_ITEMS } from "../router/settings-nav";
 
@@ -30,14 +32,7 @@ const SIDEBAR_EXPANDED = 260;
 const SIDEBAR_COLLAPSED = 72;
 
 const NAV = [
-  {
-    key: "chat",
-    path: ROUTES.root,
-    search: "?newChat=1",
-    end: true,
-    label: "新增对话",
-    icon: <MessageOutlined />,
-  },
+  { key: "chat", path: ROUTES.root, end: true, label: "对话", icon: <MessageOutlined /> },
   { key: "workbench", path: ROUTES.workbench, label: "工作台", icon: <AppstoreOutlined /> },
   { key: "skills", path: ROUTES.skills, label: "技能", icon: <ThunderboltOutlined /> },
 ] as const;
@@ -48,7 +43,7 @@ function cn(...parts: Array<string | false | null | undefined>) {
 
 function pathTitle(pathname: string): string {
   if (pathname === ROUTES.root || pathname === "") {
-    return "新增对话";
+    return "对话";
   }
   if (pathname === ROUTES.workbench) {
     return "工作台";
@@ -89,6 +84,7 @@ type SidebarNavProps = {
   onRecentSessionsChange: () => void;
   projects: NavProject[];
   projectsLoading: boolean;
+  onProjectsReload: () => void;
 };
 
 function SidebarNav({
@@ -103,7 +99,9 @@ function SidebarNav({
   onRecentSessionsChange,
   projects,
   projectsLoading,
+  onProjectsReload,
 }: SidebarNavProps) {
+  const navigate = useNavigate();
 
   const [projectsOpen, setProjectsOpen] = useState(true);
   const [recentOpen, setRecentOpen] = useState(true);
@@ -111,8 +109,12 @@ function SidebarNav({
   const [projectFilesAgentId, setProjectFilesAgentId] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const renameDialogRef = useRef<HTMLDialogElement>(null);
+  const createProjectDialogRef = useRef<HTMLDialogElement>(null);
   const [renameKey, setRenameKey] = useState("");
   const [renameDraft, setRenameDraft] = useState("");
+  const [newProjectName, setNewProjectName] = useState("");
+  const [createProjectBusy, setCreateProjectBusy] = useState(false);
+  const [createProjectError, setCreateProjectError] = useState<string | null>(null);
   const location = useLocation();
   const [settingsFlyoutOpen, setSettingsFlyoutOpen] = useState(false);
   const settingsFlyoutRef = useRef<HTMLDivElement | null>(null);
@@ -189,6 +191,37 @@ function SidebarNav({
     renameDialogRef.current?.showModal();
   }, [closeMenu]);
 
+  const openCreateProject = useCallback(() => {
+    setNewProjectName("");
+    setCreateProjectError(null);
+    createProjectDialogRef.current?.showModal();
+  }, []);
+
+  const submitCreateProject = useCallback(async () => {
+    const name = newProjectName.trim();
+    if (!adapter || !name) {
+      return;
+    }
+    setCreateProjectBusy(true);
+    setCreateProjectError(null);
+    try {
+      const snap = await adapter.request<{ config?: Record<string, unknown> | null }>("config.get", {});
+      const workspace = resolveProjectWorkspacePath(snap.config ?? null, name);
+      const projectId = await adapter.createProject(name, workspace);
+      if (!projectId) {
+        throw new Error("创建失败，请检查项目名称与工作区路径。");
+      }
+      createProjectDialogRef.current?.close();
+      onProjectsReload();
+      onPick?.();
+      navigate({ pathname: ROUTES.root, search: `?projectId=${encodeURIComponent(projectId)}` });
+    } catch (err) {
+      setCreateProjectError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCreateProjectBusy(false);
+    }
+  }, [adapter, navigate, newProjectName, onPick, onProjectsReload]);
+
   const submitRename = useCallback(async () => {
     const key = renameKey.trim();
     const label = renameDraft.trim();
@@ -222,16 +255,8 @@ function SidebarNav({
     <div className="flex min-h-0 flex-1 flex-col">
       {collapsed ? (
         <div className="flex w-full shrink-0 justify-center px-2 pb-2 pt-3">
-          <div
-            className="group relative inline-flex items-center justify-center rounded-xl bg-white/60 p-1.5 shadow-sm ring-1 ring-slate-200/60"
-            title="小龙虾助手"
-          >
-            <span
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#0d6b52] text-xs font-bold text-white"
-              aria-hidden
-            >
-              龙
-            </span>
+          <div className="group relative inline-flex items-center justify-center rounded-xl bg-white/60 p-1.5 shadow-sm ring-1 ring-slate-200/60">
+            <PowerBrandMark compact showSubtitle={false} />
             {onToggleCollapsed ? (
               <button
                 type="button"
@@ -253,19 +278,9 @@ function SidebarNav({
         </div>
       ) : (
         <div className="flex shrink-0 items-center gap-2 px-3 pb-2 pt-3">
-          <div
-            className="flex w-full min-w-0 items-center gap-2 rounded-xl bg-white/60 px-2 py-1.5 shadow-sm ring-1 ring-slate-200/60"
-            title="小龙虾助手"
-          >
-            <span
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#0d6b52] text-xs font-bold text-white"
-              aria-hidden
-            >
-              龙
-            </span>
+          <div className="flex w-full min-w-0 items-center gap-2 rounded-xl bg-white/60 px-2 py-1.5 shadow-sm ring-1 ring-slate-200/60">
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold tracking-tight text-slate-900">小龙虾助手</p>
-              <p className="truncate text-[11px] text-slate-500">国网风格工作台</p>
+              <PowerBrandMark />
             </div>
             {onToggleCollapsed ? (
               <button
@@ -334,14 +349,15 @@ function SidebarNav({
             </button>
             {projectsOpen ? (
               <div className="mt-1 space-y-0.5 px-0.5 pb-2">
-                <Link
-                  to={ROUTES.workbench}
-                  onClick={() => onPick?.()}
-                  className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] font-medium text-[#0d6b52] transition hover:bg-white/70"
+                <button
+                  type="button"
+                  onClick={openCreateProject}
+                  disabled={!adapter || createProjectBusy}
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] font-medium text-[#0d6b52] transition hover:bg-white/70 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <FolderAddOutlined className="text-sm" />
                   <span>新建项目</span>
-                </Link>
+                </button>
                 {projects.map((p) => (
                   <div key={p.id} className="group flex items-stretch gap-0.5 rounded-lg hover:bg-white/60">
                     <Link
@@ -569,6 +585,57 @@ function SidebarNav({
       </Drawer>
 
       <dialog
+        ref={createProjectDialogRef}
+        className="w-[min(100vw-2rem,22rem)] rounded-2xl border border-slate-200 bg-white p-4 shadow-xl backdrop:bg-slate-900/25"
+        onClose={() => {
+          setNewProjectName("");
+          setCreateProjectError(null);
+        }}
+      >
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void submitCreateProject();
+          }}
+        >
+          <h2 className="text-sm font-semibold text-slate-900">新建项目</h2>
+          <p className="text-xs leading-snug text-slate-500">
+            输入项目名称；工作区目录将创建在默认 workspace 下。
+          </p>
+          <input
+            type="text"
+            value={newProjectName}
+            onChange={(ev) => setNewProjectName(ev.target.value)}
+            placeholder="项目名称"
+            className="rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-300/35"
+            autoFocus
+          />
+          {createProjectError ? (
+            <p className="text-xs text-red-600" role="alert">
+              {createProjectError}
+            </p>
+          ) : null}
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-700 transition hover:bg-slate-50"
+              onClick={() => createProjectDialogRef.current?.close()}
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              disabled={!newProjectName.trim() || createProjectBusy}
+              className="rounded-lg bg-[#0d6b52] px-3 py-1.5 text-sm font-medium text-white transition hover:bg-[#0a5844] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {createProjectBusy ? "创建中…" : "创建"}
+            </button>
+          </div>
+        </form>
+      </dialog>
+
+      <dialog
         ref={renameDialogRef}
         className="w-[min(100vw-2rem,22rem)] rounded-2xl border border-slate-200 bg-white p-4 shadow-xl backdrop:bg-slate-900/25"
         onClose={() => setRenameDraft("")}
@@ -623,6 +690,11 @@ export function PowerShellLayout() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [navProjects, setNavProjects] = useState<NavProject[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
+  const [projectsReloadToken, setProjectsReloadToken] = useState(0);
+
+  const reloadProjects = useCallback(() => {
+    setProjectsReloadToken((n) => n + 1);
+  }, []);
 
   useEffect(() => {
     if (!adapter) {
@@ -654,7 +726,7 @@ export function PowerShellLayout() {
     return () => {
       cancelled = true;
     };
-  }, [adapter]);
+  }, [adapter, projectsReloadToken]);
 
   const mobileTitle = useMemo(() => pathTitle(location.pathname), [location.pathname]);
 
@@ -669,6 +741,7 @@ export function PowerShellLayout() {
     onRecentSessionsChange: () => void refetchRecent(),
     projects: navProjects,
     projectsLoading,
+    onProjectsReload: reloadProjects,
   };
 
   return (

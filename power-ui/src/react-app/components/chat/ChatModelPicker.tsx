@@ -125,6 +125,9 @@ export function ChatModelPicker({ models, valueRef, onChange, disabled }: ChatMo
                   <span className="block truncate text-sm font-semibold leading-tight text-slate-900">
                     {displayName(m)}
                   </span>
+                  <span className="mt-0.5 block font-mono text-[10px] leading-snug text-slate-400">
+                    {ref}
+                  </span>
                   <span className="mt-0.5 block text-[11px] leading-snug text-slate-500">
                     {modelPickerSubtitle(m)}
                   </span>
