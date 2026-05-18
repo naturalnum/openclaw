@@ -1,0 +1,42 @@
+{
+  "id": "prompt-safety-guard-plugin",
+  "name": "Prompt Safety Guard Plugin",
+  "description": "Intercepts LLM calls with sensitive word filtering and safety model protection.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "sensitiveWords": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Sensitive words/phrases to filter from prompts."
+      },
+      "sensitivePatterns": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Regex patterns to detect sensitive content."
+      },
+      "safetyModelEndpoint": {
+        "type": "string",
+        "description": "External safety model API endpoint for content classification."
+      },
+      "safetyModelApiKey": {
+        "type": "string",
+        "description": "API key for the safety model endpoint."
+      },
+      "safetyModelTimeout": {
+        "type": "number",
+        "description": "Timeout in ms for safety model calls (default: 3000)."
+      },
+      "blockOnSafetyModelFailure": {
+        "type": "boolean",
+        "description": "Whether to block when safety model is unavailable (default: false)."
+      },
+      "action": {
+        "type": "string",
+        "enum": ["block", "warn", "redact"],
+        "description": "Action on sensitive content: block (reject), warn (log only), redact (mask content)."
+      }
+    }
+  }
+}
