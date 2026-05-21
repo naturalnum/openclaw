@@ -1,0 +1,62 @@
+{
+  "version": "2.0",
+  "description": "Content schema for extracting project materials before rendering into the PPT template.",
+  "root_fields": {
+    "project_meta": {
+      "fields": [
+        "project_code",
+        "project_title",
+        "lead_org",
+        "funding_org",
+        "start_date",
+        "end_date",
+        "budget_total_wan",
+        "project_owner",
+        "participant_orgs"
+      ]
+    },
+    "overview": {
+      "fields": [
+        "research_background",
+        "overall_research_contents",
+        "overall_objective",
+        "overall_deliverables",
+        "overall_indicators",
+        "software_goal",
+        "pilot_goal"
+      ]
+    },
+    "management": {
+      "fields": ["org_mechanism_summary", "milestones", "change_statement", "budget_rows"]
+    },
+    "tasks": {
+      "type": "array",
+      "item_fields": [
+        "task_number",
+        "task_title",
+        "owners",
+        "owner_orgs",
+        "research_contents",
+        "objective",
+        "indicators",
+        "deliverables",
+        "slide_ready_short_title",
+        "slide_ready_research_titles",
+        "slide_ready_body_points"
+      ]
+    },
+    "summary": {
+      "fields": ["summary_points", "outlook_points"]
+    },
+    "feedback": {
+      "fields": ["feedback_items"]
+    }
+  },
+  "source_priority": ["任务书 PDF 或 DOCX 原文", "技术报告或中间整理稿", "调用时的人工补充输入"],
+  "rewrite_rules": [
+    "Keep source truth, but rewrite into PPT-ready short sentences.",
+    "For body text, target 1-2 sentences per paragraph block.",
+    "For diagram labels, rewrite into 6-14 Chinese characters when possible.",
+    "If a source field is missing, leave it blank or mark it as 待补充; do not invent metrics."
+  ]
+}

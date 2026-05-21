@@ -32,7 +32,9 @@ export function quoteIdentifier(identifier: string): string {
   return `"${identifier.replaceAll('"', '""')}"`;
 }
 
-export function parseQualifiedTableName(tableInput: string): { schema: string; table: string } | null {
+export function parseQualifiedTableName(
+  tableInput: string,
+): { schema: string; table: string } | null {
   const trimmed = tableInput.trim();
   if (!trimmed) {
     return null;
@@ -259,7 +261,13 @@ const ASKDB_RETRIEVE_DICTIONARY_RELATIVE_PATH = "skills/askdb-analytics/retrieve
 let cachedAskDbRetrieveDictionary: AskDbLocalRetrieveDictionary | null = null;
 
 function isAskDbRetrieveCategory(value: string): value is AskDbRetrieveCategory {
-  return value === "unit" || value === "award" || value === "domain" || value === "term" || value === "example";
+  return (
+    value === "unit" ||
+    value === "award" ||
+    value === "domain" ||
+    value === "term" ||
+    value === "example"
+  );
 }
 
 function normalizeAskDbLocalRetrieveDictionary(raw: unknown): AskDbLocalRetrieveDictionary | null {
@@ -460,8 +468,8 @@ export function enrichAskDbHeuristicPlanWithRetrieve(
   const unitHits = provider.retrieve(prompt, "unit", 3);
   const extraTerms = termHits.map((hit) => hit.content).join(" ");
   const searchQuery = `${basePlan.searchQuery} ${extraTerms}`.trim();
-  const domainConstraint = basePlan.domainConstraint ?? (domainHits[0]?.query ?? null);
-  const orgConstraint = basePlan.orgConstraint ?? (unitHits[0]?.content ?? null);
+  const domainConstraint = basePlan.domainConstraint ?? domainHits[0]?.query ?? null;
+  const orgConstraint = basePlan.orgConstraint ?? unitHits[0]?.content ?? null;
   return {
     ...basePlan,
     searchQuery,
@@ -565,7 +573,14 @@ export function pickAskDbTechDomainColumn(rows: Array<Record<string, unknown>>):
     .map((row) => normalizeOptionalString(row.column_name))
     .filter((name): name is string => Boolean(name))
     .map((name) => name.toLowerCase());
-  const preferred = ["tech_domain", "technology_domain", "domain", "tech_field", "technical_field", "技术领域"];
+  const preferred = [
+    "tech_domain",
+    "technology_domain",
+    "domain",
+    "tech_field",
+    "technical_field",
+    "技术领域",
+  ];
   for (const candidate of preferred) {
     const hit = names.find((name) => name === candidate);
     if (hit) {
@@ -595,7 +610,11 @@ export function pickAskDbOrgColumn(rows: Array<Record<string, unknown>>): string
       return hit;
     }
   }
-  return names.find((name) => name.includes("org") || name.includes("unit") || name.includes("company")) ?? null;
+  return (
+    names.find(
+      (name) => name.includes("org") || name.includes("unit") || name.includes("company"),
+    ) ?? null
+  );
 }
 
 export function formatColumnDescribeLines(
@@ -607,10 +626,22 @@ export function formatColumnDescribeLines(
   }
   const lines: string[] = [];
   for (const row of rows.slice(0, maxLines)) {
-    const name = String(row.column_name ?? "");
-    const type = String(row.data_type ?? "");
-    const nullable = String(row.is_nullable ?? "");
-    const def = row.column_default != null ? String(row.column_default) : "";
+    const name =
+      typeof row.column_name === "string" || typeof row.column_name === "number"
+        ? String(row.column_name)
+        : "";
+    const type =
+      typeof row.data_type === "string" || typeof row.data_type === "number"
+        ? String(row.data_type)
+        : "";
+    const nullable =
+      typeof row.is_nullable === "string" || typeof row.is_nullable === "number"
+        ? String(row.is_nullable)
+        : "";
+    const def =
+      typeof row.column_default === "string" || typeof row.column_default === "number"
+        ? String(row.column_default)
+        : "";
     const defSuffix = def ? ` default=${def}` : "";
     lines.push(`- ${name}: ${type} nullable=${nullable}${defSuffix}`);
   }

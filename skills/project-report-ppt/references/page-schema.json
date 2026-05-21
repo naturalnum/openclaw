@@ -1,0 +1,253 @@
+{
+  "version": "2.0",
+  "template": "/Users/star/code/myskills/tmp/20260127.pptx",
+  "description": "Range-based page schema for the updated project report PPT template. It separates fixed template pages from dynamic content pages and defines the preferred content contract for each block.",
+  "global_rules": {
+    "fixed_template_text_policy": "Keep fixed template text for cover ornaments, agenda pages, major chapter headers, ending page, and non-dynamic decorative labels.",
+    "dynamic_content_policy": "All project-specific text must come from source materials or from controlled slide-ready rewriting based on extracted source facts.",
+    "overflow_policy": [
+      "Prefer shorter slide-ready rewriting before shrinking fonts.",
+      "Keep body text inside the light-blue background box.",
+      "Split or duplicate dynamic page types instead of overloading a single slide."
+    ]
+  },
+  "page_types": {
+    "cover": {
+      "dynamic_slots": ["project_title", "project_lead", "lead_org", "participant_orgs"],
+      "template_text_policy": "preserve"
+    },
+    "agenda": {
+      "dynamic_slots": [],
+      "template_text_policy": "preserve"
+    },
+    "chapter-divider": {
+      "dynamic_slots": [],
+      "template_text_policy": "preserve"
+    },
+    "background-body": {
+      "dynamic_slots": ["body_summary"],
+      "template_text_policy": "preserve-header"
+    },
+    "problem-structure": {
+      "dynamic_slots": ["problem_cards", "goal_cards"],
+      "template_text_policy": "preserve-header"
+    },
+    "project-info-table": {
+      "dynamic_slots": ["project_meta", "task_table"],
+      "template_text_policy": "preserve-header"
+    },
+    "responsibility-page": {
+      "dynamic_slots": ["lead_org", "project_owner", "consultants", "task_owners"],
+      "template_text_policy": "preserve-header"
+    },
+    "management-page": {
+      "dynamic_slots": ["body_summary", "mechanism_labels"],
+      "template_text_policy": "preserve-header"
+    },
+    "timeline-page": {
+      "dynamic_slots": ["milestones"],
+      "template_text_policy": "preserve-header"
+    },
+    "change-page": {
+      "dynamic_slots": ["change_statement"],
+      "template_text_policy": "preserve-header"
+    },
+    "budget-page": {
+      "dynamic_slots": ["budget_rows"],
+      "template_text_policy": "preserve-header"
+    },
+    "research-baseline-page": {
+      "dynamic_slots": ["body_summary", "comparison_points"],
+      "template_text_policy": "preserve-header"
+    },
+    "overall-roadmap-page": {
+      "dynamic_slots": ["overall_roadmap", "overall_summary"],
+      "template_text_policy": "preserve-header"
+    },
+    "task-subtitle-page": {
+      "dynamic_slots": ["task_title"],
+      "template_text_policy": "preserve-main-title"
+    },
+    "task-route-page": {
+      "dynamic_slots": ["task_title", "route_title", "route_summary", "route_labels"],
+      "template_text_policy": "preserve-main-title"
+    },
+    "task-research-page": {
+      "dynamic_slots": ["task_title", "research_item_title", "body_summary", "diagram_labels"],
+      "template_text_policy": "preserve-main-title"
+    },
+    "task-validation-page": {
+      "dynamic_slots": ["task_title", "research_item_title", "validation_summary", "result_labels"],
+      "template_text_policy": "preserve-main-title"
+    },
+    "indicator-table-page": {
+      "dynamic_slots": ["indicator_rows"],
+      "template_text_policy": "preserve-header"
+    },
+    "deliverable-table-page": {
+      "dynamic_slots": ["deliverable_rows"],
+      "template_text_policy": "preserve-header"
+    },
+    "innovation-summary-page": {
+      "dynamic_slots": [
+        "innovation_title",
+        "innovation_summary",
+        "supporting_results",
+        "innovation_labels"
+      ],
+      "template_text_policy": "preserve-main-title"
+    },
+    "summary-page": {
+      "dynamic_slots": ["body_summary", "outlook_points"],
+      "template_text_policy": "preserve-header"
+    },
+    "feedback-page": {
+      "dynamic_slots": ["feedback_items"],
+      "template_text_policy": "preserve-header"
+    },
+    "ending": {
+      "dynamic_slots": [],
+      "template_text_policy": "preserve"
+    }
+  },
+  "slide_map": [
+    {
+      "slides": [1],
+      "page_type": "cover",
+      "section": "basic-info"
+    },
+    {
+      "slides": [2, 12, 16, 56, 59],
+      "page_type": "agenda",
+      "section": "fixed"
+    },
+    {
+      "slides": [3, 4],
+      "page_type": "background-body",
+      "section": "basic-info"
+    },
+    {
+      "slides": [5],
+      "page_type": "problem-structure",
+      "section": "basic-info"
+    },
+    {
+      "slides": [6],
+      "page_type": "project-info-table",
+      "section": "basic-info"
+    },
+    {
+      "slides": [7],
+      "page_type": "responsibility-page",
+      "section": "basic-info"
+    },
+    {
+      "slides": [8],
+      "page_type": "management-page",
+      "section": "basic-info"
+    },
+    {
+      "slides": [9],
+      "page_type": "timeline-page",
+      "section": "basic-info"
+    },
+    {
+      "slides": [10],
+      "page_type": "change-page",
+      "section": "basic-info"
+    },
+    {
+      "slides": [11],
+      "page_type": "budget-page",
+      "section": "basic-info"
+    },
+    {
+      "slides": [13, 14, 15],
+      "page_type": "research-baseline-page",
+      "section": "research-progress"
+    },
+    {
+      "slides": [17],
+      "page_type": "overall-roadmap-page",
+      "section": "results"
+    },
+    {
+      "slides": [18],
+      "page_type": "task-route-page",
+      "section": "results",
+      "task_number": 1
+    },
+    {
+      "slides": [19, 20, 21, 22],
+      "page_type": "task-research-page",
+      "section": "results",
+      "task_number": 1
+    },
+    {
+      "slides": [23],
+      "page_type": "task-route-page",
+      "section": "results",
+      "task_number": 2
+    },
+    {
+      "slides": [24, 25, 26, 27, 28, 29, 30],
+      "page_type": "task-research-page",
+      "section": "results",
+      "task_number": 2
+    },
+    {
+      "slides": [31],
+      "page_type": "task-route-page",
+      "section": "results",
+      "task_number": 3
+    },
+    {
+      "slides": [32, 33, 34, 35, 36, 37],
+      "page_type": "task-research-page",
+      "section": "results",
+      "task_number": 3
+    },
+    {
+      "slides": [38],
+      "page_type": "task-route-page",
+      "section": "results",
+      "task_number": 4
+    },
+    {
+      "slides": [39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49],
+      "page_type": "task-research-page",
+      "section": "results",
+      "task_number": 4
+    },
+    {
+      "slides": [50],
+      "page_type": "indicator-table-page",
+      "section": "results"
+    },
+    {
+      "slides": [51, 52],
+      "page_type": "deliverable-table-page",
+      "section": "results"
+    },
+    {
+      "slides": [53, 54, 55],
+      "page_type": "innovation-summary-page",
+      "section": "results"
+    },
+    {
+      "slides": [57, 58],
+      "page_type": "summary-page",
+      "section": "summary"
+    },
+    {
+      "slides": [60],
+      "page_type": "feedback-page",
+      "section": "feedback"
+    },
+    {
+      "slides": [61],
+      "page_type": "ending",
+      "section": "fixed"
+    }
+  ]
+}
