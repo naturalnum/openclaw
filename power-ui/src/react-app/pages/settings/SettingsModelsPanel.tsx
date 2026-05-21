@@ -1,10 +1,21 @@
-import { DeleteOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
-import { Alert, App, Button, Card, Form, Input, Select, Space, Spin, Switch, Typography } from "antd";
-import { useCallback, useEffect, useState } from "react";
-
+import { DeleteOutlined, EditOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
+import {
+  Alert,
+  App,
+  Button,
+  Card,
+  Form,
+  Input,
+  Modal,
+  Select,
+  Space,
+  Spin,
+  Switch,
+  Typography,
+} from "antd";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { GatewayWorkbenchAdapter } from "../../../adapters/gateway-workbench-adapter";
 import type { ConfigSnapshot } from "../../../compat/types";
-import { modelOptionLabel } from "../../lib/configured-chat-models";
 import type { ModelCatalogEntry } from "../../../compat/types";
 import {
   createEmptyModelConfig,
@@ -23,13 +34,31 @@ type Props = {
   canUseGateway: boolean;
 };
 
+function modelSelectLabel(
+  ref: string,
+  modelConfigs: WorkbenchModelConfig[],
+  labelPool: ModelCatalogEntry[],
+) {
+  const row = modelConfigs.find((item) => formatModelRef(item.provider, item.model) === ref);
+  const label =
+    row?.name.trim() ||
+    labelPool.find((item) => formatModelRef(item.provider, item.id) === ref)?.name ||
+    ref;
+  return (
+    <span className="flex min-w-0 items-center">
+      <span className="truncate text-sm font-medium text-slate-900">{label}</span>
+    </span>
+  );
+}
+
 export function SettingsModelsPanel({ adapter, canUseGateway }: Props) {
   const { message } = App.useApp();
-  const [modelConfigs, setModelConfigs] = useState<WorkbenchModelConfig[]>([createEmptyModelConfig()]);
+  const [modelConfigs, setModelConfigs] = useState([createEmptyModelConfig()]);
   const [currentModelId, setCurrentModelId] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editingModelId, setEditingModelId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!adapter || !canUseGateway) {
@@ -39,7 +68,10 @@ export function SettingsModelsPanel({ adapter, canUseGateway }: Props) {
     setError(null);
     try {
       const snap = await adapter.request<ConfigSnapshot>("config.get", {});
-      const cfg = snap.config && typeof snap.config === "object" && !Array.isArray(snap.config) ? snap.config : {};
+      const cfg =
+        snap.config && typeof snap.config === "object" && !Array.isArray(snap.config)
+          ? snap.config
+          : {};
       setModelConfigs(readGlobalModelConfigs(cfg));
       setCurrentModelId(resolvePrimaryModelFromConfig(cfg));
     } catch (e) {
@@ -54,6 +86,10 @@ export function SettingsModelsPanel({ adapter, canUseGateway }: Props) {
   }, [load]);
 
   const configuredRefs = listConfiguredModelRefs(modelConfigs);
+  const editingModel = useMemo(
+    () => modelConfigs.find((row) => row.id === editingModelId) ?? null,
+    [editingModelId, modelConfigs],
+  );
 
   const labelPool: ModelCatalogEntry[] = modelConfigs
     .filter((r) => r.enabled && r.provider.trim() && r.model.trim())
@@ -70,6 +106,7 @@ export function SettingsModelsPanel({ adapter, canUseGateway }: Props) {
   const addRow = () => {
     const row = createEmptyModelConfig();
     setModelConfigs((rows) => [...rows, row]);
+    setEditingModelId(row.id);
   };
 
   const removeRow = (id: string) => {
@@ -85,6 +122,7 @@ export function SettingsModelsPanel({ adapter, canUseGateway }: Props) {
       }
       return next;
     });
+    setEditingModelId((cur) => (cur === id ? null : cur));
   };
 
   const save = async () => {
@@ -114,150 +152,93 @@ export function SettingsModelsPanel({ adapter, canUseGateway }: Props) {
     return null;
   }
 
-  const cardSurface =
-    "border border-slate-200/90 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.05)]";
+  const cardSurface = "border border-slate-200/90 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.05)]";
 
   return (
     <div className="w-full space-y-4">
-      <div className="flex flex-wrap justify-end gap-2 border-b border-slate-100 pb-3">
-        <Button onClick={() => void load()} disabled={loading}>
-          重新加载
-        </Button>
-        <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void save()}>
-          保存到网关
-        </Button>
-      </div>
-
       {error ? <Alert type="error" showIcon message={error} className="text-sm" /> : null}
-
-      <Alert
-        type="info"
-        showIcon
-        className="text-sm"
-        message="模型配置分三层"
-        description={
-          <ul className="m-0 list-disc space-y-1 pl-4 text-xs leading-relaxed text-slate-600">
-            <li>
-              <strong>下方条目</strong>：写入{" "}
-              <code className="rounded bg-slate-100 px-1">models.providers</code>
-              ，决定 API、密钥与可选模型 ID（对话顶栏下拉列表来源）。
-            </li>
-            <li>
-              <strong>默认主模型</strong>：写入{" "}
-              <code className="rounded bg-slate-100 px-1">agents.defaults.model.primary</code>
-              ，新会话或未单独绑定时的默认值。
-            </li>
-            <li>
-              <strong>对话顶栏切换</strong>：对已选会话调用{" "}
-              <code className="rounded bg-slate-100 px-1">sessions.patch</code>
-              ，绑定到该会话后<strong>运行时以此为准</strong>（优先于本地偏好显示）。
-            </li>
-          </ul>
-        }
-      />
 
       <Card
         size="small"
         className={`${cardSurface} overflow-hidden rounded-xl`}
         styles={{ body: { padding: "16px 20px" } }}
       >
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between lg:gap-8">
-          <div className="min-w-0 shrink lg:max-w-md">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0 shrink">
             <Text className="text-sm font-semibold text-slate-900">默认主模型</Text>
-            <Text type="secondary" className="mt-0.5 block text-xs leading-snug">
-              仅已启用且含模型 ID 的条目；写回{" "}
-              <code className="rounded bg-slate-100 px-1 py-0.5 text-[11px]">agents.defaults.model.primary</code>
-            </Text>
           </div>
-          <div className="w-full min-w-0 flex-1 lg:max-w-xl">
+          <div className="flex w-full min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center lg:max-w-xl">
             <Select
-              className="w-full"
+              className="min-w-0 flex-1 [&_.ant-select-selector]:!rounded-xl"
               size="large"
-              placeholder="选择 provider/model"
+              popupClassName="power-model-select-dropdown"
+              placeholder="选择默认模型"
               value={currentModelId || undefined}
               onChange={(v) => setCurrentModelId(v)}
               options={configuredRefs.map((ref) => ({
-                label: modelOptionLabel(ref, modelConfigs, labelPool),
+                label: modelSelectLabel(ref, modelConfigs, labelPool),
                 value: ref,
               }))}
               allowClear
             />
+            <Button
+              type="primary"
+              icon={<SaveOutlined />}
+              loading={saving}
+              onClick={() => void save()}
+            >
+              保存
+            </Button>
           </div>
         </div>
       </Card>
 
       <Spin spinning={loading}>
-        <Space direction="vertical" size="middle" className="w-full">
+        <Space direction="vertical" size="small" className="w-full">
           {modelConfigs.map((row, index) => (
             <Card
               key={row.id}
               size="small"
-              className={`${cardSurface} overflow-hidden rounded-xl border-l-[3px] border-l-[#0d6b52]/45`}
-              styles={{ body: { padding: "16px 20px" } }}
-              title={
-                <span className="text-sm font-semibold text-slate-900">
-                  条目 {index + 1}
-                  {row.provider && row.model ? (
-                    <Text type="secondary" className="ml-1.5 text-xs font-normal">
-                      ({formatModelRef(row.provider, row.model)})
-                    </Text>
-                  ) : null}
-                </span>
-              }
-              extra={
+              className={`${cardSurface} overflow-hidden rounded-xl`}
+              styles={{ body: { padding: "12px 14px" } }}
+            >
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-slate-900">条目 {index + 1}</span>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                        row.enabled ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-500"
+                      }`}
+                    >
+                      {row.enabled ? "启用" : "停用"}
+                    </span>
+                  </div>
+                  <Text type="secondary" className="mt-0.5 block truncate text-xs">
+                    {row.provider && row.model
+                      ? formatModelRef(row.provider, row.model)
+                      : "未配置 provider/model"}
+                  </Text>
+                </div>
                 <Space size={4}>
-                  <span className="text-xs text-slate-600">启用</span>
-                  <Switch checked={row.enabled} onChange={(v) => updateRow(row.id, { enabled: v })} />
-                  <Button danger type="text" icon={<DeleteOutlined />} onClick={() => removeRow(row.id)}>
+                  <Button
+                    size="small"
+                    icon={<EditOutlined />}
+                    onClick={() => setEditingModelId(row.id)}
+                  >
+                    编辑
+                  </Button>
+                  <Button
+                    danger
+                    size="small"
+                    type="text"
+                    icon={<DeleteOutlined />}
+                    onClick={() => removeRow(row.id)}
+                  >
                     删除
                   </Button>
                 </Space>
-              }
-            >
-              <Form layout="vertical" className="w-full">
-                <div className="grid gap-x-6 gap-y-1 md:grid-cols-2">
-                  <Form.Item label="提供商 ID" className="!mb-3">
-                    <Input
-                      size="large"
-                      value={row.provider}
-                      onChange={(e) => updateRow(row.id, { provider: e.target.value })}
-                      placeholder="openai"
-                    />
-                  </Form.Item>
-                  <Form.Item label="显示名称" className="!mb-3">
-                    <Input
-                      size="large"
-                      value={row.name}
-                      onChange={(e) => updateRow(row.id, { name: e.target.value })}
-                      placeholder="可选"
-                    />
-                  </Form.Item>
-                  <Form.Item label="API Base URL" className="!mb-3 md:col-span-2">
-                    <Input
-                      size="large"
-                      value={row.baseUrl}
-                      onChange={(e) => updateRow(row.id, { baseUrl: e.target.value })}
-                      placeholder="https://api.openai.com/v1"
-                    />
-                  </Form.Item>
-                  <Form.Item label="API Key（留空保留原值）" className="!mb-3 md:col-span-2">
-                    <Input.Password
-                      size="large"
-                      value={row.apiKey}
-                      onChange={(e) => updateRow(row.id, { apiKey: e.target.value })}
-                      placeholder="留空表示不修改已保存的密钥"
-                    />
-                  </Form.Item>
-                  <Form.Item label="模型 ID" className="!mb-0 md:col-span-2">
-                    <Input
-                      size="large"
-                      value={row.model}
-                      onChange={(e) => updateRow(row.id, { model: e.target.value })}
-                      placeholder="gpt-4o、claude-sonnet-4-5 等"
-                    />
-                  </Form.Item>
-                </div>
-              </Form>
+              </div>
             </Card>
           ))}
         </Space>
@@ -266,6 +247,76 @@ export function SettingsModelsPanel({ adapter, canUseGateway }: Props) {
       <Button type="dashed" block icon={<PlusOutlined />} onClick={addRow}>
         添加模型配置
       </Button>
+
+      <Modal
+        title={editingModel ? "编辑模型配置" : "模型配置"}
+        open={Boolean(editingModel)}
+        onCancel={() => setEditingModelId(null)}
+        footer={[
+          <Button key="cancel" onClick={() => setEditingModelId(null)}>
+            关闭
+          </Button>,
+          <Button
+            key="save"
+            type="primary"
+            icon={<SaveOutlined />}
+            loading={saving}
+            onClick={() => void save()}
+          >
+            保存到网关
+          </Button>,
+        ]}
+        width={620}
+        destroyOnHidden
+      >
+        {editingModel ? (
+          <Form layout="vertical" size="small" className="mt-2">
+            <div className="grid gap-x-3 gap-y-1 md:grid-cols-2">
+              <Form.Item label="提供商 ID" className="!mb-3">
+                <Input
+                  value={editingModel.provider}
+                  onChange={(e) => updateRow(editingModel.id, { provider: e.target.value })}
+                  placeholder="openai"
+                />
+              </Form.Item>
+              <Form.Item label="显示名称" className="!mb-3">
+                <Input
+                  value={editingModel.name}
+                  onChange={(e) => updateRow(editingModel.id, { name: e.target.value })}
+                  placeholder="可选"
+                />
+              </Form.Item>
+              <Form.Item label="API Base URL" className="!mb-3 md:col-span-2">
+                <Input
+                  value={editingModel.baseUrl}
+                  onChange={(e) => updateRow(editingModel.id, { baseUrl: e.target.value })}
+                  placeholder="https://api.openai.com/v1"
+                />
+              </Form.Item>
+              <Form.Item label="API Key（留空保留原值）" className="!mb-3 md:col-span-2">
+                <Input.Password
+                  value={editingModel.apiKey}
+                  onChange={(e) => updateRow(editingModel.id, { apiKey: e.target.value })}
+                  placeholder="留空表示不修改已保存的密钥"
+                />
+              </Form.Item>
+              <Form.Item label="模型 ID" className="!mb-3 md:col-span-2">
+                <Input
+                  value={editingModel.model}
+                  onChange={(e) => updateRow(editingModel.id, { model: e.target.value })}
+                  placeholder="gpt-4o、claude-sonnet-4-5 等"
+                />
+              </Form.Item>
+              <Form.Item label="启用" className="!mb-0">
+                <Switch
+                  checked={editingModel.enabled}
+                  onChange={(v) => updateRow(editingModel.id, { enabled: v })}
+                />
+              </Form.Item>
+            </div>
+          </Form>
+        ) : null}
+      </Modal>
     </div>
   );
 }

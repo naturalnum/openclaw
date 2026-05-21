@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from "react";
-
 import type { GatewayWorkbenchAdapter } from "../../adapters/gateway-workbench-adapter";
 import type { WorkbenchAdapterEvent } from "../../adapters/workbench-adapter";
 
@@ -36,9 +35,10 @@ export function useRecentSessionsForNav(adapter: GatewayWorkbenchAdapter | null)
         .map((r) => ({
           key: r.key!.trim(),
           label: (typeof r.label === "string" ? r.label : "").trim() || r.key!.trim(),
-          updatedAt: typeof r.updatedAt === "number" && Number.isFinite(r.updatedAt) ? r.updatedAt : null,
+          updatedAt:
+            typeof r.updatedAt === "number" && Number.isFinite(r.updatedAt) ? r.updatedAt : null,
         }))
-        .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+        .toSorted((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
         .slice(0, 24);
       setSessions(mapped);
     } catch {
@@ -54,11 +54,11 @@ export function useRecentSessionsForNav(adapter: GatewayWorkbenchAdapter | null)
 
   useEffect(() => {
     if (!adapter) {
-      return;
+      return undefined;
     }
     let t: number | null = null;
     const sub = adapter.subscribe((event: WorkbenchAdapterEvent) => {
-      if (event.type === "chat" && (event.state === "final" || event.state === "error")) {
+      if (event.type === "chat") {
         if (t != null) {
           window.clearTimeout(t);
         }

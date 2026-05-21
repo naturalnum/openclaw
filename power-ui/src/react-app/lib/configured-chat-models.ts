@@ -1,14 +1,13 @@
+import { parseAgentSessionKey } from "../../../../ui/src/ui/session-key";
 import type { WorkbenchSnapshot } from "../../adapters/mock-workbench-adapter";
 import type { ModelCatalogEntry } from "../../compat/types";
-import { parseAgentSessionKey } from "../../../../ui/src/ui/session-key";
-
-import { formatCatalogModelRef } from "./model-catalog";
 import {
   listConfiguredModelRefs,
   readGlobalModelConfigs,
   resolvePrimaryModelFromConfig,
   type WorkbenchModelConfig,
 } from "./global-model-config";
+import { formatCatalogModelRef } from "./model-catalog";
 
 /** 判断目录项是否匹配网关/配置里的 model ref（含 `provider/id` 或裸 `id`）。 */
 export function catalogEntryMatchesRef(entry: ModelCatalogEntry, ref: string): boolean {
@@ -158,9 +157,7 @@ export function buildComposerModelCatalog(
     const provider = slashIndex >= 0 ? ref.slice(0, slashIndex) : "";
     const modelId = slashIndex >= 0 ? ref.slice(slashIndex + 1) : ref;
     const row = configs.find(
-      (c) =>
-        c.enabled &&
-        formatCatalogModelRef({ provider: c.provider, id: c.model }) === ref,
+      (c) => c.enabled && formatCatalogModelRef({ provider: c.provider, id: c.model }) === ref,
     );
     const displayName = row?.name?.trim() || modelId;
     return {
@@ -283,7 +280,7 @@ export function resolveChatModelPool(
   selectedProjectId: string | null,
   selectedSessionKey: string,
 ): ModelCatalogEntry[] {
-  const catalog = [...(snapshot?.modelCatalog ?? [])].sort((a, b) => {
+  const catalog = [...(snapshot?.modelCatalog ?? [])].toSorted((a, b) => {
     const ca = formatCatalogModelRef(a);
     const cb = formatCatalogModelRef(b);
     if (ca !== cb) {

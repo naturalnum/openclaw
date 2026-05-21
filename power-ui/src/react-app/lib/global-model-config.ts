@@ -11,7 +11,10 @@ const DEFAULT_PROVIDER_PREFIX = "provider";
 const REDACTED_SENTINEL = "__OPENCLAW_REDACTED__";
 
 function createLocalId(): string {
-  if (typeof globalThis.crypto !== "undefined" && typeof globalThis.crypto.randomUUID === "function") {
+  if (
+    typeof globalThis.crypto !== "undefined" &&
+    typeof globalThis.crypto.randomUUID === "function"
+  ) {
     return globalThis.crypto.randomUUID();
   }
   return `power-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -32,11 +35,9 @@ export function createEmptyModelConfig(): WorkbenchModelConfig {
 export function formatModelRef(provider: string, model: string): string {
   const normalizedProvider = provider.trim();
   const normalizedModel = model.trim();
-  return normalizedProvider && normalizedModel ? `${normalizedProvider}/${normalizedModel}` : normalizedModel;
-}
-
-function readConfigObject(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  return normalizedProvider && normalizedModel
+    ? `${normalizedProvider}/${normalizedModel}`
+    : normalizedModel;
 }
 
 function isRedactedSentinelValue(value: string): boolean {
@@ -75,8 +76,7 @@ export function resolveProjectWorkspacePath(
   config: Record<string, unknown> | null | undefined,
   projectName: string,
 ): string {
-  const base =
-    readDefaultAgentWorkspace(config)?.replace(/\/+$/, "") ?? "~/.openclaw/workspace";
+  const base = readDefaultAgentWorkspace(config)?.replace(/\/+$/, "") ?? "~/.openclaw/workspace";
   return `${base}/${slugifyProjectFolderName(projectName)}`;
 }
 
@@ -95,8 +95,11 @@ export function readDefaultAgentWorkspace(
   return typeof workspace === "string" && workspace.trim() ? workspace.trim() : null;
 }
 
-export function resolvePrimaryModelFromConfig(config: Record<string, unknown> | null | undefined): string {
-  const modelConfig = (config as { agents?: { defaults?: { model?: unknown } } } | null)?.agents?.defaults?.model;
+export function resolvePrimaryModelFromConfig(
+  config: Record<string, unknown> | null | undefined,
+): string {
+  const modelConfig = (config as { agents?: { defaults?: { model?: unknown } } } | null)?.agents
+    ?.defaults?.model;
   if (typeof modelConfig === "string") {
     return modelConfig.trim();
   }
@@ -110,7 +113,9 @@ export function resolvePrimaryModelFromConfig(config: Record<string, unknown> | 
   return "";
 }
 
-export function readGlobalModelConfigs(config: Record<string, unknown> | null | undefined): WorkbenchModelConfig[] {
+export function readGlobalModelConfigs(
+  config: Record<string, unknown> | null | undefined,
+): WorkbenchModelConfig[] {
   const providers = (
     config as {
       models?: {
@@ -166,7 +171,10 @@ export function listConfiguredModelRefs(modelConfigs: WorkbenchModelConfig[]): s
       continue;
     }
     const modelId = row.model.trim();
-    const providerId = sanitizeProviderId(row.provider, row.name || modelId || DEFAULT_PROVIDER_PREFIX);
+    const providerId = sanitizeProviderId(
+      row.provider,
+      row.name || modelId || DEFAULT_PROVIDER_PREFIX,
+    );
     if (modelId) {
       refs.push(formatModelRef(providerId, modelId));
     }
@@ -181,9 +189,13 @@ export function buildNextGlobalModelConfig(params: {
 }): Record<string, unknown> {
   const next = cloneConfigObject(params.config ?? {});
   const existingModels =
-    typeof next.models === "object" && next.models !== null ? (next.models as Record<string, unknown>) : {};
+    typeof next.models === "object" && next.models !== null
+      ? (next.models as Record<string, unknown>)
+      : {};
   const existingAgents =
-    typeof next.agents === "object" && next.agents !== null ? (next.agents as Record<string, unknown>) : {};
+    typeof next.agents === "object" && next.agents !== null
+      ? (next.agents as Record<string, unknown>)
+      : {};
   const existingDefaults =
     typeof existingAgents.defaults === "object" && existingAgents.defaults !== null
       ? (existingAgents.defaults as Record<string, unknown>)
@@ -280,10 +292,10 @@ export async function persistGlobalModelConfig(params: {
   modelConfigs: WorkbenchModelConfig[];
   currentModelId: string;
 }): Promise<void> {
-  const snapshot = await params.adapter.request<{ hash?: string | null; config?: Record<string, unknown> | null }>(
-    "config.get",
-    {},
-  );
+  const snapshot = await params.adapter.request<{
+    hash?: string | null;
+    config?: Record<string, unknown> | null;
+  }>("config.get", {});
   const baseHash = snapshot.hash?.trim();
   if (!baseHash) {
     throw new Error("无法保存：配置缺少 baseHash，请刷新后重试。");

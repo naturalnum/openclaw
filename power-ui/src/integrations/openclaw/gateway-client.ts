@@ -116,9 +116,6 @@ export class PowerGatewayClient {
     return await new Promise<T | null>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open("POST", url, true);
-      if (params.file.type) {
-        xhr.setRequestHeader("Content-Type", params.file.type);
-      }
       if (token) {
         xhr.setRequestHeader("Authorization", `Bearer ${token}`);
       }

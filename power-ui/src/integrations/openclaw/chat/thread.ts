@@ -1,6 +1,7 @@
 import { html, nothing, type TemplateResult } from "lit";
 import { repeat } from "lit/directives/repeat.js";
 import { isToolResultMessage } from "../../../../../ui/src/ui/chat/message-normalizer.ts";
+import { shouldHideChatMessage } from "../../../../../ui/src/ui/chat/message-visibility.ts";
 import { getOrCreateSessionCacheValue } from "../../../../../ui/src/ui/chat/session-cache.ts";
 import { extractToolCards } from "../../../../../ui/src/ui/chat/tool-cards.ts";
 import {
@@ -191,6 +192,9 @@ function buildChatItems(props: PowerChatThreadProps): Array<ChatItem | MessageGr
 
   for (let index = historyStart; index < history.length; index += 1) {
     const message = history[index];
+    if (shouldHideChatMessage(message, { showToolCalls: props.showToolCalls })) {
+      continue;
+    }
     const normalized = normalizeMessage(message);
     const raw = message as Record<string, unknown>;
     const marker = raw.__openclaw as Record<string, unknown> | undefined;
@@ -204,9 +208,6 @@ function buildChatItems(props: PowerChatThreadProps): Array<ChatItem | MessageGr
         label: "Compaction",
         timestamp: normalized.timestamp ?? Date.now(),
       });
-      continue;
-    }
-    if (!props.showToolCalls && normalized.role.toLowerCase() === "toolresult") {
       continue;
     }
     items.push({

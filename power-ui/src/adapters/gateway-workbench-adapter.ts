@@ -85,12 +85,11 @@ function resolveProjectId(projectId: string | null, agentsList: AgentsListResult
 function resolveSelection(
   args: WorkbenchSelection,
   agentsList: AgentsListResult | null,
-  sessionsResult: SessionsListResult | null,
+  _sessionsResult: SessionsListResult | null,
 ) {
   const rawSessionKey = args.sessionKey?.trim() ?? "";
-  const sessionKey = (sessionsResult?.sessions ?? []).some((row) => row.key === rawSessionKey)
-    ? rawSessionKey
-    : "";
+  // Honor explicit session selection even if sessions.list is stale or truncated.
+  const sessionKey = rawSessionKey;
   const sessionProjectId = sessionKey ? (parseAgentSessionKey(sessionKey)?.agentId ?? null) : null;
   const mergedProjectId = args.projectId ?? sessionProjectId ?? null;
   if (args.skipProjectDefault) {
@@ -129,6 +128,50 @@ async function requiredRequest<T>(request: Promise<T>, label: string): Promise<T
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`${label} failed: ${message}`, { cause: error });
   }
+}
+
+function mimeTypeFromPath(path: string): string {
+  const lower = path.toLowerCase();
+  if (lower.endsWith(".pdf")) {
+    return "application/pdf";
+  }
+  if (lower.endsWith(".png")) {
+    return "image/png";
+  }
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
+    return "image/jpeg";
+  }
+  if (lower.endsWith(".gif")) {
+    return "image/gif";
+  }
+  if (lower.endsWith(".webp")) {
+    return "image/webp";
+  }
+  if (lower.endsWith(".svg")) {
+    return "image/svg+xml";
+  }
+  if (lower.endsWith(".txt") || lower.endsWith(".log") || lower.endsWith(".md")) {
+    return "text/plain;charset=utf-8";
+  }
+  if (lower.endsWith(".json")) {
+    return "application/json;charset=utf-8";
+  }
+  if (lower.endsWith(".js") || lower.endsWith(".mjs") || lower.endsWith(".cjs")) {
+    return "text/javascript;charset=utf-8";
+  }
+  if (lower.endsWith(".ts") || lower.endsWith(".tsx")) {
+    return "text/plain;charset=utf-8";
+  }
+  if (lower.endsWith(".py")) {
+    return "text/x-python;charset=utf-8";
+  }
+  if (lower.endsWith(".html") || lower.endsWith(".htm")) {
+    return "text/html;charset=utf-8";
+  }
+  if (lower.endsWith(".css")) {
+    return "text/css;charset=utf-8";
+  }
+  return "application/octet-stream";
 }
 
 export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
@@ -251,7 +294,9 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
       agentIdentityById: buildIdentityMap(agentsList),
       agentFilesList,
       sessionsResult,
-      chatMessages: Array.isArray(chatHistory.messages) ? chatHistory.messages : [],
+      chatMessages: Array.isArray(chatHistory.messages)
+        ? chatHistory.messages.filter((message) => message != null && typeof message === "object")
+        : [],
       skillsReport: EMPTY_SKILLS_REPORT,
       cronJobs: [],
       modelCatalog: Array.isArray(modelsResult.models) ? modelsResult.models : [],
@@ -353,11 +398,35 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
     return uploaded;
   }
 
+  async installSkillArchive(file: File): Promise<void> {
+    await this.gateway.uploadHttpFile({
+      routePath: "/api/power/skills/import",
+      query: {
+        fileName: file.name,
+      },
+      file,
+    });
+  }
+
   async previewProjectFile(
     agentId: string,
     path: string,
     mode: WorkbenchFilePreviewMode,
   ): Promise<WorkbenchFilePreviewResult> {
+    const blob = await this.downloadProjectFileBlob(agentId, path);
+    if (mode === "text") {
+      return {
+        mode,
+        content: await blob.text(),
+      };
+    }
+    return {
+      mode,
+      blob,
+    };
+  }
+
+  private async downloadProjectFileBlob(agentId: string, path: string): Promise<Blob> {
     const response = await requiredRequest<{
       file?: {
         contentBase64?: string;
@@ -374,31 +443,29 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
       throw new Error("power.fs.downloadFile returned empty content");
     }
     const bytes = Uint8Array.from(atob(contentBase64), (char) => char.charCodeAt(0));
-    const blob = new Blob([bytes]);
-    if (mode === "text") {
-      return {
-        mode,
-        content: await blob.text(),
-      };
-    }
-    return {
-      mode,
-      blob,
-    };
+    return new Blob([bytes], { type: mimeTypeFromPath(path) });
   }
 
   async downloadProjectFile(agentId: string, path: string): Promise<void> {
-    await this.gateway.submitHttpDownload({
-      routePath: "/api/power/fs/download",
-      fields: { agentId, path: this.toWorkspaceRelativePath(agentId, path) },
-    });
+    const blob = await this.downloadProjectFileBlob(agentId, path);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = path.split("/").findLast((part) => part.length > 0) || "download";
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    window.setTimeout(() => {
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }, 1000);
   }
 
   async deleteProjectEntry(agentId: string, path: string): Promise<void> {
     await requiredRequest(
       this.gateway.request("power.fs.deleteEntry", {
         agentId,
-        path,
+        path: this.toWorkspaceRelativePath(agentId, path),
       }),
       "power.fs.deleteEntry",
     );
@@ -556,6 +623,9 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
       label,
       ...(model ? { model } : {}),
     });
+    for (const listener of this.listeners) {
+      listener({ type: "chat", sessionKey, runId: null, state: "delta", text: null });
+    }
     return { sessionKey, runId: null };
   }
 

@@ -1,8 +1,18 @@
 import { InboxOutlined, ReloadOutlined } from "@ant-design/icons";
-import { Alert, App, Button, Input, Pagination, Select, Space, Spin, Switch, Typography } from "antd";
+import {
+  Alert,
+  App,
+  Button,
+  Input,
+  Pagination,
+  Select,
+  Space,
+  Spin,
+  Switch,
+  Typography,
+} from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-
 import type { SkillStatusEntry } from "../../compat/types";
 import { PageScaffold } from "../components/ui/PageScaffold";
 import { StatusPill } from "../components/ui/StatusPill";
@@ -20,16 +30,6 @@ const PAGE_SIZE = 12;
 
 function cn(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
-}
-
-function encodeUint8ArrayToBase64(bytes: Uint8Array): string {
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    const chunk = bytes.subarray(index, index + chunkSize);
-    binary += String.fromCharCode(...chunk);
-  }
-  return btoa(binary);
 }
 
 function hasSetupIssues(skill: SkillStatusEntry): boolean {
@@ -119,11 +119,7 @@ export function SkillsPage() {
       }
       setArchiveBusy(true);
       try {
-        const bytes = new Uint8Array(await file.arrayBuffer());
-        await adapter.request("skills.registry.installArchive", {
-          fileName: name,
-          archiveBase64: encodeUint8ArrayToBase64(bytes),
-        });
+        await adapter.installSkillArchive(file);
         message.success("技能包已导入");
         await refetch();
       } catch (e) {
@@ -144,7 +140,8 @@ export function SkillsPage() {
           message="还没有配置服务地址"
           description={
             <span>
-              请先在 <Link to={ROUTES.settingsConnection}>设置</Link> 页面填写服务地址，才能加载技能列表。
+              请先在 <Link to={ROUTES.settingsConnection}>设置</Link>{" "}
+              页面填写服务地址，才能加载技能列表。
             </span>
           }
         />
@@ -153,7 +150,10 @@ export function SkillsPage() {
   }
 
   return (
-    <PageScaffold maxWidthClass="max-w-[min(100%,1680px)]" innerClassName="gap-5 px-4 py-5 sm:px-6 sm:py-7">
+    <PageScaffold
+      maxWidthClass="max-w-[min(100%,1680px)]"
+      innerClassName="gap-5 px-4 py-5 sm:px-6 sm:py-7"
+    >
       <div className="flex flex-col gap-5">
         <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
           <div className="min-w-0">
@@ -176,19 +176,28 @@ export function SkillsPage() {
                 }
               }}
             />
-            <Button loading={archiveBusy} disabled={archiveBusy || loading} onClick={() => importInputRef.current?.click()}>
+            <Button
+              loading={archiveBusy}
+              disabled={archiveBusy || loading}
+              onClick={() => importInputRef.current?.click()}
+            >
               {archiveBusy ? "导入中…" : "导入技能包"}
             </Button>
-            <Button type="primary" icon={<ReloadOutlined />} loading={loading} onClick={() => void refetch()}>
+            <Button
+              type="primary"
+              icon={<ReloadOutlined />}
+              loading={loading}
+              onClick={() => void refetch()}
+            >
               刷新
             </Button>
           </Space>
         </div>
 
-        <div className="rounded-2xl border border-slate-200/85 bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.05)] sm:p-5">
+        <div className="rounded-xl border border-slate-200/85 bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.05)] sm:p-5">
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-4">
-              <span className="inline-flex w-fit shrink-0 items-center gap-1.5 rounded-full border border-[#0d6b52]/20 bg-[#0d6b52]/8 px-3 py-1 text-xs font-medium text-[#0d6b52]">
+              <span className="inline-flex w-fit shrink-0 items-center gap-1.5 rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">
                 <InboxOutlined />
                 本地技能
               </span>
@@ -232,8 +241,8 @@ export function SkillsPage() {
                   className={cn(
                     "rounded-full border px-3.5 py-1.5 text-sm font-medium transition",
                     installFilter === tab.key
-                      ? "border-[#0d6b52] bg-[#0d6b52] text-white shadow-sm"
-                      : "border-slate-200/90 bg-slate-50/80 text-slate-600 hover:border-slate-300 hover:bg-white",
+                      ? "border-blue-600 bg-blue-600 text-white shadow-sm"
+                      : "border-slate-200/90 bg-slate-50/80 text-slate-600 hover:border-blue-200 hover:bg-blue-50/45 hover:text-blue-700",
                   )}
                 >
                   {tab.label}
@@ -332,7 +341,10 @@ function SkillMarketCard({
         )}
       >
         <div className="flex items-start justify-between gap-3">
-          <h2 className="line-clamp-2 min-w-0 flex-1 text-base font-semibold leading-snug text-slate-900 sm:text-lg" title={skill.name}>
+          <h2
+            className="line-clamp-2 min-w-0 flex-1 text-base font-semibold leading-snug text-slate-900 sm:text-lg"
+            title={skill.name}
+          >
             {skill.emoji ? <span className="mr-1">{skill.emoji}</span> : null}
             {skill.name}
           </h2>

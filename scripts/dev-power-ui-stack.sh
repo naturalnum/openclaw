@@ -22,7 +22,7 @@ kill_listeners_on_port 19003
 kill_listeners_on_port 5174
 
 echo "[dev-stack] starting gateway:dev ..."
-pnpm gateway:dev &
+OPENCLAW_SKIP_CHANNELS=1 node scripts/run-node.mjs --dev gateway --auth none &
 GATEWAY_PID=$!
 
 cleanup() {

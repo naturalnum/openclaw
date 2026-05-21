@@ -3,6 +3,8 @@ const LEGACY_SETTINGS_KEY = "openclaw.control.settings.v1";
 const LEGACY_TOKEN_SESSION_KEY = "openclaw.control.token.v1";
 const TOKEN_SESSION_KEY_PREFIX = "openclaw.control.token.v1:";
 const MAX_SCOPED_SESSION_ENTRIES = 10;
+const VITE_DEV_GATEWAY_PORT = "19001";
+const LEGACY_VITE_DEV_GATEWAY_PORT = "18789";
 
 function settingsKeyForGateway(gatewayUrl: string): string {
   return `${SETTINGS_KEY_PREFIX}${normalizeGatewayTokenScope(gatewayUrl)}`;
@@ -76,7 +78,11 @@ function formatHostWithPort(hostname: string, port: string): string {
   return `${normalizedHost}:${port}`;
 }
 
-function deriveDefaultGatewayUrl(): { pageUrl: string; effectiveUrl: string } {
+function deriveDefaultGatewayUrl(): {
+  pageUrl: string;
+  effectiveUrl: string;
+  legacyEffectiveUrl?: string;
+} {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const configured =
     typeof window !== "undefined" &&
@@ -88,8 +94,9 @@ function deriveDefaultGatewayUrl(): { pageUrl: string; effectiveUrl: string } {
   if (!isViteDevPage()) {
     return { pageUrl, effectiveUrl: pageUrl };
   }
-  const effectiveUrl = `${proto}://${formatHostWithPort(location.hostname, "18789")}`;
-  return { pageUrl, effectiveUrl };
+  const effectiveUrl = `${proto}://${formatHostWithPort(location.hostname, VITE_DEV_GATEWAY_PORT)}`;
+  const legacyEffectiveUrl = `${proto}://${formatHostWithPort(location.hostname, LEGACY_VITE_DEV_GATEWAY_PORT)}`;
+  return { pageUrl, effectiveUrl, legacyEffectiveUrl };
 }
 
 function getSessionStorage(): Storage | null {
@@ -181,7 +188,11 @@ function persistSessionToken(gatewayUrl: string, token: string) {
 }
 
 export function loadSettings(): UiSettings {
-  const { pageUrl: pageDerivedUrl, effectiveUrl: defaultUrl } = deriveDefaultGatewayUrl();
+  const {
+    pageUrl: pageDerivedUrl,
+    effectiveUrl: defaultUrl,
+    legacyEffectiveUrl,
+  } = deriveDefaultGatewayUrl();
   const storage = getSafeLocalStorage();
   const defaultLocale = resolveNavigatorLocale(
     typeof globalThis.navigator?.language === "string" ? globalThis.navigator.language : "",
@@ -219,7 +230,10 @@ export function loadSettings(): UiSettings {
     }
     const parsed = JSON.parse(raw) as PersistedUiSettings;
     const parsedGatewayUrl = normalizeOptionalString(parsed.gatewayUrl) ?? defaults.gatewayUrl;
-    const gatewayUrl = parsedGatewayUrl === pageDerivedUrl ? defaultUrl : parsedGatewayUrl;
+    const gatewayUrl =
+      parsedGatewayUrl === pageDerivedUrl || parsedGatewayUrl === legacyEffectiveUrl
+        ? defaultUrl
+        : parsedGatewayUrl;
     const scopedSessionSelection = resolveScopedSessionSelection(gatewayUrl, parsed, defaults);
     const { theme, mode } = parseThemeSelection(
       (parsed as { theme?: unknown }).theme,

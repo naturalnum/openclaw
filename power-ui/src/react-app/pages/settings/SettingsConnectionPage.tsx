@@ -2,7 +2,6 @@ import { ApiOutlined, SaveOutlined } from "@ant-design/icons";
 import { Alert, App, Button, Card, Form, Input, Space } from "antd";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-
 import { GatewayWorkbenchAdapter } from "../../../adapters/gateway-workbench-adapter";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { usePowerUiSettings } from "../../hooks/usePowerUiSettings";
@@ -89,7 +88,10 @@ export function SettingsConnectionPage() {
             >
               <Input placeholder="例如：ws://127.0.0.1:19001" autoComplete="url" />
             </Form.Item>
-            <Form.Item label={<span className="text-sm font-medium text-slate-800">访问令牌（可选）</span>} name="token">
+            <Form.Item
+              label={<span className="text-sm font-medium text-slate-800">访问令牌（可选）</span>}
+              name="token"
+            >
               <Input.Password placeholder="没有可留空" autoComplete="off" />
             </Form.Item>
             <Form.Item className="!mb-0">
@@ -97,7 +99,11 @@ export function SettingsConnectionPage() {
                 <Button type="primary" htmlType="submit" icon={<SaveOutlined />}>
                   保存
                 </Button>
-                <Button icon={<ApiOutlined />} loading={testing} onClick={() => void handleTestConnection()}>
+                <Button
+                  icon={<ApiOutlined />}
+                  loading={testing}
+                  onClick={() => void handleTestConnection()}
+                >
                   测试连接
                 </Button>
               </Space>
@@ -113,7 +119,7 @@ export function SettingsConnectionPage() {
               onClose={() => setTestError(null)}
             />
           ) : null}
-          <Link to={ROUTES.root} className="text-sm text-[#0d6b52] hover:underline">
+          <Link to={ROUTES.root} className="text-sm text-slate-900 hover:underline">
             ← 返回对话
           </Link>
         </Space>

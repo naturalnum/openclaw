@@ -1,6 +1,5 @@
 import { App as AntApp, ConfigProvider, theme } from "antd";
 import { HashRouter } from "react-router-dom";
-
 import { AppRouter } from "../router/AppRouter";
 
 /**
@@ -20,11 +19,11 @@ export function App() {
         theme={{
           algorithm: theme.defaultAlgorithm,
           token: {
-            colorPrimary: "#0d6b52",
-            colorLink: "#0d6b52",
-            colorSuccess: "#0d6b52",
-            borderRadiusLG: 12,
-            controlOutline: "rgba(13, 107, 82, 0.35)",
+            colorPrimary: "#2563eb",
+            colorLink: "#2563eb",
+            colorSuccess: "#2563eb",
+            borderRadiusLG: 10,
+            controlOutline: "rgba(37, 99, 235, 0.22)",
             controlOutlineWidth: 2,
           },
         }}

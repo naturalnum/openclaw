@@ -1,5 +1,4 @@
 import { useLayoutEffect, useRef } from "react";
-
 import "../../styles.css";
 import "../../app.ts";
 
@@ -17,11 +16,11 @@ export function PowerWorkbenchHost({ active = true }: PowerWorkbenchHostProps) {
 
   useLayoutEffect(() => {
     if (!active) {
-      return;
+      return undefined;
     }
     const root = containerRef.current;
     if (!root) {
-      return;
+      return undefined;
     }
     const el = document.createElement("openclaw-power-app");
     root.appendChild(el);

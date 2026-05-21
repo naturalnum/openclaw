@@ -37,6 +37,14 @@ function expectedGatewayUrl(basePath: string): string {
   return `${proto}://${location.host}${basePath}`;
 }
 
+function setViteDevPage(enabled: boolean) {
+  vi.stubGlobal("document", {
+    querySelector: vi.fn((selector: string) =>
+      enabled && selector === 'script[src*="/@vite/client"]' ? ({} as Element) : null,
+    ),
+  } as unknown as Document);
+}
+
 describe("loadSettings default gateway URL derivation", () => {
   beforeEach(() => {
     vi.stubGlobal("localStorage", createStorageMock());
@@ -72,6 +80,32 @@ describe("loadSettings default gateway URL derivation", () => {
     });
 
     expect(loadSettings().gatewayUrl).toBe(expectedGatewayUrl("/apps/openclaw"));
+  });
+
+  it("uses the Power UI dev gateway port for Vite pages", async () => {
+    setTestLocation({
+      protocol: "http:",
+      host: "localhost:5174",
+      pathname: "/react.html",
+    });
+    setViteDevPage(true);
+
+    expect(loadSettings().gatewayUrl).toBe("ws://localhost:19001");
+  });
+
+  it("migrates the previous Vite dev gateway port to the current dev stack port", async () => {
+    setTestLocation({
+      protocol: "http:",
+      host: "localhost:5174",
+      pathname: "/react.html",
+    });
+    setViteDevPage(true);
+    localStorage.setItem(
+      "openclaw.control.settings.v1",
+      JSON.stringify({ gatewayUrl: "ws://localhost:18789" }),
+    );
+
+    expect(loadSettings().gatewayUrl).toBe("ws://localhost:19001");
   });
 
   it("skips node sessionStorage accessors that warn without a storage file", async () => {
@@ -128,9 +162,12 @@ describe("loadSettings default gateway URL derivation", () => {
       chatShowToolCalls: true,
       splitRatio: 0.6,
       navCollapsed: false,
-      navWidth: 220,
+      navWidth: 312,
       navGroupsCollapsed: {},
+      showCodeNav: true,
       borderRadius: 50,
+      locale: "en",
+      chatPreferredModelRef: "",
       sessionsByGateway: {
         "wss://gateway.example:8443/openclaw": {
           sessionKey: "agent",
@@ -263,6 +300,7 @@ describe("loadSettings default gateway URL derivation", () => {
       navWidth: 220,
       navGroupsCollapsed: {},
       borderRadius: 50,
+      chatPreferredModelRef: "",
       sessionsByGateway: {
         [gwUrl]: {
           sessionKey: "main",

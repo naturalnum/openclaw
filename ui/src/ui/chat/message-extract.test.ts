@@ -79,6 +79,14 @@ describe("extractTextCached", () => {
   });
 });
 
+describe("extractText null safety", () => {
+  it("returns null for undefined or null messages", () => {
+    expect(extractText(undefined)).toBeNull();
+    expect(extractText(null)).toBeNull();
+    expect(extractTextCached(undefined)).toBeNull();
+  });
+});
+
 describe("extractThinkingCached", () => {
   it("matches extractThinking output", () => {
     const message = {

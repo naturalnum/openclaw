@@ -578,7 +578,9 @@ export class MockWorkbenchAdapter implements WorkbenchAdapter {
   }
 
   async snapshot(args: MockSnapshotArgs): Promise<WorkbenchSnapshot> {
-    const byId = args.projectId ? this.projects.find((project) => project.id === args.projectId) : undefined;
+    const byId = args.projectId
+      ? this.projects.find((project) => project.id === args.projectId)
+      : undefined;
     const bySession =
       args.sessionKey?.trim() && !byId
         ? this.projects.find((project) =>
@@ -967,6 +969,7 @@ export class MockWorkbenchAdapter implements WorkbenchAdapter {
       messages: [],
     };
     project.sessions.unshift(session);
+    this.emit({ type: "chat", sessionKey, runId: null, state: "delta", text: null });
     return {
       sessionKey,
       runId: null,
