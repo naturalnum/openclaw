@@ -1,5 +1,7 @@
-import { NavLink, Outlet } from "react-router-dom";
-import { PageScaffold } from "../../components/ui/PageScaffold";
+import { CloseOutlined } from "@ant-design/icons";
+import { Modal } from "antd";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { ROUTES } from "../../router/paths";
 import { SETTINGS_NAV_ITEMS } from "../../router/settings-nav";
 
 function cn(...parts: Array<string | false | null | undefined>) {
@@ -7,42 +9,72 @@ function cn(...parts: Array<string | false | null | undefined>) {
 }
 
 /**
- * 设置区：白底内容壳 + 下划线式子导航（轻量，避免与侧栏「设置」同为粗分段控件）。
+ * GPT 式设置：单一弹窗 + 左侧分区导航 + 右侧编辑区（子页不再套第二层 Modal）。
  */
 export function SettingsLayout() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const open = location.pathname.startsWith(ROUTES.settings);
+
+  const closeSettings = () => {
+    // 不用 history.back：在设置子页之间切换后 -1 只会回到上一分区，弹窗仍开着
+    navigate(ROUTES.root, { replace: true });
+  };
+
   return (
-    <PageScaffold maxWidthClass="max-w-[980px]" innerClassName="gap-4 px-4 py-5 sm:px-5 sm:py-6">
-      <div className="overflow-hidden rounded-xl border border-slate-200/85 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
-        <nav
-          className="flex flex-wrap gap-x-0.5 border-b border-slate-200/80 bg-slate-50/40 px-2 sm:px-3"
-          aria-label="设置分区"
-        >
-          {SETTINGS_NAV_ITEMS.map((item) => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              end
-              title={item.description}
-              className={({ isActive }) =>
-                cn(
-                  "relative -mb-px inline-flex items-center gap-1.5 border-b-2 px-2.5 py-2.5 text-[13px] font-medium transition sm:px-3",
-                  isActive
-                    ? "border-blue-500 text-blue-700"
-                    : "border-transparent text-slate-500 hover:text-slate-800",
-                )
-              }
+    <Modal
+      open={open}
+      onCancel={closeSettings}
+      footer={null}
+      closable={false}
+      centered
+      width="min(920px, calc(100vw - 2rem))"
+      styles={{
+        content: { padding: 0, overflow: "hidden", borderRadius: 16 },
+        body: { padding: 0 },
+      }}
+      destroyOnHidden
+    >
+      <div className="flex max-h-[min(80vh,720px)] min-h-[min(72vh,560px)]">
+        <aside className="flex w-[220px] shrink-0 flex-col border-r border-slate-200/80 bg-slate-50/80">
+          <div className="flex items-center justify-between border-b border-slate-200/80 px-3 py-3">
+            <span className="text-sm font-semibold text-slate-900">设置</span>
+            <button
+              type="button"
+              aria-label="关闭设置"
+              onClick={closeSettings}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white hover:text-slate-800"
             >
-              <span className="flex h-[1.125rem] w-[1.125rem] shrink-0 items-center justify-center text-[13px] leading-none opacity-90">
-                {item.icon}
-              </span>
-              <span className="whitespace-nowrap">{item.title}</span>
-            </NavLink>
-          ))}
-        </nav>
-        <div className="min-w-0 p-4 sm:p-5">
+              <CloseOutlined className="text-sm" />
+            </button>
+          </div>
+          <nav className="flex-1 overflow-y-auto p-2" aria-label="设置分区">
+            {SETTINGS_NAV_ITEMS.map((item) => (
+              <NavLink
+                key={item.path}
+                to={item.path}
+                title={item.description}
+                className={({ isActive }) =>
+                  cn(
+                    "mb-0.5 flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium transition",
+                    isActive
+                      ? "bg-white text-slate-900 shadow-sm ring-1 ring-slate-200/90"
+                      : "text-slate-600 hover:bg-white/80 hover:text-slate-900",
+                  )
+                }
+              >
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-white text-[14px] text-current ring-1 ring-slate-200/70">
+                  {item.icon}
+                </span>
+                <span className="min-w-0 truncate">{item.title}</span>
+              </NavLink>
+            ))}
+          </nav>
+        </aside>
+        <div className="power-chat-scroll min-w-0 flex-1 overflow-y-auto bg-white p-5 sm:p-6">
           <Outlet />
         </div>
       </div>
-    </PageScaffold>
+    </Modal>
   );
 }

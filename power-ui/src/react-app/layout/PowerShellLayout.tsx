@@ -13,6 +13,7 @@ import {
   SettingOutlined,
   ThunderboltOutlined,
 } from "@ant-design/icons";
+import { App } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { parseAgentSessionKey } from "../../../../ui/src/ui/session-key";
@@ -22,6 +23,7 @@ import type { UiSettings } from "../../compat/ui-core";
 import { isProtectedMainSessionKey } from "../../integrations/openclaw/session-keys";
 import { PowerBrandMark } from "../components/ui/PowerBrandMark";
 import { useWorkbenchChat, WorkbenchChatProvider } from "../context/WorkbenchChatContext";
+import { WorkspaceRailProvider } from "../context/WorkspaceRailContext";
 import { useGatewayWorkbenchAdapter } from "../hooks/useGatewayWorkbenchAdapter";
 import { usePowerUiSettings } from "../hooks/usePowerUiSettings";
 import type { RecentSessionNavItem } from "../hooks/useRecentSessionsForNav";
@@ -78,7 +80,7 @@ function pathTitle(pathname: string): string {
   return "小龙虾助手";
 }
 
-type NavProject = { id: string; name: string };
+type NavProject = { id: string; name: string; workspace: string | null };
 
 type SidebarNavProps = {
   collapsed: boolean;
@@ -113,6 +115,7 @@ function SidebarNav({
   onProjectsReload,
 }: SidebarNavProps) {
   const navigate = useNavigate();
+  const { modal } = App.useApp();
   const { selectedSessionKey, selectedProjectId } = useWorkbenchChat();
 
   const [projectsOpen, setProjectsOpen] = useState(true);
@@ -120,6 +123,9 @@ function SidebarNav({
   const [openMenuKey, setOpenMenuKey] = useState<string | null>(null);
   const [openProjectMenuKey, setOpenProjectMenuKey] = useState<string | null>(null);
   const [collapsedProjectIds, setCollapsedProjectIds] = useState<Set<string>>(() => new Set());
+  const [expandedProjectSessionIds, setExpandedProjectSessionIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const menuRef = useRef<HTMLDivElement | null>(null);
   const renameDialogRef = useRef<HTMLDialogElement>(null);
   const renameProjectDialogRef = useRef<HTMLDialogElement>(null);
@@ -128,6 +134,7 @@ function SidebarNav({
   const [renameDraft, setRenameDraft] = useState("");
   const [renameProjectId, setRenameProjectId] = useState("");
   const [renameProjectDraft, setRenameProjectDraft] = useState("");
+  const [renameProjectError, setRenameProjectError] = useState<string | null>(null);
   const [newProjectName, setNewProjectName] = useState("");
   const [createProjectBusy, setCreateProjectBusy] = useState(false);
   const [createProjectError, setCreateProjectError] = useState<string | null>(null);
@@ -148,14 +155,16 @@ function SidebarNav({
 
   const sessionNavItemClass = (selected: boolean) =>
     cn(
-      "group/session relative flex items-center gap-0.5 rounded-lg transition",
-      selected ? "bg-blue-50/80 font-semibold text-blue-800" : "text-slate-600 hover:bg-white/80",
+      "group/session relative flex items-center gap-0.5 rounded-xl transition",
+      selected
+        ? "bg-white/90 font-semibold text-slate-900 shadow-sm shadow-slate-300/16 ring-1 ring-[#d9d9d6]"
+        : "text-slate-600 hover:bg-slate-100/55 hover:text-slate-900",
     );
 
   const sessionLinkClass = (selected: boolean) =>
     cn(
-      "min-w-0 flex-1 truncate py-1.5 text-left text-[12px] leading-snug transition",
-      selected ? "text-blue-800" : "font-medium text-slate-600 hover:text-slate-900",
+      "min-w-0 flex-1 truncate py-1.5 text-left text-[12.5px] leading-snug transition",
+      selected ? "text-slate-900" : "font-medium text-slate-600 hover:text-slate-900",
     );
 
   useEffect(() => {
@@ -267,6 +276,7 @@ function SidebarNav({
     (project: NavProject) => {
       setRenameProjectId(project.id);
       setRenameProjectDraft(project.name);
+      setRenameProjectError(null);
       closeProjectMenu();
       renameProjectDialogRef.current?.showModal();
     },
@@ -284,6 +294,10 @@ function SidebarNav({
     if (!adapter || !name) {
       return;
     }
+    if (projects.some((project) => project.name.trim() === name)) {
+      setCreateProjectError("项目名称已存在，请换一个名称。");
+      return;
+    }
     setCreateProjectBusy(true);
     setCreateProjectError(null);
     try {
@@ -291,7 +305,13 @@ function SidebarNav({
         "config.get",
         {},
       );
-      const workspace = resolveProjectWorkspacePath(snap.config ?? null, name);
+      const workspace = resolveProjectWorkspacePath(
+        snap.config ?? null,
+        name,
+        projects
+          .map((project) => project.workspace)
+          .filter((workspace): workspace is string => Boolean(workspace?.trim())),
+      );
       const projectId = await adapter.createProject(name, workspace);
       if (!projectId) {
         throw new Error("创建失败，请检查项目名称与工作区路径。");
@@ -305,7 +325,7 @@ function SidebarNav({
     } finally {
       setCreateProjectBusy(false);
     }
-  }, [adapter, navigate, newProjectName, onPick, onProjectsReload]);
+  }, [adapter, navigate, newProjectName, onPick, onProjectsReload, projects]);
 
   const submitRename = useCallback(async () => {
     const key = renameKey.trim();
@@ -328,37 +348,48 @@ function SidebarNav({
     if (!adapter || !id || !name) {
       return;
     }
+    if (projects.some((project) => project.id !== id && project.name.trim() === name)) {
+      setRenameProjectError("项目名称已存在，请换一个名称。");
+      return;
+    }
     try {
+      setRenameProjectError(null);
       await adapter.renameProject(id, name);
       renameProjectDialogRef.current?.close();
       onProjectsReload();
-    } catch {
-      // ignore
+    } catch (err) {
+      setRenameProjectError(err instanceof Error ? err.message : String(err));
     }
-  }, [adapter, onProjectsReload, renameProjectDraft, renameProjectId]);
+  }, [adapter, onProjectsReload, projects, renameProjectDraft, renameProjectId]);
 
   const deleteProject = useCallback(
-    async (project: NavProject) => {
+    (project: NavProject) => {
       if (!adapter) {
         return;
       }
-      if (!window.confirm(`确定删除项目「${project.name}」？不可恢复。`)) {
-        return;
-      }
-      try {
-        await adapter.deleteProject(project.id);
-        closeProjectMenu();
-        onProjectsReload();
-        navigate(ROUTES.root);
-      } catch {
-        // ignore
-      }
+      modal.confirm({
+        title: "删除项目",
+        content: `确定删除项目「${project.name}」？不可恢复，项目工作区与会话文件将一并移入系统废纸篓。`,
+        okText: "删除",
+        okType: "danger",
+        cancelText: "取消",
+        onOk: async () => {
+          try {
+            await adapter.deleteProject(project.id);
+            closeProjectMenu();
+            onProjectsReload();
+            navigate(ROUTES.root);
+          } catch {
+            // ignore
+          }
+        },
+      });
     },
-    [adapter, closeProjectMenu, navigate, onProjectsReload],
+    [adapter, closeProjectMenu, modal, navigate, onProjectsReload],
   );
 
   const navItemShell =
-    "flex items-center rounded-xl text-[13px] transition-[background-color,color,box-shadow,transform] duration-150 outline-none focus-visible:ring-2 focus-visible:ring-blue-200/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#f8fafc] active:scale-[0.99]";
+    "flex items-center rounded-2xl text-[13px] transition-[background-color,color,box-shadow,transform] duration-150 outline-none focus-visible:ring-2 focus-visible:ring-[#d7d7d2] focus-visible:ring-offset-2 focus-visible:ring-offset-[#f8f8f7] active:scale-[0.99]";
   const navItemExpanded = "gap-2.5 px-3 py-2.5";
   /** 收起时收窄选中底，避免贴满侧栏宽度 */
   const navItemCollapsed = "mx-auto h-10 w-10 shrink-0 justify-center gap-0 p-0";
@@ -367,7 +398,7 @@ function SidebarNav({
     <div className="flex min-h-0 flex-1 flex-col">
       {collapsed ? (
         <div className="flex w-full shrink-0 justify-center px-2 pb-2 pt-3">
-          <div className="group relative inline-flex items-center justify-center rounded-2xl bg-white/75 p-1.5 shadow-sm ring-1 ring-slate-200/65 backdrop-blur">
+          <div className="group relative inline-flex items-center justify-center rounded-2xl bg-white p-1.5 shadow-md shadow-slate-300/35 ring-1 ring-slate-200/80">
             <PowerBrandMark compact showSubtitle={false} />
             {onToggleCollapsed ? (
               <button
@@ -390,7 +421,7 @@ function SidebarNav({
         </div>
       ) : (
         <div className="flex shrink-0 items-center gap-2 px-3 pb-2 pt-3">
-          <div className="power-surface flex w-full min-w-0 items-center gap-2 rounded-xl px-2.5 py-2 backdrop-blur">
+          <div className="flex w-full min-w-0 items-center gap-2 rounded-2xl border border-slate-200/50 bg-white/82 px-2.5 py-2 shadow-sm shadow-slate-300/16">
             <div className="min-w-0 flex-1">
               <PowerBrandMark />
             </div>
@@ -424,8 +455,8 @@ function SidebarNav({
                 navItemShell,
                 collapsed ? navItemCollapsed : navItemExpanded,
                 isActive
-                  ? "bg-blue-50 font-semibold text-blue-700 shadow-sm shadow-blue-100/70 ring-1 ring-blue-100"
-                  : "text-slate-600 hover:bg-white hover:text-slate-900",
+                  ? "bg-white/90 font-semibold text-slate-900 shadow-sm shadow-slate-300/16 ring-1 ring-[#d9d9d6]"
+                  : "text-slate-600 hover:bg-slate-100/55 hover:text-slate-900",
               )
             }
           >
@@ -444,17 +475,17 @@ function SidebarNav({
 
       {!collapsed ? (
         <>
-          <div className="mt-2 shrink-0 border-t border-slate-200/70 px-2 pt-2.5">
+          <div className="mt-3 shrink-0 border-t border-slate-200/70 px-2 pt-3">
             <div className="flex w-full items-center gap-0.5">
               <button
                 type="button"
                 aria-expanded={projectsOpen}
                 onClick={() => setProjectsOpen((o) => !o)}
-                className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg px-1.5 py-1.5 text-left text-[12px] font-semibold text-slate-500 transition hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-200/60"
+                className="flex min-w-0 flex-1 items-center gap-1.5 rounded-xl px-2 py-1.5 text-left text-[12px] font-semibold text-slate-500 transition hover:bg-slate-100/55 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300/60"
               >
                 <CaretRightOutlined
                   className={cn(
-                    "w-4 shrink-0 text-[10px] text-slate-400 transition-transform duration-150",
+                    "w-3.5 shrink-0 text-[9px] text-slate-400 transition-transform duration-150",
                     projectsOpen ? "rotate-90" : "",
                   )}
                   aria-hidden
@@ -473,23 +504,28 @@ function SidebarNav({
                   openCreateProject();
                 }}
                 disabled={!adapter || createProjectBusy}
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-200/60"
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100/65 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300/60"
               >
-                <FolderAddOutlined className="text-[16px]" />
+                <FolderAddOutlined className="text-[18px]" />
               </button>
             </div>
             {projectsOpen ? (
-              <div className="mt-1 space-y-0.5 pb-2 pl-1">
+              <div className="mt-1.5 space-y-1 pb-2 pl-1">
                 {projects.map((p) => {
                   const projectCollapsed = collapsedProjectIds.has(p.id);
+                  const projectSessions = sessionsByProject.get(p.id) ?? [];
+                  const projectSessionsExpanded = expandedProjectSessionIds.has(p.id);
+                  const visibleProjectSessions = projectSessionsExpanded
+                    ? projectSessions
+                    : projectSessions.slice(0, 6);
                   return (
                     <div key={p.id} className="space-y-0.5">
                       <div
                         className={cn(
-                          "group relative flex items-center gap-0.5 rounded-xl transition hover:bg-white/75",
+                          "group relative flex items-center gap-0.5 rounded-2xl transition hover:bg-slate-100/50",
                           activeProjectId === p.id &&
                             !activeSessionKey &&
-                            "bg-white shadow-sm ring-1 ring-slate-200/80",
+                            "bg-white/90 shadow-sm shadow-slate-300/16 ring-1 ring-[#d9d9d6]",
                         )}
                       >
                         <button
@@ -509,34 +545,34 @@ function SidebarNav({
                               return next;
                             });
                           }}
-                          className="group/folder relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-50 hover:text-slate-800"
+                          className="group/folder relative flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-slate-500 transition hover:bg-transparent hover:text-slate-800"
                         >
                           {projectCollapsed ? (
                             <>
                               <FolderOutlined
-                                className="text-[15px] transition-opacity group-hover/folder:hidden"
+                                className="text-[16px] transition-opacity group-hover/folder:hidden"
                                 aria-hidden
                               />
                               <FolderOpenOutlined
-                                className="hidden text-[15px] group-hover/folder:block"
+                                className="hidden text-[16px] group-hover/folder:block"
                                 aria-hidden
                               />
                             </>
                           ) : (
                             <>
                               <FolderOpenOutlined
-                                className="text-[15px] transition-opacity group-hover/folder:hidden"
+                                className="text-[16px] transition-opacity group-hover/folder:hidden"
                                 aria-hidden
                               />
                               <FolderOutlined
-                                className="hidden text-[15px] group-hover/folder:block"
+                                className="hidden text-[16px] group-hover/folder:block"
                                 aria-hidden
                               />
                             </>
                           )}
                           <span
                             role="tooltip"
-                            className="pointer-events-none absolute left-1/2 top-[calc(100%+5px)] z-50 -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-800 px-2 py-1 text-[11px] font-medium text-white opacity-0 shadow-md transition-opacity duration-150 group-hover/folder:opacity-100"
+                            className="pointer-events-none absolute left-1/2 top-[calc(100%+4px)] z-50 -translate-x-1/2 whitespace-nowrap rounded-md bg-[#30343a]/92 px-1.5 py-0.5 text-[10px] font-medium leading-4 text-white opacity-0 shadow-sm transition-opacity duration-150 group-hover/folder:opacity-100"
                           >
                             {projectCollapsed ? "展开" : "收起"}
                           </span>
@@ -549,8 +585,8 @@ function SidebarNav({
                           title={p.name}
                           onClick={() => onPick?.()}
                           className={cn(
-                            "min-w-0 flex-1 truncate rounded-lg py-2 pr-2 text-left text-[12px] font-semibold transition",
-                            activeProjectId === p.id ? "text-slate-950" : "text-slate-800",
+                            "min-w-0 flex-1 truncate rounded-xl py-2 pr-2 text-left text-[13px] font-semibold transition",
+                            activeProjectId === p.id ? "text-slate-900" : "text-slate-800",
                           )}
                         >
                           {p.name}
@@ -566,7 +602,12 @@ function SidebarNav({
                             setOpenProjectMenuKey((k) => (k === p.id ? null : p.id));
                             setOpenMenuKey(null);
                           }}
-                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-50 hover:text-slate-700"
+                          className={cn(
+                            "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100/65 hover:text-slate-700 focus:opacity-100",
+                            openProjectMenuKey === p.id
+                              ? "opacity-100"
+                              : "opacity-0 group-hover:opacity-100",
+                          )}
                         >
                           <MoreOutlined className="text-base" />
                         </button>
@@ -589,7 +630,7 @@ function SidebarNav({
                               type="button"
                               role="menuitem"
                               className="block w-full px-3 py-2 text-left text-[12px] text-red-600 hover:bg-red-50"
-                              onClick={() => void deleteProject(p)}
+                              onClick={() => deleteProject(p)}
                             >
                               删除
                             </button>
@@ -597,12 +638,12 @@ function SidebarNav({
                         ) : null}
                       </div>
                       {!collapsedProjectIds.has(p.id)
-                        ? (sessionsByProject.get(p.id) ?? []).slice(0, 5).map((s) => {
+                        ? visibleProjectSessions.map((s) => {
                             const sessionSelected = activeSessionKey === s.key;
                             return (
                               <div
                                 key={s.key}
-                                className={cn(sessionNavItemClass(sessionSelected), "ml-5")}
+                                className={cn(sessionNavItemClass(sessionSelected), "ml-8")}
                               >
                                 <Link
                                   to={{
@@ -614,7 +655,7 @@ function SidebarNav({
                                     void onSelectSession?.(s.key, p.id);
                                     onPick?.();
                                   }}
-                                  className={cn(sessionLinkClass(sessionSelected), "px-2")}
+                                  className={cn(sessionLinkClass(sessionSelected), "pl-2 pr-2.5")}
                                 >
                                   {s.label}
                                 </Link>
@@ -628,7 +669,12 @@ function SidebarNav({
                                     setOpenMenuKey((k) => (k === s.key ? null : s.key));
                                     setOpenProjectMenuKey(null);
                                   }}
-                                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-50 hover:text-slate-800"
+                                  className={cn(
+                                    "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100/65 hover:text-slate-800 focus:opacity-100",
+                                    openMenuKey === s.key
+                                      ? "opacity-100"
+                                      : "opacity-0 group-hover/session:opacity-100",
+                                  )}
                                 >
                                   <MoreOutlined className="text-[15px]" />
                                 </button>
@@ -661,6 +707,27 @@ function SidebarNav({
                             );
                           })
                         : null}
+                      {!collapsedProjectIds.has(p.id) && projectSessions.length > 6 ? (
+                        <button
+                          type="button"
+                          className="ml-8 mt-1 inline-flex h-6 items-center rounded-full border border-slate-200/70 bg-white/70 px-2.5 text-[11px] font-medium text-slate-500 shadow-sm shadow-slate-200/30 transition hover:border-slate-300 hover:bg-white hover:text-slate-900"
+                          onClick={() =>
+                            setExpandedProjectSessionIds((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(p.id)) {
+                                next.delete(p.id);
+                              } else {
+                                next.add(p.id);
+                              }
+                              return next;
+                            })
+                          }
+                        >
+                          {projectSessionsExpanded
+                            ? "收起会话"
+                            : `展示全部 ${projectSessions.length} 个会话`}
+                        </button>
+                      ) : null}
                     </div>
                   );
                 })}
@@ -671,16 +738,16 @@ function SidebarNav({
             ) : null}
           </div>
 
-          <div className="flex min-h-0 flex-1 flex-col border-t border-slate-200/70 px-2 pt-2.5">
+          <div className="flex min-h-0 flex-1 flex-col border-t border-slate-300/35 px-2 pt-3">
             <button
               type="button"
               aria-expanded={recentOpen}
               onClick={() => setRecentOpen((o) => !o)}
-              className="flex w-full shrink-0 items-center gap-1.5 rounded-xl px-2 py-1.5 text-left text-[12px] font-semibold text-slate-500 transition hover:bg-white/75 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-200/60"
+              className="flex w-full shrink-0 items-center gap-1.5 rounded-xl px-2 py-1.5 text-left text-[12px] font-semibold text-slate-500 transition hover:bg-white/52 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300/60"
             >
               <CaretRightOutlined
                 className={cn(
-                  "w-4 shrink-0 text-[10px] text-slate-400 transition-transform duration-150",
+                  "w-3.5 shrink-0 text-[9px] text-slate-400 transition-transform duration-150",
                   recentOpen ? "rotate-90" : "",
                 )}
                 aria-hidden
@@ -705,7 +772,7 @@ function SidebarNav({
                   {recentOnlySessions.map((s) => {
                     const sessionSelected = activeSessionKey === s.key;
                     return (
-                      <div key={s.key} className={cn(sessionNavItemClass(sessionSelected), "ml-2")}>
+                      <div key={s.key} className={cn(sessionNavItemClass(sessionSelected), "ml-1")}>
                         <Link
                           to={{
                             pathname: ROUTES.root,
@@ -731,7 +798,12 @@ function SidebarNav({
                               e.stopPropagation();
                               setOpenMenuKey((k) => (k === s.key ? null : s.key));
                             }}
-                            className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-50 hover:text-slate-800"
+                            className={cn(
+                              "rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-50 hover:text-slate-800 focus:opacity-100",
+                              openMenuKey === s.key
+                                ? "opacity-100"
+                                : "opacity-0 group-hover/session:opacity-100",
+                            )}
                           >
                             <MoreOutlined className="text-base" />
                           </button>
@@ -773,7 +845,7 @@ function SidebarNav({
 
       <div
         className={cn(
-          "mt-auto shrink-0 border-t border-slate-200/70",
+          "mt-auto shrink-0 border-t border-slate-300/45",
           collapsed ? "px-2 py-3" : "px-2 py-3",
         )}
       >
@@ -789,7 +861,7 @@ function SidebarNav({
                 navItemShell,
                 navItemCollapsed,
                 isSettingsSection
-                  ? "bg-blue-50 font-semibold text-blue-700 shadow-sm shadow-blue-100/70 ring-1 ring-blue-100"
+                  ? "bg-white font-semibold text-slate-900 shadow-sm shadow-slate-300/22 ring-1 ring-[#d9d9d6]"
                   : "text-slate-600 hover:bg-white hover:text-slate-900",
               )}
             >
@@ -811,7 +883,7 @@ function SidebarNav({
                 navItemShell,
                 navItemExpanded,
                 isSettingsSection
-                  ? "bg-blue-50 font-semibold text-blue-700 shadow-sm shadow-blue-100/70 ring-1 ring-blue-100"
+                  ? "bg-white font-semibold text-slate-900 shadow-sm shadow-slate-300/22 ring-1 ring-[#d9d9d6]"
                   : "text-slate-600 hover:bg-white hover:text-slate-900",
               )}
             >
@@ -848,7 +920,7 @@ function SidebarNav({
                   cn(
                     "flex items-center gap-2 px-3 py-2 text-left text-[13px] transition",
                     isActive
-                      ? "bg-blue-50 font-medium text-blue-700"
+                      ? "bg-slate-100 font-medium text-slate-900"
                       : "text-slate-700 hover:bg-slate-50",
                   )
                 }
@@ -865,7 +937,7 @@ function SidebarNav({
 
       <dialog
         ref={createProjectDialogRef}
-        className="w-[min(100vw-2rem,22rem)] rounded-xl border border-slate-200 bg-white p-4 shadow-xl backdrop:bg-slate-900/25"
+        className="w-[min(100vw-2rem,22rem)] rounded-xl border border-slate-200 bg-white p-4 shadow-xl backdrop:bg-slate-900/10 backdrop:backdrop-blur-[1px]"
         onClose={() => {
           setNewProjectName("");
           setCreateProjectError(null);
@@ -880,14 +952,15 @@ function SidebarNav({
         >
           <h2 className="text-sm font-semibold text-slate-900">新建项目</h2>
           <p className="text-xs leading-snug text-slate-500">
-            输入项目名称；工作区目录将创建在默认 workspace 下。
+            工作区目录会创建在默认 workspace
+            下；若目录已存在会自动追加编号。重命名项目不会移动已有目录。
           </p>
           <input
             type="text"
             value={newProjectName}
             onChange={(ev) => setNewProjectName(ev.target.value)}
             placeholder="项目名称"
-            className="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-200 focus:ring-2 focus:ring-blue-100"
+            className="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
             autoFocus
             onFocus={(ev) => {
               const input = ev.currentTarget;
@@ -912,7 +985,7 @@ function SidebarNav({
             <button
               type="submit"
               disabled={!newProjectName.trim() || createProjectBusy}
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg bg-[#30343a] px-3 py-1.5 text-sm font-medium text-white transition hover:bg-[#24272d] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {createProjectBusy ? "创建中…" : "创建"}
             </button>
@@ -922,10 +995,11 @@ function SidebarNav({
 
       <dialog
         ref={renameProjectDialogRef}
-        className="w-[min(100vw-2rem,22rem)] rounded-xl border border-slate-200 bg-white p-4 shadow-xl backdrop:bg-slate-900/25"
+        className="w-[min(100vw-2rem,22rem)] rounded-xl border border-slate-200 bg-white p-4 shadow-xl backdrop:bg-slate-900/10 backdrop:backdrop-blur-[1px]"
         onClose={() => {
           setRenameProjectId("");
           setRenameProjectDraft("");
+          setRenameProjectError(null);
         }}
       >
         <form
@@ -940,7 +1014,7 @@ function SidebarNav({
             type="text"
             value={renameProjectDraft}
             onChange={(ev) => setRenameProjectDraft(ev.target.value)}
-            className="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-200 focus:ring-2 focus:ring-blue-100"
+            className="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
             autoFocus
             onFocus={(ev) => {
               const input = ev.currentTarget;
@@ -949,6 +1023,11 @@ function SidebarNav({
               );
             }}
           />
+          {renameProjectError ? (
+            <p className="text-xs text-red-600" role="alert">
+              {renameProjectError}
+            </p>
+          ) : null}
           <div className="flex justify-end gap-2">
             <button
               type="button"
@@ -960,7 +1039,7 @@ function SidebarNav({
             <button
               type="submit"
               disabled={!renameProjectDraft.trim()}
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg bg-[#30343a] px-3 py-1.5 text-sm font-medium text-white transition hover:bg-[#24272d] disabled:cursor-not-allowed disabled:opacity-50"
             >
               保存
             </button>
@@ -970,7 +1049,7 @@ function SidebarNav({
 
       <dialog
         ref={renameDialogRef}
-        className="w-[min(100vw-2rem,22rem)] rounded-xl border border-slate-200 bg-white p-4 shadow-xl backdrop:bg-slate-900/25"
+        className="w-[min(100vw-2rem,22rem)] rounded-xl border border-slate-200 bg-white p-4 shadow-xl backdrop:bg-slate-900/10 backdrop:backdrop-blur-[1px]"
         onClose={() => setRenameDraft("")}
       >
         <form
@@ -985,7 +1064,7 @@ function SidebarNav({
             type="text"
             value={renameDraft}
             onChange={(ev) => setRenameDraft(ev.target.value)}
-            className="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-200 focus:ring-2 focus:ring-blue-100"
+            className="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
             autoFocus
           />
           <div className="flex justify-end gap-2">
@@ -998,7 +1077,7 @@ function SidebarNav({
             </button>
             <button
               type="submit"
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-blue-500"
+              className="rounded-lg bg-[#30343a] px-3 py-1.5 text-sm font-medium text-white transition hover:bg-[#24272d]"
             >
               保存
             </button>
@@ -1046,6 +1125,7 @@ function PowerShellLayoutContent() {
         const rows = (res.agents ?? []).map((a) => ({
           id: a.id,
           name: (a.identity?.name ?? a.name ?? a.id).trim() || a.id,
+          workspace: typeof a.workspace === "string" && a.workspace.trim() ? a.workspace : null,
         }));
         if (!cancelled) {
           setNavProjects(rows);
@@ -1085,8 +1165,8 @@ function PowerShellLayoutContent() {
   };
 
   return (
-    <div className="flex h-[100dvh] flex-col overflow-hidden bg-white text-slate-900">
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-slate-200/80 bg-white/95 px-3 shadow-sm backdrop-blur md:hidden">
+    <div className="flex h-[100dvh] flex-col overflow-hidden bg-[#fafafa] text-slate-900">
+      <header className="power-shell-mobile-header flex h-12 shrink-0 items-center gap-2 border-b border-slate-200/55 bg-white/82 px-3 shadow-sm shadow-slate-300/20 backdrop-blur md:hidden">
         <button
           type="button"
           className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100 active:scale-95"
@@ -1101,7 +1181,7 @@ function PowerShellLayoutContent() {
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-row">
         <aside
-          className="hidden min-h-0 shrink-0 flex-col border-r border-slate-200/80 bg-[#f8fafc] md:flex"
+          className="power-sidebar hidden min-h-0 shrink-0 flex-col border-r border-slate-200/55 md:flex"
           style={{ width: sidebarWidth }}
         >
           <div className="flex min-h-0 flex-1 flex-col pt-1">
@@ -1121,7 +1201,7 @@ function PowerShellLayoutContent() {
               aria-label="关闭菜单"
               onClick={() => setMobileNavOpen(false)}
             />
-            <aside className="fixed inset-y-0 left-0 z-50 flex w-[min(100vw,280px)] max-w-[88vw] flex-col border-r border-slate-200/80 bg-[#f8fafc] shadow-2xl md:hidden">
+            <aside className="power-sidebar fixed inset-y-0 left-0 z-50 flex w-[min(100vw,280px)] max-w-[88vw] flex-col border-r border-slate-200/70 shadow-2xl md:hidden">
               <div className="flex items-center justify-between border-b border-slate-200/80 px-3 py-2.5">
                 <span className="text-sm font-semibold text-slate-900">菜单</span>
                 <button
@@ -1143,7 +1223,7 @@ function PowerShellLayoutContent() {
           </>
         ) : null}
 
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-transparent">
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-white">
           <Outlet />
         </main>
       </div>
@@ -1156,7 +1236,9 @@ export function PowerShellLayout() {
   const adapter = useGatewayWorkbenchAdapter(settings);
   return (
     <WorkbenchChatProvider adapter={adapter} patchSettings={patchSettings}>
-      <PowerShellLayoutContent />
+      <WorkspaceRailProvider>
+        <PowerShellLayoutContent />
+      </WorkspaceRailProvider>
     </WorkbenchChatProvider>
   );
 }

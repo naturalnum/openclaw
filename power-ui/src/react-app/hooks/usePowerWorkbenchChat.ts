@@ -12,6 +12,7 @@ import {
 import type { GatewayBrowserClient } from "../../compat/gateway";
 import type { UiSettings } from "../../compat/ui-core";
 import {
+  flushToolStreamSync,
   handleAgentEvent,
   loadSettings,
   resetToolStream,
@@ -26,6 +27,11 @@ import {
   trimCommittedPrefixFromChatMessage,
   trimCommittedPrefixFromText,
 } from "../lib/chat-stream-prefix";
+import {
+  buildChatToolSteps,
+  finalizeChatToolStepsForRunEnd,
+  type ChatToolStep,
+} from "../lib/chat-tool-status";
 import { resolveChatModelPool, resolveEffectiveChatModelRef } from "../lib/configured-chat-models";
 
 function filterVisibleChatMessages(messages: unknown[]): unknown[] {
@@ -44,9 +50,25 @@ type SessionRuntimeState = ChatState & {
   toolStreamById: Map<string, ToolStreamEntry>;
   toolStreamOrder: string[];
   chatToolMessages: Record<string, unknown>[];
+  /** 保留上一轮工具步骤供 UI 展示（避免 resetToolStream 后瞬间消失） */
+  displayToolSteps: ChatToolStep[];
   chatStreamSegments: Array<{ text: string; ts: number }>;
   chatCommittedToolPrefix: string;
 };
+
+function syncDisplayToolSteps(rt: SessionRuntimeState) {
+  const live = buildChatToolSteps(rt.chatToolMessages);
+  if (live.length > 0) {
+    rt.displayToolSteps = live;
+  }
+}
+
+function finalizeDisplayToolSteps(rt: SessionRuntimeState) {
+  if (rt.displayToolSteps.length === 0) {
+    return;
+  }
+  rt.displayToolSteps = finalizeChatToolStepsForRunEnd(rt.displayToolSteps);
+}
 
 function createControllerClient(adapter: GatewayWorkbenchAdapter): GatewayBrowserClient {
   return {
@@ -76,6 +98,7 @@ function createRuntime(
     toolStreamById: new Map(),
     toolStreamOrder: [],
     chatToolMessages: [],
+    displayToolSteps: [],
     chatStreamSegments: [],
     chatCommittedToolPrefix: "",
   };
@@ -241,6 +264,8 @@ export function usePowerWorkbenchChat(
               rt.chatSending ||
               Boolean(rt.chatRunId) ||
               Boolean(rt.chatStream?.trim()));
+          const hasActiveLocalRun =
+            rt.chatSending || Boolean(rt.chatRunId) || Boolean(rt.chatStream?.trim());
           if (reloadChatHistory && !shouldPreserveLocalChatState) {
             if (snapshotMessages.length > 0) {
               rt.chatMessages = snapshotMessages;
@@ -248,7 +273,7 @@ export function usePowerWorkbenchChat(
               await loadChatHistory(rt);
             }
             finalizeChatRun(rt);
-          } else if (!reloadChatHistory && snapshotMessages.length > 0) {
+          } else if (!reloadChatHistory && snapshotMessages.length > 0 && !hasActiveLocalRun) {
             rt.chatMessages = snapshotMessages;
             finalizeChatRun(rt);
           }
@@ -330,6 +355,7 @@ export function usePowerWorkbenchChat(
             const rt = getOrCreateRuntime(sessionKey);
             handleAgentEvent(rt as Parameters<typeof handleAgentEvent>[0], event.payload);
             rt.chatCommittedToolPrefix = rt.chatStreamSegments.map((entry) => entry.text).join("");
+            syncDisplayToolSteps(rt);
             bumpRuntime();
           } else {
             for (const rt of runtimesRef.current.values()) {
@@ -337,6 +363,7 @@ export function usePowerWorkbenchChat(
               rt.chatCommittedToolPrefix = rt.chatStreamSegments
                 .map((entry) => entry.text)
                 .join("");
+              syncDisplayToolSteps(rt);
             }
             bumpRuntime();
           }
@@ -386,6 +413,11 @@ export function usePowerWorkbenchChat(
 
         const toolHost = rt as Parameters<typeof resetToolStream>[0];
         const hadToolEvents = toolHost.toolStreamOrder.length > 0;
+        flushToolStreamSync(toolHost);
+        syncDisplayToolSteps(rt);
+        if (hadToolEvents) {
+          finalizeDisplayToolSteps(rt);
+        }
         const refreshPromise =
           nextState === "final"
             ? refreshSnapshotRef.current({
@@ -552,10 +584,15 @@ export function usePowerWorkbenchChat(
       rt.sessionKey = sessionKey;
       rt.client = clientRef.current;
       rt.connected = connected;
+      rt.displayToolSteps = [];
       if (modelId.trim()) {
         await adapter.request("sessions.patch", { key: sessionKey, model: modelId.trim() });
       }
-      await sendChatMessage(rt, trimmed, hasAttachments ? attachments : undefined);
+      const sendPromise = sendChatMessage(rt, trimmed, hasAttachments ? attachments : undefined);
+      // sendChatMessage mutates the runtime before the request resolves; render that local
+      // user bubble and first-token loading immediately instead of waiting on the network.
+      bumpRuntime();
+      await sendPromise;
       bumpRuntime();
       void refreshSnapshot({ projectId, sessionKey }, { reloadChatHistory: false });
       return true;

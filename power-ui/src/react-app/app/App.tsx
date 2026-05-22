@@ -19,11 +19,14 @@ export function App() {
         theme={{
           algorithm: theme.defaultAlgorithm,
           token: {
-            colorPrimary: "#2563eb",
-            colorLink: "#2563eb",
-            colorSuccess: "#2563eb",
+            colorPrimary: "#30343a",
+            colorLink: "#30343a",
+            colorSuccess: "#30343a",
+            colorText: "#24272d",
+            colorTextHeading: "#17191d",
+            colorBgMask: "rgba(15, 23, 42, 0.12)",
             borderRadiusLG: 10,
-            controlOutline: "rgba(37, 99, 235, 0.22)",
+            controlOutline: "rgba(48, 52, 58, 0.14)",
             controlOutlineWidth: 2,
           },
         }}

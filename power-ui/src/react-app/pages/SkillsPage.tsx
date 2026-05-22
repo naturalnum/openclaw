@@ -194,10 +194,10 @@ export function SkillsPage() {
           </Space>
         </div>
 
-        <div className="rounded-xl border border-slate-200/85 bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.05)] sm:p-5">
+        <div className="rounded-2xl border border-slate-200/75 bg-white/86 p-4 shadow-sm shadow-slate-300/18 sm:p-5">
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-4">
-              <span className="inline-flex w-fit shrink-0 items-center gap-1.5 rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">
+              <span className="inline-flex w-fit shrink-0 items-center gap-1.5 rounded-full border border-slate-200/80 bg-[#f7f7f5] px-3 py-1 text-xs font-medium text-slate-700">
                 <InboxOutlined />
                 本地技能
               </span>
@@ -241,8 +241,8 @@ export function SkillsPage() {
                   className={cn(
                     "rounded-full border px-3.5 py-1.5 text-sm font-medium transition",
                     installFilter === tab.key
-                      ? "border-blue-600 bg-blue-600 text-white shadow-sm"
-                      : "border-slate-200/90 bg-slate-50/80 text-slate-600 hover:border-blue-200 hover:bg-blue-50/45 hover:text-blue-700",
+                      ? "border-[#30343a] bg-[#30343a] text-white shadow-sm shadow-slate-300/30"
+                      : "border-slate-200/90 bg-white/78 text-slate-600 hover:border-slate-300 hover:bg-[#f7f7f5] hover:text-slate-900",
                   )}
                 >
                   {tab.label}
@@ -263,7 +263,7 @@ export function SkillsPage() {
 
         <Spin spinning={loading}>
           {pageSlice.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/60 py-14 text-center text-sm text-slate-500">
+            <div className="rounded-2xl border border-dashed border-slate-200 bg-white/65 py-14 text-center text-sm text-slate-500">
               {loading ? "加载中…" : "暂无匹配技能"}
             </div>
           ) : (
@@ -336,8 +336,8 @@ function SkillMarketCard({
     <li>
       <article
         className={cn(
-          "flex h-full min-h-[220px] flex-col gap-3 rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm sm:p-5",
-          "transition hover:border-slate-300/90 hover:shadow-md",
+          "flex h-full min-h-[220px] flex-col gap-3 rounded-2xl border border-slate-200/75 bg-white/88 p-4 shadow-sm shadow-slate-300/14 sm:p-5",
+          "transition hover:border-slate-300/85 hover:bg-white hover:shadow-md hover:shadow-slate-300/16",
         )}
       >
         <div className="flex items-start justify-between gap-3">

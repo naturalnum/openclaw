@@ -61,23 +61,46 @@ function sanitizeProviderId(raw: string, fallbackSeed: string): string {
   return fallback || `${DEFAULT_PROVIDER_PREFIX}-${createLocalId().slice(0, 8)}`;
 }
 
-/** 侧栏「新建项目」用的子目录名（仅字母数字与连字符）。 */
+function replaceInvalidPathChars(value: string): string {
+  return Array.from(value, (char) => {
+    const code = char.charCodeAt(0);
+    return code < 32 || /[\\/:*?"<>|]/.test(char) ? "-" : char;
+  }).join("");
+}
+
+/** 侧栏「新建项目」用的子目录名：保留中文等可读名称，只替换文件系统非法字符。 */
 export function slugifyProjectFolderName(name: string): string {
   const slug = name
     .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
+    .normalize("NFKC")
+    .replaceAll(/[\\/:*?"<>|]/g, "-");
+  const readableSlug = replaceInvalidPathChars(slug)
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "");
-  return slug || "project";
+  return readableSlug || "project";
 }
 
 /** 在默认 agent workspace 下为新建项目解析目录路径（由网关 resolveUserPath）。 */
 export function resolveProjectWorkspacePath(
   config: Record<string, unknown> | null | undefined,
   projectName: string,
+  existingWorkspaces: string[] = [],
 ): string {
   const base = readDefaultAgentWorkspace(config)?.replace(/\/+$/, "") ?? "~/.openclaw/workspace";
-  return `${base}/${slugifyProjectFolderName(projectName)}`;
+  const slug = slugifyProjectFolderName(projectName);
+  const used = new Set(
+    existingWorkspaces
+      .map((workspace) => workspace.trim().replaceAll("\\", "/").replace(/\/+$/, ""))
+      .filter(Boolean),
+  );
+  let candidate = `${base}/${slug}`;
+  let index = 2;
+  while (used.has(candidate)) {
+    candidate = `${base}/${slug}-${index}`;
+    index += 1;
+  }
+  return candidate;
 }
 
 export function readDefaultAgentWorkspace(

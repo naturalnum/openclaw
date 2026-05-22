@@ -7,8 +7,8 @@ import {
   Form,
   Input,
   InputNumber,
-  Modal,
   Select,
+  Space,
   Spin,
   Switch,
   Table,
@@ -376,8 +376,8 @@ export function SettingsConnectorsPanel({ adapter, canUseGateway }: Props) {
             onClick={() => setOnlyDatabase(true)}
             className={`h-7 w-20 rounded-md text-xs font-medium transition ${
               onlyDatabase
-                ? "bg-blue-600 text-white shadow-sm"
-                : "text-slate-600 hover:bg-blue-50 hover:text-blue-700"
+                ? "bg-[#30343a] text-white shadow-sm shadow-slate-300/35"
+                : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
             }`}
           >
             仅数据库
@@ -387,8 +387,8 @@ export function SettingsConnectorsPanel({ adapter, canUseGateway }: Props) {
             onClick={() => setOnlyDatabase(false)}
             className={`h-7 w-20 rounded-md text-xs font-medium transition ${
               !onlyDatabase
-                ? "bg-blue-600 text-white shadow-sm"
-                : "text-slate-600 hover:bg-blue-50 hover:text-blue-700"
+                ? "bg-[#30343a] text-white shadow-sm shadow-slate-300/35"
+                : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
             }`}
           >
             全部类型
@@ -417,8 +417,8 @@ export function SettingsConnectorsPanel({ adapter, canUseGateway }: Props) {
                     onClick={() => selectProvider(p.id)}
                     className={`flex w-full flex-col rounded-lg border px-2.5 py-2 text-left text-sm transition ${
                       selectedProviderId === p.id
-                        ? "border-blue-200 bg-blue-50/70 ring-1 ring-blue-100"
-                        : "border-slate-200/90 hover:border-blue-200 hover:bg-blue-50/35"
+                        ? "border-slate-300 bg-slate-100/80 ring-1 ring-slate-200"
+                        : "border-slate-200/90 hover:border-slate-300 hover:bg-slate-50"
                     }`}
                   >
                     <span className="font-medium leading-tight text-slate-900">
@@ -467,144 +467,147 @@ export function SettingsConnectorsPanel({ adapter, canUseGateway }: Props) {
         </div>
       </div>
 
-      <Modal
-        title={
-          <span>
-            {editingInstanceId ? "编辑连接" : "新建连接"}
-            {selectedProvider ? (
-              <Text type="secondary" className="ml-1.5 text-xs font-normal">
-                · {selectedProvider.displayName}
-              </Text>
-            ) : null}
-          </span>
-        }
-        open={editorOpen}
-        onCancel={() => setEditorOpen(false)}
-        footer={[
-          <Button
-            key="test"
-            icon={<ThunderboltOutlined />}
-            loading={testing}
-            onClick={() => void testConnection()}
-          >
-            测试
-          </Button>,
-          <Button key="cancel" onClick={() => setEditorOpen(false)}>
-            关闭
-          </Button>,
-          <Button
-            key="save"
-            type="primary"
-            icon={<SaveOutlined />}
-            loading={saving}
-            onClick={() => void save()}
-          >
-            {editingInstanceId ? "保存" : "创建"}
-          </Button>,
-        ]}
-        width={620}
-        destroyOnHidden
-      >
-        {!selectedProvider ? (
-          <Text type="secondary" className="text-sm">
-            请选择提供商
-          </Text>
-        ) : (
-          <Form layout="vertical" size="small" className="mt-2">
-            <div className="grid gap-x-3 md:grid-cols-2">
-              <Form.Item label="显示名称" required className="!mb-2">
-                <Input
-                  value={draft.displayName}
-                  onChange={(e) => setMeta("displayName", e.target.value)}
-                />
-              </Form.Item>
-              <Form.Item label="描述" className="!mb-2">
-                <Input
-                  value={draft.description}
-                  onChange={(e) => setMeta("description", e.target.value)}
-                  placeholder="可选"
-                />
-              </Form.Item>
-              <Form.Item label="启用" className="!mb-2">
-                <Switch
-                  size="small"
-                  checked={draft.enabled}
-                  onChange={(v) => setMeta("enabled", v)}
-                />
-              </Form.Item>
-              <Form.Item label="策略模式" className="!mb-2">
-                <Select
-                  value={draft.policyMode}
-                  onChange={(v) => setDraft((d) => ({ ...d, policyMode: v }))}
-                  options={[
-                    { value: "read-only", label: "只读 read-only" },
-                    { value: "limited-write", label: "受限写 limited-write" },
-                    { value: "full", label: "完全 full" },
-                  ]}
-                />
-              </Form.Item>
-            </div>
-
-            {selectedProvider.configFields.length > 0 ? (
-              <div className="mt-3 border-t border-slate-100 pt-3">
-                <Text className="mb-2 block text-xs font-semibold text-slate-700">连接参数</Text>
-                <div className="grid gap-x-3 md:grid-cols-2">
-                  {selectedProvider.configFields.map((field) => (
-                    <Form.Item
-                      key={`c-${field.key}`}
-                      className={`!mb-2 ${connectorFieldClass(field, selectedProvider.configFields.length)}`}
-                      label={
-                        <span className="text-xs">
-                          {field.label}
-                          {field.required ? <span className="text-red-500"> *</span> : null}
-                        </span>
-                      }
-                      extra={
-                        field.description ? (
-                          <Text type="secondary" className="text-[11px]">
-                            {field.description}
-                          </Text>
-                        ) : undefined
-                      }
-                    >
-                      {renderField(field, "config")}
-                    </Form.Item>
-                  ))}
-                </div>
+      {editorOpen ? (
+        <Card
+          size="small"
+          className="border-slate-200/90 shadow-sm"
+          title={
+            <span className="text-sm">
+              {editingInstanceId ? "编辑连接" : "新建连接"}
+              {selectedProvider ? (
+                <Text type="secondary" className="ml-1.5 text-xs font-normal">
+                  · {selectedProvider.displayName}
+                </Text>
+              ) : null}
+            </span>
+          }
+          extra={
+            <Space size={4}>
+              <Button
+                size="small"
+                icon={<ThunderboltOutlined />}
+                loading={testing}
+                onClick={() => void testConnection()}
+              >
+                测试
+              </Button>
+              <Button size="small" onClick={() => setEditorOpen(false)}>
+                关闭
+              </Button>
+              <Button
+                type="primary"
+                size="small"
+                icon={<SaveOutlined />}
+                loading={saving}
+                onClick={() => void save()}
+              >
+                {editingInstanceId ? "保存" : "创建"}
+              </Button>
+            </Space>
+          }
+          styles={{ body: { padding: "14px 16px" } }}
+        >
+          {!selectedProvider ? (
+            <Text type="secondary" className="text-sm">
+              请选择提供商
+            </Text>
+          ) : (
+            <Form layout="vertical" size="small">
+              <div className="grid gap-x-3 md:grid-cols-2">
+                <Form.Item label="显示名称" required className="!mb-2">
+                  <Input
+                    value={draft.displayName}
+                    onChange={(e) => setMeta("displayName", e.target.value)}
+                  />
+                </Form.Item>
+                <Form.Item label="描述" className="!mb-2">
+                  <Input
+                    value={draft.description}
+                    onChange={(e) => setMeta("description", e.target.value)}
+                    placeholder="可选"
+                  />
+                </Form.Item>
+                <Form.Item label="启用" className="!mb-2">
+                  <Switch
+                    size="small"
+                    checked={draft.enabled}
+                    onChange={(v) => setMeta("enabled", v)}
+                  />
+                </Form.Item>
+                <Form.Item label="策略模式" className="!mb-2">
+                  <Select
+                    value={draft.policyMode}
+                    onChange={(v) => setDraft((d) => ({ ...d, policyMode: v }))}
+                    options={[
+                      { value: "read-only", label: "只读 read-only" },
+                      { value: "limited-write", label: "受限写 limited-write" },
+                      { value: "full", label: "完全 full" },
+                    ]}
+                  />
+                </Form.Item>
               </div>
-            ) : null}
 
-            {selectedProvider.secretFields.length > 0 ? (
-              <div className="mt-3 border-t border-slate-100 pt-3">
-                <Text className="mb-2 block text-xs font-semibold text-slate-700">密钥字段</Text>
-                <div className="grid gap-x-3 md:grid-cols-2">
-                  {selectedProvider.secretFields.map((field) => (
-                    <Form.Item
-                      key={`s-${field.key}`}
-                      className={`!mb-2 ${connectorFieldClass(field, selectedProvider.secretFields.length)}`}
-                      label={
-                        <span className="text-xs">
-                          {field.label}
-                          {field.required ? <span className="text-red-500"> *</span> : null}
-                        </span>
-                      }
-                      extra={
-                        field.description ? (
-                          <Text type="secondary" className="text-[11px]">
-                            {field.description}
-                          </Text>
-                        ) : undefined
-                      }
-                    >
-                      {renderField(field, "secret")}
-                    </Form.Item>
-                  ))}
+              {selectedProvider.configFields.length > 0 ? (
+                <div className="mt-3 border-t border-slate-100 pt-3">
+                  <Text className="mb-2 block text-xs font-semibold text-slate-700">连接参数</Text>
+                  <div className="grid gap-x-3 md:grid-cols-2">
+                    {selectedProvider.configFields.map((field) => (
+                      <Form.Item
+                        key={`c-${field.key}`}
+                        className={`!mb-2 ${connectorFieldClass(field, selectedProvider.configFields.length)}`}
+                        label={
+                          <span className="text-xs">
+                            {field.label}
+                            {field.required ? <span className="text-red-500"> *</span> : null}
+                          </span>
+                        }
+                        extra={
+                          field.description ? (
+                            <Text type="secondary" className="text-[11px]">
+                              {field.description}
+                            </Text>
+                          ) : undefined
+                        }
+                      >
+                        {renderField(field, "config")}
+                      </Form.Item>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ) : null}
-          </Form>
-        )}
-      </Modal>
+              ) : null}
+
+              {selectedProvider.secretFields.length > 0 ? (
+                <div className="mt-3 border-t border-slate-100 pt-3">
+                  <Text className="mb-2 block text-xs font-semibold text-slate-700">密钥字段</Text>
+                  <div className="grid gap-x-3 md:grid-cols-2">
+                    {selectedProvider.secretFields.map((field) => (
+                      <Form.Item
+                        key={`s-${field.key}`}
+                        className={`!mb-2 ${connectorFieldClass(field, selectedProvider.secretFields.length)}`}
+                        label={
+                          <span className="text-xs">
+                            {field.label}
+                            {field.required ? <span className="text-red-500"> *</span> : null}
+                          </span>
+                        }
+                        extra={
+                          field.description ? (
+                            <Text type="secondary" className="text-[11px]">
+                              {field.description}
+                            </Text>
+                          ) : undefined
+                        }
+                      >
+                        {renderField(field, "secret")}
+                      </Form.Item>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </Form>
+          )}
+        </Card>
+      ) : null}
     </div>
   );
 }

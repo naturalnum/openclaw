@@ -76,7 +76,7 @@ export function ChatModelPicker({
       ref={rootRef}
       className={cn(
         "relative inline-block max-w-[min(100vw-2rem,320px)]",
-        compact && "max-w-[9.25rem]",
+        compact && "max-w-[10.5rem]",
       )}
     >
       <button
@@ -88,16 +88,19 @@ export function ChatModelPicker({
         onClick={() => setOpen((o) => !o)}
         title={selected ? modelPickerSubtitle(selected) : undefined}
         className={cn(
-          "inline-flex w-max max-w-full min-w-0 items-center gap-1.5 rounded-lg border border-slate-200/90 bg-white text-left shadow-sm",
-          compact ? "h-8 px-2.5 py-0 text-xs" : "px-2.5 py-1.5",
-          "text-slate-800 hover:border-blue-200 hover:bg-blue-50/45",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-200 focus-visible:ring-offset-2 focus-visible:ring-offset-white",
-          open && "border-blue-200 bg-blue-50/50",
+          "inline-flex w-max max-w-full min-w-0 items-center gap-1.5 rounded-lg border border-slate-200/80 bg-white/72 text-left shadow-sm shadow-slate-200/25",
+          compact ? "h-8 rounded-full px-2.5 py-0 text-xs" : "px-2.5 py-1.5",
+          "text-slate-700 hover:border-slate-300 hover:bg-white hover:text-slate-900",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white",
+          open && "border-slate-300 bg-white text-slate-900",
           disabled && "pointer-events-none opacity-45",
         )}
       >
         <span
-          className={cn("truncate font-semibold tracking-tight", compact ? "text-xs" : "text-sm")}
+          className={cn(
+            "truncate font-semibold tracking-tight",
+            compact ? "max-w-[7.25rem] text-[11.5px]" : "text-sm",
+          )}
         >
           {selected ? displayName(selected) : "—"}
         </span>
@@ -118,8 +121,8 @@ export function ChatModelPicker({
           role="listbox"
           aria-label="切换模型"
           className={cn(
-            "absolute z-50 max-w-[min(calc(100vw-1.5rem),20rem)] rounded-xl border border-slate-200/90 bg-white py-1 shadow-lg shadow-slate-300/40",
-            compact ? "w-56" : "w-72",
+            "absolute z-50 max-w-[min(calc(100vw-1.5rem),18rem)] rounded-2xl border border-slate-200/80 bg-white/96 py-1.5 shadow-xl shadow-slate-300/32 backdrop-blur",
+            compact ? "w-52" : "w-72",
             placement === "top"
               ? "bottom-[calc(100%+0.35rem)] right-0"
               : "left-0 top-[calc(100%+0.35rem)]",
@@ -141,7 +144,7 @@ export function ChatModelPicker({
                 }}
                 className={cn(
                   "flex w-full items-start gap-2 px-3 py-2.5 text-left transition",
-                  active ? "bg-blue-50 text-blue-950" : "hover:bg-slate-50",
+                  active ? "bg-slate-100/90 text-slate-900" : "hover:bg-slate-50",
                 )}
               >
                 <span className="min-w-0 flex-1 pr-1">
@@ -159,7 +162,7 @@ export function ChatModelPicker({
                     </>
                   ) : null}
                 </span>
-                <span className="shrink-0 self-center text-sm text-blue-600" aria-hidden>
+                <span className="shrink-0 self-center text-sm text-slate-600" aria-hidden>
                   {active ? "✓" : ""}
                 </span>
               </button>

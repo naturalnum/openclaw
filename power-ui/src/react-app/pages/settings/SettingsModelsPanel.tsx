@@ -6,7 +6,6 @@ import {
   Card,
   Form,
   Input,
-  Modal,
   Select,
   Space,
   Spin,
@@ -59,6 +58,7 @@ export function SettingsModelsPanel({ adapter, canUseGateway }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingModelId, setEditingModelId] = useState<string | null>(null);
+  const [defaultEditorOpen, setDefaultEditorOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!adapter || !canUseGateway) {
@@ -163,24 +163,19 @@ export function SettingsModelsPanel({ adapter, canUseGateway }: Props) {
         className={`${cardSurface} overflow-hidden rounded-xl`}
         styles={{ body: { padding: "16px 20px" } }}
       >
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="min-w-0 shrink">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0 space-y-1">
             <Text className="text-sm font-semibold text-slate-900">默认主模型</Text>
+            <Text type="secondary" className="block truncate text-xs">
+              {currentModelId
+                ? modelSelectLabel(currentModelId, modelConfigs, labelPool)
+                : "未选择默认模型"}
+            </Text>
           </div>
-          <div className="flex w-full min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center lg:max-w-xl">
-            <Select
-              className="min-w-0 flex-1 [&_.ant-select-selector]:!rounded-xl"
-              size="large"
-              popupClassName="power-model-select-dropdown"
-              placeholder="选择默认模型"
-              value={currentModelId || undefined}
-              onChange={(v) => setCurrentModelId(v)}
-              options={configuredRefs.map((ref) => ({
-                label: modelSelectLabel(ref, modelConfigs, labelPool),
-                value: ref,
-              }))}
-              allowClear
-            />
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <Button onClick={() => setDefaultEditorOpen((v) => !v)}>
+              {defaultEditorOpen ? "收起" : "设置默认模型"}
+            </Button>
             <Button
               type="primary"
               icon={<SaveOutlined />}
@@ -191,6 +186,27 @@ export function SettingsModelsPanel({ adapter, canUseGateway }: Props) {
             </Button>
           </div>
         </div>
+        {defaultEditorOpen ? (
+          <div className="mt-4 border-t border-slate-100 pt-4">
+            <Form layout="vertical" size="small">
+              <Form.Item label="默认主模型" className="!mb-0">
+                <Select
+                  className="[&_.ant-select-selector]:!rounded-xl"
+                  size="large"
+                  popupClassName="power-model-select-dropdown"
+                  placeholder="选择默认模型"
+                  value={currentModelId || undefined}
+                  onChange={(v) => setCurrentModelId(v)}
+                  options={configuredRefs.map((ref) => ({
+                    label: modelSelectLabel(ref, modelConfigs, labelPool),
+                    value: ref,
+                  }))}
+                  allowClear
+                />
+              </Form.Item>
+            </Form>
+          </div>
+        ) : null}
       </Card>
 
       <Spin spinning={loading}>
@@ -208,7 +224,7 @@ export function SettingsModelsPanel({ adapter, canUseGateway }: Props) {
                     <span className="text-sm font-semibold text-slate-900">条目 {index + 1}</span>
                     <span
                       className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                        row.enabled ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-500"
+                        row.enabled ? "bg-slate-100 text-slate-700" : "bg-slate-100 text-slate-500"
                       }`}
                     >
                       {row.enabled ? "启用" : "停用"}
@@ -248,29 +264,19 @@ export function SettingsModelsPanel({ adapter, canUseGateway }: Props) {
         添加模型配置
       </Button>
 
-      <Modal
-        title={editingModel ? "编辑模型配置" : "模型配置"}
-        open={Boolean(editingModel)}
-        onCancel={() => setEditingModelId(null)}
-        footer={[
-          <Button key="cancel" onClick={() => setEditingModelId(null)}>
-            关闭
-          </Button>,
-          <Button
-            key="save"
-            type="primary"
-            icon={<SaveOutlined />}
-            loading={saving}
-            onClick={() => void save()}
-          >
-            保存到网关
-          </Button>,
-        ]}
-        width={620}
-        destroyOnHidden
-      >
-        {editingModel ? (
-          <Form layout="vertical" size="small" className="mt-2">
+      {editingModel ? (
+        <Card
+          size="small"
+          className={`${cardSurface} overflow-hidden rounded-xl`}
+          title={<span className="text-sm">编辑模型配置</span>}
+          extra={
+            <Button type="link" size="small" onClick={() => setEditingModelId(null)}>
+              关闭
+            </Button>
+          }
+          styles={{ body: { padding: "14px 16px" } }}
+        >
+          <Form layout="vertical" size="small">
             <div className="grid gap-x-3 gap-y-1 md:grid-cols-2">
               <Form.Item label="提供商 ID" className="!mb-3">
                 <Input
@@ -315,8 +321,8 @@ export function SettingsModelsPanel({ adapter, canUseGateway }: Props) {
               </Form.Item>
             </div>
           </Form>
-        ) : null}
-      </Modal>
+        </Card>
+      ) : null}
     </div>
   );
 }

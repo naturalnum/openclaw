@@ -1,11 +1,9 @@
 import { ApiOutlined, SaveOutlined } from "@ant-design/icons";
-import { Alert, App, Button, Card, Form, Input, Space } from "antd";
+import { Alert, App, Button, Form, Input, Space } from "antd";
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { GatewayWorkbenchAdapter } from "../../../adapters/gateway-workbench-adapter";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { usePowerUiSettings } from "../../hooks/usePowerUiSettings";
-import { ROUTES } from "../../router/paths";
 
 type SettingsFormValues = {
   gatewayUrl: string;
@@ -26,12 +24,8 @@ export function SettingsConnectionPage() {
     });
   }, [form, settings.gatewayUrl, settings.token]);
 
-  const handleTestConnection = async () => {
-    const values = form.getFieldsValue();
-    const gatewayUrl = values.gatewayUrl?.trim() ?? "";
-    const token = values.token?.trim() ?? "";
+  const testConnection = async (gatewayUrl: string, token: string) => {
     if (!gatewayUrl) {
-      form.setFields([{ name: "gatewayUrl", errors: ["请填写服务地址"] }]);
       return;
     }
     setTesting(true);
@@ -56,6 +50,25 @@ export function SettingsConnectionPage() {
     }
   };
 
+  const handleTestConnection = async () => {
+    const values = form.getFieldsValue();
+    const gatewayUrl = values.gatewayUrl?.trim() ?? "";
+    const token = values.token?.trim() ?? "";
+    if (!gatewayUrl) {
+      form.setFields([{ name: "gatewayUrl", errors: ["请填写服务地址"] }]);
+      return;
+    }
+    await testConnection(gatewayUrl, token);
+  };
+
+  const saveConnection = (values: SettingsFormValues) => {
+    patchSettings({
+      gatewayUrl: values.gatewayUrl.trim(),
+      token: values.token.trim(),
+    });
+    message.success("已保存");
+  };
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -63,67 +76,46 @@ export function SettingsConnectionPage() {
         title="连接与令牌"
         description="WebSocket 地址与可选令牌；保存后各页立即生效。"
       />
-      <Card
-        className="max-w-2xl rounded-xl border border-slate-200/90 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.05)]"
-        styles={{ body: { padding: "16px 18px" } }}
+      <Form<SettingsFormValues>
+        form={form}
+        layout="vertical"
+        requiredMark={false}
+        size="middle"
+        onFinish={saveConnection}
       >
-        <Space direction="vertical" size="middle" className="w-full">
-          <Form<SettingsFormValues>
-            form={form}
-            layout="vertical"
-            requiredMark={false}
-            size="small"
-            onFinish={(values) => {
-              patchSettings({
-                gatewayUrl: values.gatewayUrl.trim(),
-                token: values.token.trim(),
-              });
-              message.success("已保存");
-            }}
+        <Form.Item
+          label="Gateway URL"
+          name="gatewayUrl"
+          rules={[{ required: true, message: "请填写服务地址" }]}
+        >
+          <Input placeholder="例如：ws://127.0.0.1:19001" autoComplete="url" />
+        </Form.Item>
+        <Form.Item label="访问令牌（可选）" name="token">
+          <Input.Password placeholder="没有可留空" autoComplete="off" />
+        </Form.Item>
+        <Space size="small" wrap>
+          <Button type="primary" htmlType="submit" icon={<SaveOutlined />}>
+            保存
+          </Button>
+          <Button
+            icon={<ApiOutlined />}
+            loading={testing}
+            onClick={() => void handleTestConnection()}
           >
-            <Form.Item
-              label={<span className="text-sm font-medium text-slate-800">Gateway URL</span>}
-              name="gatewayUrl"
-              rules={[{ required: true, message: "请填写服务地址" }]}
-            >
-              <Input placeholder="例如：ws://127.0.0.1:19001" autoComplete="url" />
-            </Form.Item>
-            <Form.Item
-              label={<span className="text-sm font-medium text-slate-800">访问令牌（可选）</span>}
-              name="token"
-            >
-              <Input.Password placeholder="没有可留空" autoComplete="off" />
-            </Form.Item>
-            <Form.Item className="!mb-0">
-              <Space size="small" wrap>
-                <Button type="primary" htmlType="submit" icon={<SaveOutlined />}>
-                  保存
-                </Button>
-                <Button
-                  icon={<ApiOutlined />}
-                  loading={testing}
-                  onClick={() => void handleTestConnection()}
-                >
-                  测试连接
-                </Button>
-              </Space>
-            </Form.Item>
-          </Form>
-          {testError ? (
-            <Alert
-              type="error"
-              showIcon
-              message="连接测试失败"
-              description={testError}
-              closable
-              onClose={() => setTestError(null)}
-            />
-          ) : null}
-          <Link to={ROUTES.root} className="text-sm text-slate-900 hover:underline">
-            ← 返回对话
-          </Link>
+            测试连接
+          </Button>
         </Space>
-      </Card>
+      </Form>
+      {testError ? (
+        <Alert
+          type="error"
+          showIcon
+          message="连接测试失败"
+          description={testError}
+          closable
+          onClose={() => setTestError(null)}
+        />
+      ) : null}
     </div>
   );
 }

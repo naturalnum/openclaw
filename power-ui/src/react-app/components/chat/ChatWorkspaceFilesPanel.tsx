@@ -4,9 +4,13 @@ import {
   DownOutlined,
   FileTextOutlined,
   FolderOpenOutlined,
+  FullscreenExitOutlined,
+  FullscreenOutlined,
+  PicRightOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { App } from "antd";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
@@ -16,6 +20,7 @@ import type {
   WorkbenchFilePreviewResult,
   WorkbenchFilePreviewMode,
 } from "../../../adapters/workbench-adapter";
+import { filterUserVisibleWorkspaceEntries } from "../../lib/workspace-default-entries";
 import { ROUTES } from "../../router/paths";
 import { ChatMarkdownBody } from "./ChatMarkdownBody";
 
@@ -42,7 +47,33 @@ type Props = {
   showToolbar?: boolean;
   onPreviewActiveChange?: (active: boolean) => void;
   reloadToken?: number;
+  canFullscreen?: boolean;
+  previewFullscreen?: boolean;
+  onToggleFullscreen?: () => void;
+  onCollapseRail?: () => void;
 };
+
+function RailIconButton({
+  title,
+  onClick,
+  children,
+}: {
+  title: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={onClick}
+      className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200/75 bg-white/86 text-slate-600 transition hover:border-slate-300 hover:bg-white hover:text-slate-900"
+    >
+      {children}
+    </button>
+  );
+}
 
 type PreviewState =
   | {
@@ -226,7 +257,12 @@ export function ChatWorkspaceFilesPanel({
   showToolbar = true,
   onPreviewActiveChange,
   reloadToken = 0,
+  canFullscreen = false,
+  previewFullscreen = false,
+  onToggleFullscreen,
+  onCollapseRail,
 }: Props) {
+  const { modal } = App.useApp();
   const [path, setPath] = useState<string | null>(null);
   const [entries, setEntries] = useState<WorkbenchFileEntry[]>([]);
   const [parentPath, setParentPath] = useState<string | null>(null);
@@ -312,7 +348,7 @@ export function ChatWorkspaceFilesPanel({
       return;
     }
     setPreview({ status: "loading", entry, result: null, error: null });
-    setPaneMode("split");
+    setPaneMode("preview");
     try {
       const result = await adapter.previewProjectFile(agentId.trim(), entry.path, mode);
       setPreview({ status: "ready", entry, result, error: null });
@@ -337,30 +373,36 @@ export function ChatWorkspaceFilesPanel({
     }
   };
 
-  const onDelete = async (entry: WorkbenchFileEntry) => {
+  const onDelete = (entry: WorkbenchFileEntry) => {
     if (entry.kind !== "file") {
       return;
     }
-    if (!window.confirm(`确定删除「${entry.name}」？此操作不可恢复。`)) {
-      return;
-    }
-    setError(null);
-    try {
-      await adapter.deleteProjectEntry(agentId.trim(), entry.path);
-      setEntries((current) => current.filter((item) => item.path !== entry.path));
-      if (preview.entry?.path === entry.path) {
-        setPreview({ status: "idle", entry: null, result: null, error: null });
-        setPaneMode("split");
-      }
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
+    modal.confirm({
+      title: "删除文件",
+      content: `确定删除「${entry.name}」？此操作不可恢复，本地工作区中的文件将一并删除。`,
+      okText: "删除",
+      okType: "danger",
+      cancelText: "取消",
+      onOk: async () => {
+        setError(null);
+        try {
+          await adapter.deleteProjectEntry(agentId.trim(), entry.path);
+          setEntries((current) => current.filter((item) => item.path !== entry.path));
+          if (preview.entry?.path === entry.path) {
+            setPreview({ status: "idle", entry: null, result: null, error: null });
+            setPaneMode("split");
+          }
+          await load();
+        } catch (e) {
+          setError(e instanceof Error ? e.message : String(e));
+        }
+      },
+    });
   };
 
   const sortedFiles = useMemo(
     () =>
-      entries
+      filterUserVisibleWorkspaceEntries(entries)
         .filter((entry) => entry.kind === "file")
         .sort((a, b) => (b.updatedAtMs ?? 0) - (a.updatedAtMs ?? 0)),
     [entries],
@@ -375,6 +417,13 @@ export function ChatWorkspaceFilesPanel({
     }
     return URL.createObjectURL(preview.result.blob);
   }, [preview]);
+
+  const pdfPreviewSrc = useMemo(() => {
+    if (!previewBlobUrl) {
+      return "";
+    }
+    return `${previewBlobUrl}#zoom=100`;
+  }, [previewBlobUrl]);
 
   useEffect(() => {
     return () => {
@@ -414,7 +463,7 @@ export function ChatWorkspaceFilesPanel({
   }, [onPreviewActiveChange, showPreviewPane]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-white">
+    <div className="flex h-full min-h-0 flex-col bg-transparent">
       <input
         ref={uploadRef}
         type="file"
@@ -443,7 +492,7 @@ export function ChatWorkspaceFilesPanel({
               type="button"
               disabled={uploading || loading}
               onClick={() => uploadRef.current?.click()}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <UploadOutlined className="text-[12px]" />
               {uploading ? "上传中…" : "上传到工作区"}
@@ -468,7 +517,7 @@ export function ChatWorkspaceFilesPanel({
       >
         <section
           className={cn(
-            "power-chat-scroll min-h-0 overflow-y-auto bg-white px-3 py-4",
+            "power-chat-scroll min-h-0 overflow-y-auto bg-transparent px-4 py-5",
             filesPaneHidden && "hidden",
           )}
         >
@@ -485,14 +534,14 @@ export function ChatWorkspaceFilesPanel({
           ) : entries.length === 0 ? (
             <div className="py-10 text-center text-sm text-slate-500">此目录暂无文件</div>
           ) : (
-            <div className="mx-auto max-w-xl">
-              <div className="power-surface rounded-xl border p-2.5 backdrop-blur">
-                <div className="flex items-start justify-between gap-3 px-2 pb-2 pt-1">
+            <div className="mx-auto max-w-[19.5rem]">
+              <div className="rounded-[22px] border border-slate-200/60 bg-white/72 p-3 shadow-sm shadow-slate-300/18 backdrop-blur">
+                <div className="flex items-start justify-between gap-3 px-1 pb-3 pt-0.5">
                   <button
                     type="button"
                     aria-expanded={!recentCollapsed}
                     onClick={() => setRecentCollapsed((v) => !v)}
-                    className="flex min-w-0 flex-1 items-start gap-1.5 rounded-lg text-left transition hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-200/60"
+                    className="flex min-w-0 flex-1 items-start gap-1.5 rounded-lg text-left transition hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300/60"
                   >
                     <DownOutlined
                       className={cn(
@@ -502,7 +551,9 @@ export function ChatWorkspaceFilesPanel({
                       aria-hidden
                     />
                     <span className="min-w-0">
-                      <span className="block text-xs font-semibold text-slate-600">最近修改</span>
+                      <span className="block text-[13px] font-semibold text-slate-800">
+                        最近修改
+                      </span>
                       <span className="mt-0.5 block text-[11px] text-slate-400">
                         默认展示最近修改的 6 个文件
                       </span>
@@ -512,14 +563,14 @@ export function ChatWorkspaceFilesPanel({
                     type="button"
                     disabled={uploading || loading}
                     onClick={() => uploadRef.current?.click()}
-                    className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-slate-200/75 bg-white/82 px-2.5 text-xs font-semibold text-slate-700 shadow-sm shadow-slate-200/25 transition hover:border-slate-300 hover:bg-white hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <UploadOutlined className="text-[12px]" />
                     {uploading ? "上传中…" : "上传文件"}
                   </button>
                 </div>
                 {!recentCollapsed ? (
-                  <div className="space-y-1">
+                  <div className="space-y-2">
                     {recentFiles.length === 0 ? (
                       <p className="px-2 py-4 text-center text-xs text-slate-500">
                         当前目录暂无文件
@@ -532,7 +583,7 @@ export function ChatWorkspaceFilesPanel({
                           active={preview.entry?.path === entry.path}
                           onOpen={() => void openPreview(entry)}
                           onDownload={() => void onDownload(entry)}
-                          onDelete={() => void onDelete(entry)}
+                          onDelete={() => onDelete(entry)}
                         />
                       ))
                     )}
@@ -542,7 +593,7 @@ export function ChatWorkspaceFilesPanel({
                   <button
                     type="button"
                     onClick={() => setShowAllFiles((v) => !v)}
-                    className="mt-2 flex w-full items-center justify-center rounded-lg border border-slate-200 bg-white/86 px-3 py-2 text-xs font-medium text-slate-600 transition hover:border-blue-200 hover:bg-blue-50/45 hover:text-blue-700"
+                    className="mt-3 flex w-full items-center justify-center rounded-xl border border-slate-200/70 bg-white/62 px-3 py-2 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:bg-white hover:text-slate-950"
                   >
                     {showAllFiles ? "收起" : `更多，查看全部 ${sortedFiles.length} 个文件`}
                   </button>
@@ -554,13 +605,13 @@ export function ChatWorkspaceFilesPanel({
 
         <section
           className={cn(
-            "min-h-0 min-w-0 flex-col bg-white/95",
+            "min-h-0 min-w-0 flex-col bg-white/92",
             previewPaneHidden ? "hidden" : "flex",
           )}
         >
           {preview.entry ? (
             <>
-              <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200/70 bg-white/95 px-4 py-3 backdrop-blur">
+              <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200/60 bg-white/92 px-4 py-3 backdrop-blur">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-slate-900">
                     {preview.entry.name}
@@ -569,7 +620,24 @@ export function ChatWorkspaceFilesPanel({
                     {formatBytes(preview.entry.size)} · {formatUpdatedAt(preview.entry.updatedAtMs)}
                   </p>
                 </div>
-                <div className="flex shrink-0 items-center gap-1">
+                <div className="flex shrink-0 items-center gap-1.5">
+                  {canFullscreen ? (
+                    <RailIconButton
+                      title={previewFullscreen ? "退出全屏" : "全屏预览"}
+                      onClick={() => onToggleFullscreen?.()}
+                    >
+                      {previewFullscreen ? (
+                        <FullscreenExitOutlined className="text-[14px]" />
+                      ) : (
+                        <FullscreenOutlined className="text-[14px]" />
+                      )}
+                    </RailIconButton>
+                  ) : null}
+                  {onCollapseRail ? (
+                    <RailIconButton title="收起面板" onClick={() => onCollapseRail()}>
+                      <PicRightOutlined className="text-[14px]" />
+                    </RailIconButton>
+                  ) : null}
                   {preview.status === "ready" && preview.result.mode === "text" ? (
                     <button
                       type="button"
@@ -585,15 +653,8 @@ export function ChatWorkspaceFilesPanel({
                   ) : null}
                   <button
                     type="button"
-                    onClick={() => setPaneMode((m) => (m === "preview" ? "split" : "preview"))}
-                    className="power-soft-button rounded-xl border border-slate-200 px-2 py-1 text-xs text-slate-700 transition hover:bg-slate-50"
-                  >
-                    预览全屏
-                  </button>
-                  <button
-                    type="button"
                     onClick={() => void onDownload(preview.entry)}
-                    className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white transition hover:bg-blue-500"
+                    className="inline-flex items-center gap-1 rounded-lg bg-[#30343a] px-2.5 py-1 text-xs font-semibold text-white transition hover:bg-[#24272d]"
                   >
                     <DownloadOutlined className="text-[12px]" />
                     下载
@@ -676,8 +737,8 @@ export function ChatWorkspaceFilesPanel({
                 ) : preview.status === "ready" && preview.result.mode === "pdf" ? (
                   <iframe
                     title={preview.entry.name}
-                    src={previewBlobUrl}
-                    className="h-full w-full border-0"
+                    src={pdfPreviewSrc}
+                    className="h-full w-full border-0 bg-white"
                   />
                 ) : null}
               </div>
@@ -706,10 +767,10 @@ function FileCard({
   return (
     <div
       className={cn(
-        "group flex items-center gap-2.5 rounded-xl border px-2.5 py-2.5 transition-[background-color,border-color,box-shadow,transform]",
+        "group flex items-center gap-2 rounded-2xl border px-2.5 py-2.5 transition-[background-color,border-color,box-shadow,transform]",
         active
-          ? "border-blue-200 bg-blue-50/70 shadow-sm shadow-blue-100/70"
-          : "border-transparent bg-slate-50/65 hover:border-blue-100 hover:bg-white hover:shadow-sm hover:shadow-slate-200/40",
+          ? "border-slate-300/80 bg-white shadow-sm shadow-slate-200/35"
+          : "border-transparent bg-slate-50/80 hover:border-slate-200/90 hover:bg-white hover:shadow-sm hover:shadow-slate-200/25",
       )}
     >
       <button
@@ -719,9 +780,9 @@ function FileCard({
       >
         <span
           className={cn(
-            "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
+            "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl",
             entry.kind === "directory"
-              ? "bg-blue-50 text-blue-600"
+              ? "bg-slate-100 text-slate-600"
               : "bg-white text-slate-500 ring-1 ring-slate-200/70",
           )}
           aria-hidden
@@ -733,8 +794,10 @@ function FileCard({
           )}
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-semibold text-slate-900">{entry.name}</span>
-          <span className="mt-0.5 block truncate text-xs text-slate-500">
+          <span className="block truncate text-[13px] font-semibold text-slate-900">
+            {entry.name}
+          </span>
+          <span className="mt-0.5 block truncate text-[11px] text-slate-500">
             {entry.kind === "directory"
               ? "文件夹 · 点击进入"
               : `${formatBytes(entry.size)} · ${formatUpdatedAt(entry.updatedAtMs)}`}
@@ -751,7 +814,7 @@ function FileCard({
               e.stopPropagation();
               onDownload();
             }}
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 opacity-90 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200/75 bg-white/82 text-slate-500 transition hover:border-slate-300 hover:bg-white hover:text-slate-900"
           >
             <DownloadOutlined className="text-[14px]" />
           </button>
@@ -763,7 +826,7 @@ function FileCard({
               e.stopPropagation();
               onDelete();
             }}
-            className="hidden h-8 w-8 items-center justify-center rounded-lg border border-red-100 bg-white text-red-500 transition hover:bg-red-50 hover:text-red-700 group-hover:flex focus-visible:flex"
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-red-100/90 bg-white/82 text-red-500 transition hover:bg-red-50 hover:text-red-700"
           >
             <DeleteOutlined className="text-[14px]" />
           </button>

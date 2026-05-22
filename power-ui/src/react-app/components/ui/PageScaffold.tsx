@@ -18,7 +18,7 @@ export function PageScaffold({
   innerClassName = "gap-6 px-4 py-8 sm:px-6",
 }: PageScaffoldProps) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-auto bg-slate-50">
+    <div className="flex min-h-0 flex-1 flex-col overflow-auto bg-[#fafafa]">
       <div className={`mx-auto flex w-full flex-col ${innerClassName} ${maxWidthClass}`}>
         {actions ? <div className="flex items-center justify-end">{actions}</div> : null}
         {children}

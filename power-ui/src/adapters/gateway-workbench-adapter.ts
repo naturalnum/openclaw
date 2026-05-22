@@ -174,6 +174,19 @@ function mimeTypeFromPath(path: string): string {
   return "application/octet-stream";
 }
 
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    });
+    reader.addEventListener("error", () => reject(reader.error ?? new Error("read file failed")));
+    reader.readAsDataURL(file);
+  });
+}
+
 export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
   readonly kind = "gateway" as const;
   private readonly gateway: PowerGatewayClient;
@@ -378,24 +391,24 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
     path: string | null,
     files: WorkbenchUploadedFile[],
   ): Promise<WorkbenchFileEntry[]> {
-    const uploaded: WorkbenchFileEntry[] = [];
-    for (const file of files) {
-      const result = await this.gateway.uploadHttpFile<{ entry?: WorkbenchFileEntry }>({
-        routePath: "/api/power/fs/upload",
-        query: {
-          agentId,
-          path: this.toWorkspaceRelativePath(agentId, path),
+    const payload = await Promise.all(
+      files.map(async (file) => {
+        file.onProgress?.({ loaded: file.file.size, total: file.file.size });
+        return {
           name: file.name,
-        },
-        file: file.file,
-        onProgress: file.onProgress,
-      });
-      const entry = result?.entry;
-      if (entry) {
-        uploaded.push(entry);
-      }
-    }
-    return uploaded;
+          contentBase64: await fileToBase64(file.file),
+        };
+      }),
+    );
+    const result = await requiredRequest<{ entries?: WorkbenchFileEntry[] }>(
+      this.gateway.request("power.fs.uploadFiles", {
+        agentId,
+        path: this.toWorkspaceRelativePath(agentId, path),
+        files: payload,
+      }),
+      "power.fs.uploadFiles",
+    );
+    return Array.isArray(result.entries) ? result.entries : [];
   }
 
   async installSkillArchive(file: File): Promise<void> {
@@ -590,7 +603,7 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
     await requiredRequest(
       this.gateway.request("agents.delete", {
         agentId: projectId,
-        deleteFiles: false,
+        deleteFiles: true,
       }),
       "agents.delete",
     );

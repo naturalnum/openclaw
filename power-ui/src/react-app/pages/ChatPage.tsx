@@ -1,4 +1,4 @@
-import { ArrowUpOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from "@ant-design/icons";
+import { ArrowUpOutlined, MenuUnfoldOutlined } from "@ant-design/icons";
 import { App } from "antd";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -13,17 +13,20 @@ import { extractText } from "../../compat/chat";
 import { isProtectedMainSessionKey } from "../../integrations/openclaw/session-keys";
 import { ChatMarkdownBody } from "../components/chat/ChatMarkdownBody";
 import { ChatModelPicker } from "../components/chat/ChatModelPicker";
+import { ChatToolStepsList } from "../components/chat/ChatToolStepsList";
 import { ChatWorkspaceFilesPanel } from "../components/chat/ChatWorkspaceFilesPanel";
 import { useWorkbenchChat } from "../context/WorkbenchChatContext";
+import { useWorkspaceRail } from "../context/WorkspaceRailContext";
 import { useGatewayWorkbenchAdapter } from "../hooks/useGatewayWorkbenchAdapter";
 import { usePowerUiSettings } from "../hooks/usePowerUiSettings";
 import { shouldHideChatMessage } from "../lib/chat-message-visibility";
+import { dedupeCumulativeStreamSegments, streamTextAfterPrefix } from "../lib/chat-stream-segments";
 import { resolveChatModelPool, resolveEffectiveChatModelRef } from "../lib/configured-chat-models";
 import { formatCatalogModelRef } from "../lib/model-catalog";
 
 /** 主色仅用于关键操作；大面积 UI 用中性灰白 */
 const BRAND = {
-  primary: "bg-blue-600 hover:bg-blue-500 active:bg-blue-700",
+  primary: "border border-[#30343a] bg-[#30343a] hover:bg-[#24272d] active:bg-[#17191d]",
   primaryText: "text-white",
 } as const;
 
@@ -43,10 +46,91 @@ function messageHasVisibleText(msg: unknown): boolean {
   return typeof raw === "string" && raw.trim().length > 0;
 }
 
+function messageRole(msg: unknown): string {
+  if (!isRenderableChatMessage(msg)) {
+    return "";
+  }
+  return typeof msg.role === "string" ? msg.role.toLowerCase() : "";
+}
+
+function findLastUserMessageIndex(messages: unknown[]): number {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messageRole(messages[i]) === "user" && messageHasVisibleText(messages[i])) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/** 有工具步骤时，把本轮助手总结挪到步骤条之后展示。 */
+function splitMessagesForTurnLayout(messages: unknown[], pinToolStepsBeforeAssistant: boolean) {
+  if (!pinToolStepsBeforeAssistant) {
+    return { leadMessages: messages, tailAssistantMessages: [] as unknown[] };
+  }
+  const lastUserIdx = findLastUserMessageIndex(messages);
+  if (lastUserIdx < 0) {
+    return { leadMessages: messages, tailAssistantMessages: [] as unknown[] };
+  }
+  const tailAssistantMessages = messages
+    .slice(lastUserIdx + 1)
+    .filter((msg) => messageRole(msg) === "assistant" && messageHasVisibleText(msg));
+  if (tailAssistantMessages.length === 0) {
+    return { leadMessages: messages, tailAssistantMessages: [] as unknown[] };
+  }
+  return {
+    leadMessages: messages.slice(0, lastUserIdx + 1),
+    tailAssistantMessages,
+  };
+}
+
+function renderChatMessageBubble(msg: unknown, key: string) {
+  if (!isRenderableChatMessage(msg) || !messageHasVisibleText(msg)) {
+    return null;
+  }
+  const role = messageRole(msg);
+  const rawText = extractText(msg);
+  const text = (typeof rawText === "string" ? rawText : "").trim();
+  const isUser = role === "user";
+  const isAssistant = role === "assistant";
+  const displayText = isAssistant ? sanitizeChatDisplayText(text) : text;
+  return (
+    <div key={key} className={cn("flex w-full", isUser ? "justify-end" : "justify-start")}>
+      <div
+        aria-label={isUser ? "用户消息" : "助手消息"}
+        className={cn(
+          "max-w-[min(100%,42rem)] rounded-[22px] px-4 py-2.5 text-[15px] leading-relaxed transition-shadow",
+          isUser
+            ? "rounded-br-lg bg-[#fbfbfa] text-slate-900 shadow-sm shadow-slate-200/18 ring-1 ring-slate-200/70"
+            : "rounded-bl-lg bg-white/92 px-4 py-3 text-slate-800 shadow-sm shadow-slate-200/25 ring-1 ring-slate-200/60",
+        )}
+      >
+        {isAssistant ? (
+          <ChatMarkdownBody source={displayText} />
+        ) : (
+          <span className="whitespace-pre-wrap break-words">{displayText}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const MAX_CHAT_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MAX_CHAT_ATTACHMENT_COUNT = 6;
 /** 距底部小于此值视为「在底部」，新消息/流式输出会自动跟随 */
 const SCROLL_BOTTOM_THRESHOLD_PX = 80;
+
+function sanitizeChatDisplayText(text: string): string {
+  return text.replace(/MEDIA:([^\s\n\r]+)/g, (_match, rawPath: string) => {
+    const normalized = rawPath.replaceAll("\\", "/");
+    const filename =
+      normalized
+        .split("/")
+        .toReversed()
+        .find((part) => part.trim().length > 0)
+        ?.trim() || "文件";
+    return `MEDIA:${filename}`;
+  });
+}
 
 function fileToChatAttachment(file: File): Promise<ChatAttachment | null> {
   return new Promise((resolve) => {
@@ -83,14 +167,6 @@ function TypingDots({ className }: { className?: string }) {
       ))}
     </span>
   );
-}
-
-function looksLikeFileGenerationRequest(text: string): boolean {
-  const q = text.trim().toLowerCase();
-  if (!q) {
-    return false;
-  }
-  return /(pdf|docx|xlsx|pptx|文件|文档|报告|导出|生成.*(pdf|文件|报告))/.test(q);
 }
 
 function ClipIcon({ className }: { className?: string }) {
@@ -217,9 +293,17 @@ export function ChatPage() {
 
   const agents = snapshot?.agentsList?.agents ?? [];
   const defaultAgentId = snapshot?.agentsList?.defaultId ?? null;
-  const [workspacePreviewActive, setWorkspacePreviewActive] = useState(false);
   const [workspaceFilesReloadToken, setWorkspaceFilesReloadToken] = useState(0);
-  const [workspaceSidebarOpen, setWorkspaceSidebarOpen] = useState(true);
+  const {
+    previewActive: workspacePreviewActive,
+    setPreviewActive: setWorkspacePreviewActive,
+    railOpen: workspaceSidebarOpen,
+    setRailOpen: setWorkspaceSidebarOpen,
+    fullscreen: workspacePreviewFullscreen,
+    canFullscreen: workspaceCanFullscreen,
+    toggleFullscreen: toggleWorkspacePreviewFullscreen,
+    collapseRail: collapseWorkspaceRail,
+  } = useWorkspaceRail();
 
   const workspaceFilesEligible = useMemo(() => {
     const list = snapshot?.agentsList?.agents ?? [];
@@ -252,7 +336,7 @@ export function ChatPage() {
       setWorkspacePreviewActive(false);
       setWorkspaceSidebarOpen(true);
     }
-  }, [workspaceFilesEligible]);
+  }, [setWorkspacePreviewActive, setWorkspaceSidebarOpen, workspaceFilesEligible]);
 
   const workspaceRailEligible = Boolean(workspaceFilesEligible && adapter && workspaceAgentId);
   const workspaceRailOpen = workspaceRailEligible && workspaceSidebarOpen;
@@ -312,29 +396,63 @@ export function ChatPage() {
     return m.input.includes("image") ? "yes" : "no";
   }, [effectiveModelRef, snapshot?.modelCatalog]);
 
-  const showStream = Boolean(activeRuntime?.chatStream?.trim());
+  const chatToolSteps = activeRuntime?.displayToolSteps ?? [];
+  const pinToolStepsBeforeAssistant = chatToolSteps.length > 0;
+  const { leadMessages, tailAssistantMessages } = useMemo(
+    () =>
+      splitMessagesForTurnLayout(activeRuntime?.chatMessages ?? [], pinToolStepsBeforeAssistant),
+    [activeRuntime?.chatMessages, pinToolStepsBeforeAssistant],
+  );
+  const hideStreamSegments = pinToolStepsBeforeAssistant;
+
+  const visibleStreamSegments = useMemo(() => {
+    const segments = activeRuntime?.chatStreamSegments ?? [];
+    if (hideStreamSegments) {
+      return [];
+    }
+    return dedupeCumulativeStreamSegments(segments).filter((seg) => seg.text.trim().length > 0);
+  }, [activeRuntime?.chatStreamSegments, hideStreamSegments]);
+
+  const liveStreamText = useMemo(() => {
+    const stream = activeRuntime?.chatStream ?? "";
+    const prefix = activeRuntime?.chatCommittedToolPrefix ?? "";
+    return streamTextAfterPrefix(stream, prefix);
+  }, [activeRuntime?.chatCommittedToolPrefix, activeRuntime?.chatStream]);
+
+  const tailAssistantText = useMemo(
+    () =>
+      tailAssistantMessages
+        .map((msg) => extractText(msg))
+        .filter((text): text is string => typeof text === "string" && text.trim().length > 0)
+        .join("\n\n")
+        .trim(),
+    [tailAssistantMessages],
+  );
+  const showLiveStream =
+    Boolean(liveStreamText.trim()) && liveStreamText.trim() !== tailAssistantText;
+  const showStream = showLiveStream;
   const runActive = Boolean(activeRuntime?.chatRunId);
   const busy = sending || runActive || Boolean(activeRuntime?.chatSending) || showStream;
   /** 已发起请求但尚未收到可见文本（首 token 等待） */
-  const awaitingFirstToken =
-    runActive && !activeRuntime?.chatStream?.trim() && !activeRuntime?.lastError;
+  const awaitingFirstToken = runActive && !showLiveStream && !activeRuntime?.lastError;
   const showAssistantOutput = awaitingFirstToken || showStream;
-  const errorText = snapshotError ?? activeRuntime?.lastError ?? null;
-  const likelyGeneratingFile = useMemo(() => {
-    if (optimisticUserBubble && looksLikeFileGenerationRequest(optimisticUserBubble.text)) {
-      return true;
+  const runStatusHint = useMemo(() => {
+    if (!runActive && !sending) {
+      return null;
     }
-    const recentUser = [...(activeRuntime?.chatMessages ?? [])].toReversed().find((m) => {
-      if (!isRenderableChatMessage(m)) {
-        return false;
-      }
-      const role = typeof m.role === "string" ? m.role.toLowerCase() : "";
-      return role === "user";
-    });
-    const text = recentUser ? (extractText(recentUser) ?? "") : "";
-    return looksLikeFileGenerationRequest(text);
-  }, [activeRuntime?.chatMessages, optimisticUserBubble]);
-
+    if (chatToolSteps.length > 0) {
+      const active = chatToolSteps.some((step) => !step.complete);
+      const done = chatToolSteps.filter((step) => step.complete).length;
+      return active
+        ? `执行步骤 ${done}/${chatToolSteps.length}`
+        : `步骤已完成（${chatToolSteps.length}）`;
+    }
+    if (runActive) {
+      return showStream ? "正在生成回复…" : "等待模型响应…";
+    }
+    return "发送中…";
+  }, [chatToolSteps, runActive, sending, showStream]);
+  const errorText = snapshotError ?? activeRuntime?.lastError ?? null;
   useEffect(() => {
     if (!optimisticUserBubble) {
       return;
@@ -421,8 +539,9 @@ export function ChatPage() {
     requestAnimationFrame(() => syncScrollGap());
   }, [
     activeRuntime?.chatMessages?.length,
-    activeRuntime?.chatToolMessages?.length,
+    activeRuntime?.displayToolSteps?.length,
     activeRuntime?.chatStreamSegments?.length,
+    optimisticUserBubble?.ts,
     syncScrollGap,
   ]);
 
@@ -469,7 +588,7 @@ export function ChatPage() {
   }, [
     activeRuntime?.chatStream,
     activeRuntime?.chatMessages?.length,
-    activeRuntime?.chatToolMessages?.length,
+    activeRuntime?.displayToolSteps?.length,
     showAssistantOutput,
     syncScrollGap,
   ]);
@@ -485,29 +604,58 @@ export function ChatPage() {
     t.style.height = `${Math.min(Math.max(t.scrollHeight, 44), 200)}px`;
   };
 
-  const addFilesFromList = useCallback(async (files: FileList | File[] | null | undefined) => {
-    if (!files?.length) {
-      return;
-    }
-    const list = Array.from(files);
-    const picked: ChatAttachment[] = [];
-    for (const file of list) {
-      const att = await fileToChatAttachment(file);
-      if (att) {
-        picked.push(att);
+  const addFilesFromList = useCallback(
+    async (files: FileList | File[] | null | undefined) => {
+      if (!files?.length) {
+        return;
       }
-    }
-    if (!picked.length) {
-      return;
-    }
-    setPendingAttachments((prev) => {
-      const room = MAX_CHAT_ATTACHMENT_COUNT - prev.length;
-      if (room <= 0) {
-        return prev;
+      const list = Array.from(files);
+      const picked: ChatAttachment[] = [];
+      let unsupported = 0;
+      let oversized = 0;
+      for (const file of list) {
+        if (!isSupportedChatAttachmentMimeType(file.type)) {
+          unsupported += 1;
+          continue;
+        }
+        if (file.size > MAX_CHAT_ATTACHMENT_BYTES) {
+          oversized += 1;
+          continue;
+        }
+        const att = await fileToChatAttachment(file);
+        if (att) {
+          picked.push(att);
+        }
       }
-      return [...prev, ...picked.slice(0, room)];
-    });
-  }, []);
+      if (!picked.length) {
+        if (unsupported > 0 || oversized > 0) {
+          message.warning(
+            unsupported > 0 ? "对话附件目前仅支持图片文件。" : "图片附件不能超过 8 MB。",
+          );
+        }
+        return;
+      }
+      setPendingAttachments((prev) => {
+        const room = MAX_CHAT_ATTACHMENT_COUNT - prev.length;
+        if (room <= 0) {
+          message.warning(`最多只能附带 ${MAX_CHAT_ATTACHMENT_COUNT} 张图片。`);
+          return prev;
+        }
+        if (picked.length > room) {
+          message.warning(`最多只能附带 ${MAX_CHAT_ATTACHMENT_COUNT} 张图片，已自动截取。`);
+        }
+        return [...prev, ...picked.slice(0, room)];
+      });
+      if (unsupported > 0 || oversized > 0) {
+        message.warning(
+          unsupported > 0
+            ? "已跳过非图片文件；对话附件目前仅支持图片。"
+            : "已跳过超过 8 MB 的图片。",
+        );
+      }
+    },
+    [message],
+  );
 
   const onFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     void addFilesFromList(e.target.files);
@@ -520,24 +668,35 @@ export function ChatPage() {
     if (!canSend || sending) {
       return;
     }
+    const outgoingDraft = draft;
+    const outgoingText = draft.trim();
+    const outgoingAttachments = pendingAttachments;
     setSending(true);
     setOptimisticUserBubble({
-      text: draft.trim(),
-      attachmentCount: pendingAttachments.length,
+      text: outgoingText,
+      attachmentCount: outgoingAttachments.length,
       ts: Date.now(),
+    });
+    setDraft("");
+    setPendingAttachments([]);
+    requestAnimationFrame(() => {
+      resetComposerHeight();
+      textareaRef.current?.focus();
+      followBottomRef.current = true;
+      scrollViewportToBottom("smooth");
     });
     try {
       const sent = await sendUserMessage(
-        draft,
-        pendingAttachments.length > 0 ? pendingAttachments : undefined,
+        outgoingDraft,
+        outgoingAttachments.length > 0 ? outgoingAttachments : undefined,
       );
       if (!sent) {
         message.warning("网关或项目还没准备好，请稍后再试。");
+        setDraft(outgoingDraft);
+        setPendingAttachments(outgoingAttachments);
         setOptimisticUserBubble(null);
         return;
       }
-      setDraft("");
-      setPendingAttachments([]);
       requestAnimationFrame(() => {
         resetComposerHeight();
         textareaRef.current?.focus();
@@ -546,6 +705,8 @@ export function ChatPage() {
       });
     } catch (err) {
       message.error(err instanceof Error ? err.message : "发送失败，请稍后再试。");
+      setDraft(outgoingDraft);
+      setPendingAttachments(outgoingAttachments);
       setOptimisticUserBubble(null);
     } finally {
       setSending(false);
@@ -555,12 +716,19 @@ export function ChatPage() {
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-white">
       <main className="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] bg-white">
-        <header className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-200/70 bg-white px-3 py-2.5 sm:px-4">
+        <header className="power-chat-page-header flex h-14 shrink-0 items-center justify-between gap-3 border-b border-slate-200/35 bg-white/95 px-5 backdrop-blur">
           <div className="min-w-0 flex-1 pt-0.5">
             {currentSessionLabel ? (
-              <p className="truncate text-sm font-semibold tracking-[-0.01em] text-slate-900 sm:text-base">
-                {currentSessionLabel}
-              </p>
+              <>
+                <p className="truncate text-sm font-semibold tracking-[-0.01em] text-slate-900 sm:text-base">
+                  {currentSessionLabel}
+                </p>
+                {runStatusHint ? (
+                  <p className="truncate text-xs text-slate-500" aria-live="polite">
+                    {runStatusHint}
+                  </p>
+                ) : null}
+              </>
             ) : (
               <p className="truncate text-sm text-slate-500">新建或选择会话以开始</p>
             )}
@@ -570,32 +738,27 @@ export function ChatPage() {
               type="button"
               title={workspaceSidebarOpen ? "收起最近修改" : "展开最近修改"}
               aria-label={workspaceSidebarOpen ? "收起最近修改" : "展开最近修改"}
-              aria-expanded={workspaceSidebarOpen}
+              aria-pressed={workspaceSidebarOpen}
               onClick={() => setWorkspaceSidebarOpen((open) => !open)}
-              className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200/90 text-slate-600 transition-[colors,transform] duration-200 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-200/60 active:scale-95"
-            >
-              {workspaceSidebarOpen ? (
-                <MenuFoldOutlined
-                  className="text-[15px] transition-opacity duration-200"
-                  aria-hidden
-                />
-              ) : (
-                <MenuUnfoldOutlined
-                  className="text-[15px] transition-opacity duration-200"
-                  aria-hidden
-                />
+              className={cn(
+                "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition",
+                workspaceSidebarOpen
+                  ? "border-slate-300 bg-white text-slate-800 shadow-sm shadow-slate-200/40"
+                  : "border-slate-200/90 bg-white/70 text-slate-600 hover:border-slate-300 hover:bg-white hover:text-slate-900",
               )}
+            >
+              <MenuUnfoldOutlined className="text-[15px]" aria-hidden />
             </button>
           ) : null}
         </header>
 
         <div className="flex min-h-0 min-w-0 bg-white">
-          <div className="grid min-h-0 min-w-0 flex-1 grid-rows-[minmax(0,1fr)_auto] bg-white transition-[flex] duration-300 ease-out">
+          <div className="power-chat-stage grid min-h-0 min-w-0 flex-1 grid-rows-[minmax(0,1fr)_auto] transition-[flex] duration-300 ease-out">
             <div className="relative min-h-0 min-w-0 overflow-hidden">
               <div
                 ref={scrollRef}
                 onScroll={onScrollViewport}
-                className="power-chat-scroll h-full max-h-full min-h-0 overflow-y-auto overscroll-y-contain bg-white px-3 pb-4 pt-4 sm:px-7"
+                className="power-chat-scroll h-full max-h-full min-h-0 overflow-y-auto overscroll-y-contain bg-transparent px-3 pb-4 pt-5 sm:px-7"
               >
                 {errorText ? (
                   <div
@@ -623,42 +786,14 @@ export function ChatPage() {
                 ) : (
                   <div
                     ref={messagesColumnRef}
-                    className="mx-auto flex w-full max-w-3xl flex-col gap-3.5"
+                    className="mx-auto flex w-full max-w-[760px] flex-col gap-5 px-2 py-5 sm:px-4"
                   >
-                    {(activeRuntime?.chatMessages ?? []).map((msg, i) => {
-                      if (!isRenderableChatMessage(msg) || !messageHasVisibleText(msg)) {
-                        return null;
-                      }
-                      const raw = msg;
-                      const role =
-                        typeof raw.role === "string" ? raw.role.toLowerCase() : "unknown";
-                      const rawText = extractText(msg);
-                      const text = (typeof rawText === "string" ? rawText : "").trim();
-                      const isUser = role === "user";
-                      const isAssistant = role === "assistant";
-                      return (
-                        <div
-                          key={`${i}-${typeof raw.timestamp === "number" ? raw.timestamp : i}`}
-                          className={cn("flex w-full", isUser ? "justify-end" : "justify-start")}
-                        >
-                          <div
-                            aria-label={isUser ? "用户消息" : "助手消息"}
-                            className={cn(
-                              "max-w-[min(100%,32rem)] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed shadow-sm transition-shadow",
-                              isUser
-                                ? "rounded-br-md border border-slate-200 bg-slate-50 text-slate-900 shadow-slate-200/35"
-                                : "rounded-bl-md border border-slate-200/80 bg-white/95 text-slate-800 shadow-slate-200/40",
-                            )}
-                          >
-                            {isAssistant ? (
-                              <ChatMarkdownBody source={text} />
-                            ) : (
-                              <span className="whitespace-pre-wrap break-words">{text}</span>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
+                    {leadMessages.map((msg, i) =>
+                      renderChatMessageBubble(
+                        msg,
+                        `lead-${i}-${isRenderableChatMessage(msg) && typeof msg.timestamp === "number" ? msg.timestamp : i}`,
+                      ),
+                    )}
                     {optimisticUserBubble &&
                     !(activeRuntime?.chatMessages ?? []).some((m) => {
                       if (!isRenderableChatMessage(m)) {
@@ -671,7 +806,7 @@ export function ChatPage() {
                       return (extractText(m) ?? "").trim() === optimisticUserBubble.text.trim();
                     }) ? (
                       <div className="flex w-full justify-end">
-                        <div className="max-w-[min(100%,32rem)] rounded-2xl rounded-br-md border border-slate-200 bg-slate-50 px-4 py-2.5 text-[15px] leading-relaxed text-slate-900 shadow-sm shadow-slate-200/35">
+                        <div className="max-w-[min(100%,42rem)] rounded-[22px] rounded-br-lg bg-[#fbfbfa] px-4 py-2.5 text-[15px] leading-relaxed text-slate-900 shadow-sm shadow-slate-200/18 ring-1 ring-slate-200/70">
                           <span className="whitespace-pre-wrap break-words">
                             {optimisticUserBubble.text || "（仅附件消息）"}
                           </span>
@@ -683,78 +818,40 @@ export function ChatPage() {
                         </div>
                       </div>
                     ) : null}
-                    {(activeRuntime?.chatStreamSegments ?? [])
-                      .filter((seg) => seg.text.trim().length > 0)
-                      .map((seg, i) => (
-                        <div key={`seg-${seg.ts}-${i}`} className="flex w-full justify-start">
-                          <div className="max-w-[min(100%,32rem)] rounded-2xl rounded-bl-md border border-slate-200/80 bg-white/90 px-3.5 py-2.5 text-sm italic text-slate-600 shadow-sm shadow-slate-200/40">
-                            <ChatMarkdownBody
-                              className="chat-markdown break-words text-sm italic leading-relaxed text-slate-600 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
-                              source={seg.text}
-                            />
-                          </div>
+                    {visibleStreamSegments.map((seg, i) => (
+                      <div key={`seg-${seg.ts}-${i}`} className="flex w-full justify-start">
+                        <div className="max-w-[min(100%,42rem)] rounded-[22px] rounded-bl-lg bg-white/92 px-4 py-3 text-sm text-slate-600 shadow-sm shadow-slate-200/25 ring-1 ring-slate-200/60">
+                          <ChatMarkdownBody
+                            className="chat-markdown break-words text-sm leading-relaxed text-slate-600 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+                            source={sanitizeChatDisplayText(seg.text)}
+                          />
                         </div>
-                      ))}
-                    {(activeRuntime?.chatToolMessages ?? []).map((tm, i) => {
-                      if (
-                        !isRenderableChatMessage(tm) ||
-                        shouldHideChatMessage(tm, { showToolCalls: false })
-                      ) {
-                        return null;
-                      }
-                      const preview = extractText(tm) || JSON.stringify(tm).slice(0, 400);
-                      const content = tm.content;
-                      let title = "工具";
-                      if (Array.isArray(content) && content[0] && typeof content[0] === "object") {
-                        const first = content[0] as Record<string, unknown>;
-                        if (typeof first.name === "string") {
-                          title = first.name;
-                        }
-                      }
-                      return (
-                        <details
-                          key={`tool-${i}`}
-                          className="max-w-[min(100%,32rem)] rounded-2xl border border-slate-200/80 bg-slate-50/80 px-3.5 py-2.5 text-sm text-slate-900 shadow-sm shadow-slate-200/35"
-                        >
-                          <summary className="cursor-pointer select-none font-medium text-slate-800 outline-none hover:text-slate-900">
-                            {title}
-                          </summary>
-                          <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs text-slate-700">
-                            {preview}
-                          </pre>
-                        </details>
-                      );
-                    })}
+                      </div>
+                    ))}
+                    <ChatToolStepsList steps={chatToolSteps} />
+                    {tailAssistantMessages.map((msg, i) =>
+                      renderChatMessageBubble(
+                        msg,
+                        `tail-${i}-${isRenderableChatMessage(msg) && typeof msg.timestamp === "number" ? msg.timestamp : i}`,
+                      ),
+                    )}
                     {showAssistantOutput ? (
                       <div className="flex w-full justify-start scroll-mt-4">
-                        <div className="max-w-[min(100%,32rem)] rounded-2xl rounded-bl-md bg-white/95 px-4 py-2.5 text-[15px] text-slate-800 shadow-sm shadow-slate-200/40 ring-1 ring-slate-200/80">
+                        <div className="max-w-[min(100%,42rem)] rounded-[22px] rounded-bl-lg bg-white/92 px-4 py-3 text-[15px] text-slate-800 shadow-sm shadow-slate-200/25 ring-1 ring-slate-200/60">
                           {awaitingFirstToken ? (
                             <div
-                              className="flex items-center gap-1.5 py-1 text-sm text-slate-500"
+                              className="flex items-center py-1"
                               aria-live="polite"
                               aria-busy="true"
                             >
                               <TypingDots />
-                              <span>
-                                {likelyGeneratingFile
-                                  ? "正在处理，可能在生成文件..."
-                                  : "正在处理..."}
-                              </span>
                             </div>
-                          ) : (
-                            <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-slate-400">
-                              <span
-                                className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-slate-900/70"
-                                aria-hidden
-                              />
-                              输出中
-                            </div>
-                          )}
+                          ) : null}
                           {showStream ? (
                             <>
                               <ChatMarkdownBody
                                 className="chat-markdown break-words text-[15px] leading-relaxed text-slate-800 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
-                                source={activeRuntime?.chatStream ?? ""}
+                                source={sanitizeChatDisplayText(liveStreamText)}
                               />
                               <span
                                 className="ml-1 inline-block h-4 w-0.5 animate-pulse bg-slate-500 align-middle opacity-70"
@@ -771,7 +868,7 @@ export function ChatPage() {
               {selectedSessionKey && activeRuntime?.chatLoading !== true && showJumpToBottom ? (
                 <button
                   type="button"
-                  className="absolute bottom-4 right-4 z-10 flex items-center gap-1.5 rounded-full border border-slate-200/90 bg-white px-3 py-2 text-xs font-medium text-slate-700 shadow-lg shadow-slate-300/35 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300/60 sm:right-6"
+                  className="absolute bottom-4 right-4 z-10 flex items-center gap-1.5 rounded-full border border-slate-200/90 bg-white px-3 py-2 text-xs font-medium text-slate-700 shadow-md shadow-slate-300/25 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300/60 sm:right-6"
                   aria-label="回到底部查看最新内容"
                   onClick={() => scrollViewportToBottom("smooth")}
                 >
@@ -783,7 +880,7 @@ export function ChatPage() {
               ) : null}
             </div>
 
-            <div className="relative shrink-0 bg-white px-3 py-3 shadow-[0_-16px_36px_rgba(255,255,255,0.9)] sm:px-6 sm:py-4">
+            <div className="power-composer-fade relative shrink-0 px-3 pb-4 pt-9 sm:px-6 sm:pb-5 sm:pt-10">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -794,7 +891,7 @@ export function ChatPage() {
                 tabIndex={-1}
                 onChange={onFileInputChange}
               />
-              <div className="mx-auto w-full max-w-3xl">
+              <div className="mx-auto w-full max-w-[760px]">
                 {catalogImageSupport === "no" && pendingAttachments.length > 0 ? (
                   <div
                     role="status"
@@ -833,8 +930,8 @@ export function ChatPage() {
                 ) : null}
                 <div
                   className={cn(
-                    "power-surface flex items-end gap-2 rounded-2xl border px-2 py-2 transition-[box-shadow,border-color,transform] sm:gap-3 sm:px-3 sm:py-2.5",
-                    "focus-within:border-blue-200 focus-within:shadow-lg focus-within:shadow-blue-100/45 focus-within:ring-2 focus-within:ring-blue-100 focus-within:ring-offset-0",
+                    "power-surface flex items-end gap-2 rounded-[26px] border px-2.5 py-2 transition-[box-shadow,border-color,transform] sm:gap-2.5 sm:px-3 sm:py-2.5",
+                    "focus-within:border-slate-400/45 focus-within:shadow-xl focus-within:shadow-slate-300/25 focus-within:ring-1 focus-within:ring-slate-300/60 focus-within:ring-offset-0",
                   )}
                   onDragOver={(e) => {
                     e.preventDefault();
@@ -853,7 +950,7 @@ export function ChatPage() {
                       pendingAttachments.length >= MAX_CHAT_ATTACHMENT_COUNT || sending || busy
                     }
                     onClick={() => fileInputRef.current?.click()}
-                    className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-slate-500 transition hover:bg-blue-50 hover:text-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-200/60 focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-35"
+                    className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300/60 focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-35"
                   >
                     <ClipIcon className="h-5 w-5" />
                   </button>
@@ -884,9 +981,9 @@ export function ChatPage() {
                       }
                     }}
                     disabled={sending}
-                    className="max-h-[200px] min-h-[44px] w-full resize-none bg-transparent py-2.5 text-[15px] text-slate-900 outline-none ring-0 placeholder:text-slate-400 focus:outline-none focus-visible:outline-none disabled:opacity-50"
+                    className="max-h-[200px] min-h-[40px] w-full resize-none bg-transparent py-2.5 text-[15px] text-slate-900 outline-none ring-0 placeholder:text-slate-400 focus:outline-none focus-visible:outline-none disabled:opacity-50"
                   />
-                  <div className="mb-1 hidden shrink-0 items-center sm:flex">
+                  <div className="mb-0.5 hidden shrink-0 items-center sm:flex">
                     <ChatModelPicker
                       models={configuredModels}
                       valueRef={effectiveModelRef}
@@ -902,27 +999,29 @@ export function ChatPage() {
                     disabled={busy ? false : !canSend || sending}
                     onClick={() => (busy ? void stopGeneration() : void handleSend())}
                     className={cn(
-                      "mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-semibold shadow-sm transition",
+                      "mb-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-semibold transition",
                       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-0",
                       busy
                         ? "border border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100 focus-visible:ring-rose-300/50 enabled:active:scale-95"
-                        : cn(
-                            "enabled:active:scale-95 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500",
-                            "focus-visible:ring-blue-300/60",
-                            BRAND.primary,
-                            BRAND.primaryText,
-                          ),
+                        : canSend && !sending
+                          ? cn(
+                              "shadow-sm shadow-slate-300/35 enabled:active:scale-95",
+                              "focus-visible:ring-slate-300/60",
+                              BRAND.primary,
+                              BRAND.primaryText,
+                            )
+                          : "border border-slate-200/90 bg-[#f3f4f6] text-slate-400 shadow-sm shadow-slate-200/25 disabled:cursor-not-allowed",
                     )}
                   >
                     {busy ? (
-                      <span className="h-3.5 w-3.5 rounded-[3px] bg-current" aria-hidden />
+                      <span className="h-2.5 w-2.5 rounded-[2px] bg-current" aria-hidden />
                     ) : sending ? (
                       <span
                         className="h-1.5 w-1.5 rounded-full bg-current opacity-80"
                         aria-hidden
                       />
                     ) : (
-                      <ArrowUpOutlined className="text-[15px]" aria-hidden />
+                      <ArrowUpOutlined className="text-[13px]" aria-hidden />
                     )}
                   </button>
                 </div>
@@ -933,13 +1032,16 @@ export function ChatPage() {
           {workspaceRailEligible ? (
             <aside
               className={cn(
-                "power-workspace-rail hidden min-h-0 shrink-0 overflow-hidden border-l border-slate-200/70 bg-white xl:block",
+                "power-workspace-rail hidden min-h-0 shrink-0 overflow-hidden border-l border-slate-200/45 bg-white xl:block",
                 workspacePreviewActive
                   ? "power-workspace-rail--preview"
                   : "power-workspace-rail--list",
-                workspaceRailOpen ? "power-workspace-rail--open" : "power-workspace-rail--closed",
+                workspaceRailOpen || workspacePreviewFullscreen
+                  ? "power-workspace-rail--open"
+                  : "power-workspace-rail--closed",
+                workspacePreviewFullscreen && "power-workspace-rail--fullscreen",
               )}
-              aria-hidden={!workspaceRailOpen}
+              aria-hidden={!workspaceRailOpen && !workspacePreviewFullscreen}
             >
               <div className="power-workspace-rail__inner">
                 <ChatWorkspaceFilesPanel
@@ -948,6 +1050,10 @@ export function ChatPage() {
                   showToolbar={false}
                   onPreviewActiveChange={setWorkspacePreviewActive}
                   reloadToken={workspaceFilesReloadToken}
+                  canFullscreen={workspaceCanFullscreen}
+                  previewFullscreen={workspacePreviewFullscreen}
+                  onToggleFullscreen={toggleWorkspacePreviewFullscreen}
+                  onCollapseRail={collapseWorkspaceRail}
                 />
               </div>
             </aside>
