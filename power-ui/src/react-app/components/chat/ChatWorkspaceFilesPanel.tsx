@@ -535,7 +535,7 @@ export function ChatWorkspaceFilesPanel({
             <div className="py-10 text-center text-sm text-slate-500">此目录暂无文件</div>
           ) : (
             <div className="mx-auto max-w-[19.5rem]">
-              <div className="rounded-[22px] border border-slate-200/60 bg-white/72 p-3 shadow-sm shadow-slate-300/18 backdrop-blur">
+              <div className="rounded-[22px] border border-[rgba(226,232,240,0.5)] bg-[#fafafa] p-3 shadow-sm shadow-neutral-900/[0.04]">
                 <div className="flex items-start justify-between gap-3 px-1 pb-3 pt-0.5">
                   <button
                     type="button"
@@ -563,7 +563,7 @@ export function ChatWorkspaceFilesPanel({
                     type="button"
                     disabled={uploading || loading}
                     onClick={() => uploadRef.current?.click()}
-                    className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-slate-200/75 bg-white/82 px-2.5 text-xs font-semibold text-slate-700 shadow-sm shadow-slate-200/25 transition hover:border-slate-300 hover:bg-white hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-[rgba(226,232,240,0.65)] bg-white px-2.5 text-xs font-semibold text-neutral-700 shadow-sm shadow-neutral-900/[0.04] transition hover:border-[rgba(203,213,225,0.85)] hover:bg-[#f5f5f4] hover:text-neutral-900 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <UploadOutlined className="text-[12px]" />
                     {uploading ? "上传中…" : "上传文件"}
@@ -593,7 +593,7 @@ export function ChatWorkspaceFilesPanel({
                   <button
                     type="button"
                     onClick={() => setShowAllFiles((v) => !v)}
-                    className="mt-3 flex w-full items-center justify-center rounded-xl border border-slate-200/70 bg-white/62 px-3 py-2 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:bg-white hover:text-slate-950"
+                    className="mt-3 flex w-full items-center justify-center rounded-xl border border-[rgba(226,232,240,0.55)] bg-[#f5f5f4] px-3 py-2 text-xs font-medium text-neutral-600 transition hover:border-[rgba(226,232,240,0.72)] hover:bg-white hover:text-neutral-900"
                   >
                     {showAllFiles ? "收起" : `更多，查看全部 ${sortedFiles.length} 个文件`}
                   </button>
@@ -769,8 +769,8 @@ function FileCard({
       className={cn(
         "group flex items-center gap-2 rounded-2xl border px-2.5 py-2.5 transition-[background-color,border-color,box-shadow,transform]",
         active
-          ? "border-slate-300/80 bg-white shadow-sm shadow-slate-200/35"
-          : "border-transparent bg-slate-50/80 hover:border-slate-200/90 hover:bg-white hover:shadow-sm hover:shadow-slate-200/25",
+          ? "border-[rgba(226,232,240,0.72)] bg-white shadow-sm shadow-neutral-900/[0.05]"
+          : "border-transparent bg-[#f5f5f4] hover:border-[rgba(226,232,240,0.55)] hover:bg-white hover:shadow-sm hover:shadow-neutral-900/[0.04]",
       )}
     >
       <button
@@ -782,8 +782,8 @@ function FileCard({
           className={cn(
             "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl",
             entry.kind === "directory"
-              ? "bg-slate-100 text-slate-600"
-              : "bg-white text-slate-500 ring-1 ring-slate-200/70",
+              ? "bg-[#efefed] text-neutral-600"
+              : "bg-white text-neutral-500 ring-1 ring-[rgba(226,232,240,0.65)]",
           )}
           aria-hidden
         >
@@ -814,7 +814,7 @@ function FileCard({
               e.stopPropagation();
               onDownload();
             }}
-            className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200/75 bg-white/82 text-slate-500 transition hover:border-slate-300 hover:bg-white hover:text-slate-900"
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-[rgba(226,232,240,0.65)] bg-white text-neutral-500 transition hover:border-[rgba(203,213,225,0.85)] hover:bg-[#f5f5f4] hover:text-neutral-800"
           >
             <DownloadOutlined className="text-[14px]" />
           </button>
@@ -826,7 +826,7 @@ function FileCard({
               e.stopPropagation();
               onDelete();
             }}
-            className="flex h-8 w-8 items-center justify-center rounded-full border border-red-100/90 bg-white/82 text-red-500 transition hover:bg-red-50 hover:text-red-700"
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-[rgba(226,232,240,0.65)] bg-white text-red-500 transition hover:border-red-200/80 hover:bg-red-50/90 hover:text-red-600"
           >
             <DeleteOutlined className="text-[14px]" />
           </button>

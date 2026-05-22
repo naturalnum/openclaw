@@ -1,3 +1,7 @@
+function cn(...parts: Array<string | false | null | undefined>) {
+  return parts.filter(Boolean).join(" ");
+}
+
 type PowerBrandMarkProps = {
   compact?: boolean;
   showSubtitle?: boolean;
@@ -8,7 +12,12 @@ export function PowerBrandMark({ compact = false, showSubtitle = !compact }: Pow
   return (
     <div className="flex min-w-0 items-center gap-2.5">
       <span
-        className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#30343a] to-[#5b6068] text-[13px] font-semibold tracking-tight text-white shadow-sm shadow-slate-300/35 ring-1 ring-white/70"
+        className={cn(
+          "relative flex shrink-0 items-center justify-center bg-gradient-to-br from-[#30343a] to-[#5b6068] font-semibold tracking-tight text-white",
+          compact
+            ? "h-8 w-8 rounded-lg text-[12px] shadow-sm shadow-slate-300/25"
+            : "h-9 w-9 rounded-xl text-[13px] shadow-sm shadow-slate-300/35 ring-1 ring-white/70",
+        )}
         aria-hidden
       >
         小

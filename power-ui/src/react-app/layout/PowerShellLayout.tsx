@@ -153,17 +153,20 @@ function SidebarNav({
   const activeProjectId =
     selectedProjectId?.trim() || activeProjectFromSearch || activeProjectFromSession;
 
+  const shellTreeRow = "power-shell-tree-row";
+  const shellNavSelected = "power-shell-tree-row--selected font-semibold text-neutral-900";
+  const shellNavIdle = "text-neutral-600";
+
   const sessionNavItemClass = (selected: boolean) =>
     cn(
-      "group/session relative flex items-center gap-0.5 rounded-xl transition",
-      selected
-        ? "bg-white/90 font-semibold text-slate-900 shadow-sm shadow-slate-300/16 ring-1 ring-[#d9d9d6]"
-        : "text-slate-600 hover:bg-slate-100/55 hover:text-slate-900",
+      shellTreeRow,
+      "group/session relative flex items-center gap-0.5 rounded-xl",
+      selected ? shellNavSelected : shellNavIdle,
     );
 
   const sessionLinkClass = (selected: boolean) =>
     cn(
-      "min-w-0 flex-1 truncate py-1.5 text-left text-[12.5px] leading-snug transition",
+      "min-w-0 flex-1 truncate py-1 text-left text-[12.5px] leading-snug transition",
       selected ? "text-slate-900" : "font-medium text-slate-600 hover:text-slate-900",
     );
 
@@ -390,15 +393,15 @@ function SidebarNav({
 
   const navItemShell =
     "flex items-center rounded-2xl text-[13px] transition-[background-color,color,box-shadow,transform] duration-150 outline-none focus-visible:ring-2 focus-visible:ring-[#d7d7d2] focus-visible:ring-offset-2 focus-visible:ring-offset-[#f8f8f7] active:scale-[0.99]";
-  const navItemExpanded = "gap-2.5 px-3 py-2.5";
-  /** 收起时收窄选中底，避免贴满侧栏宽度 */
-  const navItemCollapsed = "mx-auto h-10 w-10 shrink-0 justify-center gap-0 p-0";
+  const navItemExpanded = "gap-2.5 px-3 py-2";
+  /** 收起时仅包住图标，避免 2px 边框把点击区撑得过大 */
+  const navItemCollapsed = "mx-auto h-9 w-9 shrink-0 justify-center gap-0 p-0";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {collapsed ? (
-        <div className="flex w-full shrink-0 justify-center px-2 pb-2 pt-3">
-          <div className="group relative inline-flex items-center justify-center rounded-2xl bg-white p-1.5 shadow-md shadow-slate-300/35 ring-1 ring-slate-200/80">
+        <div className="power-shell-brand-header flex shrink-0 items-center justify-center px-2">
+          <div className="group/brand relative flex h-9 w-9 items-center justify-center">
             <PowerBrandMark compact showSubtitle={false} />
             {onToggleCollapsed ? (
               <button
@@ -406,41 +409,39 @@ function SidebarNav({
                 aria-label="展开侧栏"
                 onClick={onToggleCollapsed}
                 className={cn(
-                  "absolute inset-0 flex items-center justify-center rounded-[10px]",
-                  "bg-white/95 text-slate-700 ring-1 ring-slate-200/80 shadow-sm",
+                  "absolute inset-0 flex items-center justify-center rounded-lg",
+                  "bg-[#30343a]/88 text-white",
                   "opacity-0 transition-opacity duration-150",
-                  "pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto",
+                  "pointer-events-none group-hover/brand:opacity-100 group-hover/brand:pointer-events-auto",
                   "[@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100",
-                  "focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300/60",
+                  "focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400/40 focus-visible:ring-offset-1 focus-visible:ring-offset-white",
                 )}
               >
-                <MenuUnfoldOutlined className="text-lg leading-none" />
+                <MenuUnfoldOutlined className="text-[15px] leading-none" />
               </button>
             ) : null}
           </div>
         </div>
       ) : (
-        <div className="flex shrink-0 items-center gap-2 px-3 pb-2 pt-3">
-          <div className="flex w-full min-w-0 items-center gap-2 rounded-2xl border border-slate-200/50 bg-white/82 px-2.5 py-2 shadow-sm shadow-slate-300/16">
-            <div className="min-w-0 flex-1">
-              <PowerBrandMark />
-            </div>
-            {onToggleCollapsed ? (
-              <button
-                type="button"
-                aria-label="收起侧栏"
-                onClick={onToggleCollapsed}
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-100/80 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300/60"
-              >
-                <MenuFoldOutlined className="text-lg leading-none" />
-              </button>
-            ) : null}
+        <div className="power-shell-brand-header flex h-14 shrink-0 items-center gap-2 bg-white/95 px-3 backdrop-blur">
+          <div className="min-w-0 flex-1">
+            <PowerBrandMark showSubtitle={false} />
           </div>
+          {onToggleCollapsed ? (
+            <button
+              type="button"
+              aria-label="收起侧栏"
+              onClick={onToggleCollapsed}
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-200/55 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300/60"
+            >
+              <MenuFoldOutlined className="text-lg leading-none" />
+            </button>
+          ) : null}
         </div>
       )}
 
       <nav
-        className={cn("flex shrink-0 flex-col gap-0.5", collapsed ? "px-2" : "px-2")}
+        className={cn("flex shrink-0 flex-col px-2", collapsed ? "gap-1.5 pt-2" : "gap-0 pt-1.5")}
         aria-label="主导航"
       >
         {NAV.map((item) => (
@@ -452,11 +453,10 @@ function SidebarNav({
             onClick={() => onPick?.()}
             className={({ isActive }) =>
               cn(
+                shellTreeRow,
                 navItemShell,
                 collapsed ? navItemCollapsed : navItemExpanded,
-                isActive
-                  ? "bg-white/90 font-semibold text-slate-900 shadow-sm shadow-slate-300/16 ring-1 ring-[#d9d9d6]"
-                  : "text-slate-600 hover:bg-slate-100/55 hover:text-slate-900",
+                isActive ? shellNavSelected : shellNavIdle,
               )
             }
           >
@@ -510,7 +510,7 @@ function SidebarNav({
               </button>
             </div>
             {projectsOpen ? (
-              <div className="mt-1.5 space-y-1 pb-2 pl-1">
+              <div className="mt-1 flex flex-col gap-0 pb-1.5 pl-1">
                 {projects.map((p) => {
                   const projectCollapsed = collapsedProjectIds.has(p.id);
                   const projectSessions = sessionsByProject.get(p.id) ?? [];
@@ -519,13 +519,14 @@ function SidebarNav({
                     ? projectSessions
                     : projectSessions.slice(0, 6);
                   return (
-                    <div key={p.id} className="space-y-0.5">
+                    <div key={p.id} className="flex flex-col gap-0">
                       <div
                         className={cn(
-                          "group relative flex items-center gap-0.5 rounded-2xl transition hover:bg-slate-100/50",
-                          activeProjectId === p.id &&
-                            !activeSessionKey &&
-                            "bg-white/90 shadow-sm shadow-slate-300/16 ring-1 ring-[#d9d9d6]",
+                          shellTreeRow,
+                          "group relative flex items-center gap-0.5 rounded-2xl",
+                          activeProjectId === p.id && !activeSessionKey
+                            ? shellNavSelected
+                            : shellNavIdle,
                         )}
                       >
                         <button
@@ -585,7 +586,7 @@ function SidebarNav({
                           title={p.name}
                           onClick={() => onPick?.()}
                           className={cn(
-                            "min-w-0 flex-1 truncate rounded-xl py-2 pr-2 text-left text-[13px] font-semibold transition",
+                            "min-w-0 flex-1 truncate rounded-xl py-1.5 pr-2 text-left text-[13px] font-semibold transition",
                             activeProjectId === p.id ? "text-slate-900" : "text-slate-800",
                           )}
                         >
@@ -762,13 +763,13 @@ function SidebarNav({
               )}
             </button>
             {recentOpen ? (
-              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-0.5 pb-2 pt-0.5">
+              <div className="power-sidebar-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-0.5 pb-2 pt-0.5">
                 {!recentLoading && recentOnlySessions.length === 0 ? (
                   <p className="px-1.5 py-2 text-center text-[11px] leading-snug text-slate-500">
                     暂无会话
                   </p>
                 ) : null}
-                <div className="space-y-0.5">
+                <div className="flex flex-col gap-0">
                   {recentOnlySessions.map((s) => {
                     const sessionSelected = activeSessionKey === s.key;
                     return (
@@ -784,7 +785,7 @@ function SidebarNav({
                             void onSelectSession?.(s.key, agentId);
                             onPick?.();
                           }}
-                          className={cn(sessionLinkClass(sessionSelected), "px-2.5 py-2")}
+                          className={cn(sessionLinkClass(sessionSelected), "px-2.5 py-1.5")}
                         >
                           {s.label}
                         </Link>
@@ -846,7 +847,7 @@ function SidebarNav({
       <div
         className={cn(
           "mt-auto shrink-0 border-t border-slate-300/45",
-          collapsed ? "px-2 py-3" : "px-2 py-3",
+          collapsed ? "px-2 pb-3 pt-2" : "px-2 py-3",
         )}
       >
         <div ref={settingsFlyoutRef} className={cn("relative", !collapsed && "group/settings")}>
@@ -858,11 +859,10 @@ function SidebarNav({
               aria-haspopup="menu"
               onClick={() => setSettingsFlyoutOpen((v) => !v)}
               className={cn(
+                shellTreeRow,
                 navItemShell,
                 navItemCollapsed,
-                isSettingsSection
-                  ? "bg-white font-semibold text-slate-900 shadow-sm shadow-slate-300/22 ring-1 ring-[#d9d9d6]"
-                  : "text-slate-600 hover:bg-white hover:text-slate-900",
+                isSettingsSection ? shellNavSelected : shellNavIdle,
               )}
             >
               <span
@@ -880,11 +880,10 @@ function SidebarNav({
               title="设置"
               onClick={() => onPick?.()}
               className={cn(
+                shellTreeRow,
                 navItemShell,
                 navItemExpanded,
-                isSettingsSection
-                  ? "bg-white font-semibold text-slate-900 shadow-sm shadow-slate-300/22 ring-1 ring-[#d9d9d6]"
-                  : "text-slate-600 hover:bg-white hover:text-slate-900",
+                isSettingsSection ? shellNavSelected : shellNavIdle,
               )}
             >
               <span className={cn("flex h-5 w-5 shrink-0 items-center justify-center text-base")}>
@@ -1181,10 +1180,13 @@ function PowerShellLayoutContent() {
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-row">
         <aside
-          className="power-sidebar hidden min-h-0 shrink-0 flex-col border-r border-slate-200/55 md:flex"
+          className={cn(
+            "power-sidebar hidden min-h-0 shrink-0 flex-col border-r border-slate-200/55 md:flex",
+            collapsed && "power-sidebar--collapsed",
+          )}
           style={{ width: sidebarWidth }}
         >
-          <div className="flex min-h-0 flex-1 flex-col pt-1">
+          <div className="flex min-h-0 flex-1 flex-col">
             <SidebarNav
               collapsed={collapsed}
               onToggleCollapsed={() => setCollapsed((c) => !c)}

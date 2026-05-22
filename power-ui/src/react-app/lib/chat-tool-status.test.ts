@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { dedupeCumulativeStreamSegments, streamTextAfterPrefix } from "./chat-stream-segments";
-import { buildChatToolSteps, collapseDuplicateToolSteps } from "./chat-tool-status";
+import {
+  buildChatToolSteps,
+  collapseDuplicateToolSteps,
+  mergeStableChatToolSteps,
+} from "./chat-tool-status";
 
 describe("chat-tool-status", () => {
   it("labels exec steps from command text", () => {
@@ -17,6 +21,48 @@ describe("chat-tool-status", () => {
       },
     ]);
     expect(steps[0]?.label).toBe("运行 gen_sun_wukong_pdf.py");
+  });
+
+  it("shortens cd exec steps without exposing full paths", () => {
+    const steps = buildChatToolSteps([
+      {
+        role: "assistant",
+        toolCallId: "call-1",
+        content: [
+          {
+            type: "toolcall",
+            name: "exec",
+            arguments: { command: "cd /Users/me/.openclaw/workspace-dev/hello" },
+          },
+        ],
+      },
+    ]);
+    expect(steps[0]?.label).toBe("切换工作目录");
+    expect(steps[0]?.detail).toBe("");
+  });
+
+  it("keeps step labels stable across refreshes", () => {
+    const first = buildChatToolSteps([
+      {
+        role: "assistant",
+        toolCallId: "call-2",
+        content: [{ type: "toolcall", name: "exec", arguments: { command: "python3 gen.py" } }],
+      },
+    ]);
+    const second = buildChatToolSteps([
+      {
+        role: "assistant",
+        toolCallId: "call-2",
+        content: [
+          { type: "toolcall", name: "exec", arguments: { command: "python3 gen.py" } },
+          { type: "toolresult", name: "exec", text: "long tool output that should not appear" },
+        ],
+      },
+    ]);
+    const merged = mergeStableChatToolSteps(first, second);
+    expect(merged[0]?.label).toBe(first[0]?.label);
+    expect(merged[0]?.complete).toBe(true);
+    expect(merged[0]?.detail).toBe("");
   });
 
   it("collapses consecutive duplicate step titles", () => {

@@ -30,6 +30,7 @@ import {
 import {
   buildChatToolSteps,
   finalizeChatToolStepsForRunEnd,
+  mergeStableChatToolSteps,
   type ChatToolStep,
 } from "../lib/chat-tool-status";
 import { resolveChatModelPool, resolveEffectiveChatModelRef } from "../lib/configured-chat-models";
@@ -59,7 +60,7 @@ type SessionRuntimeState = ChatState & {
 function syncDisplayToolSteps(rt: SessionRuntimeState) {
   const live = buildChatToolSteps(rt.chatToolMessages);
   if (live.length > 0) {
-    rt.displayToolSteps = live;
+    rt.displayToolSteps = mergeStableChatToolSteps(rt.displayToolSteps, live);
   }
 }
 

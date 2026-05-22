@@ -13,7 +13,7 @@ import { extractText } from "../../compat/chat";
 import { isProtectedMainSessionKey } from "../../integrations/openclaw/session-keys";
 import { ChatMarkdownBody } from "../components/chat/ChatMarkdownBody";
 import { ChatModelPicker } from "../components/chat/ChatModelPicker";
-import { ChatToolStepsList } from "../components/chat/ChatToolStepsList";
+import { ChatToolStepsList, type ChatToolStepsPhase } from "../components/chat/ChatToolStepsList";
 import { ChatWorkspaceFilesPanel } from "../components/chat/ChatWorkspaceFilesPanel";
 import { useWorkbenchChat } from "../context/WorkbenchChatContext";
 import { useWorkspaceRail } from "../context/WorkspaceRailContext";
@@ -119,17 +119,41 @@ const MAX_CHAT_ATTACHMENT_COUNT = 6;
 /** 距底部小于此值视为「在底部」，新消息/流式输出会自动跟随 */
 const SCROLL_BOTTOM_THRESHOLD_PX = 80;
 
+function mediaPathBasename(rawPath: string): string {
+  const normalized = rawPath.replaceAll("\\", "/").trim();
+  const parts = normalized.split("/").filter((part) => part.trim().length > 0);
+  return parts.length > 0 ? (parts[parts.length - 1] ?? "文件") : "文件";
+}
+
 function sanitizeChatDisplayText(text: string): string {
-  return text.replace(/MEDIA:([^\s\n\r]+)/g, (_match, rawPath: string) => {
-    const normalized = rawPath.replaceAll("\\", "/");
-    const filename =
-      normalized
-        .split("/")
-        .toReversed()
-        .find((part) => part.trim().length > 0)
-        ?.trim() || "文件";
-    return `MEDIA:${filename}`;
-  });
+  const lines = text.split("\n");
+  const mediaNames = new Set<string>();
+  for (const line of lines) {
+    const match = line.trim().match(/^MEDIA:(.+)$/);
+    if (match?.[1]) {
+      mediaNames.add(mediaPathBasename(match[1]));
+    }
+  }
+  const bodyWithoutMediaLines = lines
+    .filter((line) => {
+      const match = line.trim().match(/^MEDIA:(.+)$/);
+      if (!match?.[1]) {
+        return true;
+      }
+      const filename = mediaPathBasename(match[1]);
+      if (mediaNames.size === 0) {
+        return true;
+      }
+      const mentionedElsewhere = lines.some((other) => {
+        if (other === line) {
+          return false;
+        }
+        return other.includes(filename);
+      });
+      return !mentionedElsewhere;
+    })
+    .join("\n");
+  return bodyWithoutMediaLines.replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function fileToChatAttachment(file: File): Promise<ChatAttachment | null> {
@@ -436,22 +460,28 @@ export function ChatPage() {
   /** 已发起请求但尚未收到可见文本（首 token 等待） */
   const awaitingFirstToken = runActive && !showLiveStream && !activeRuntime?.lastError;
   const showAssistantOutput = awaitingFirstToken || showStream;
+  const toolStepsPhase = useMemo((): ChatToolStepsPhase => {
+    if (chatToolSteps.some((step) => !step.complete)) {
+      return "running";
+    }
+    if (runActive || sending) {
+      return "waiting_reply";
+    }
+    return "done";
+  }, [chatToolSteps, runActive, sending]);
+  const showAssistantActivityCard = chatToolSteps.length > 0 || showAssistantOutput;
   const runStatusHint = useMemo(() => {
     if (!runActive && !sending) {
       return null;
     }
-    if (chatToolSteps.length > 0) {
-      const active = chatToolSteps.some((step) => !step.complete);
-      const done = chatToolSteps.filter((step) => step.complete).length;
-      return active
-        ? `执行步骤 ${done}/${chatToolSteps.length}`
-        : `步骤已完成（${chatToolSteps.length}）`;
+    if (chatToolSteps.some((step) => !step.complete)) {
+      return "正在执行任务…";
     }
-    if (runActive) {
-      return showStream ? "正在生成回复…" : "等待模型响应…";
+    if (runActive || sending) {
+      return "正在生成回复…";
     }
     return "发送中…";
-  }, [chatToolSteps, runActive, sending, showStream]);
+  }, [chatToolSteps, runActive, sending, showStream, awaitingFirstToken]);
   const errorText = snapshotError ?? activeRuntime?.lastError ?? null;
   useEffect(() => {
     if (!optimisticUserBubble) {
@@ -828,40 +858,41 @@ export function ChatPage() {
                         </div>
                       </div>
                     ))}
-                    <ChatToolStepsList steps={chatToolSteps} />
+                    {showAssistantActivityCard ? (
+                      <ChatToolStepsList
+                        steps={chatToolSteps}
+                        phase={toolStepsPhase}
+                        fitContent={chatToolSteps.length === 0 && awaitingFirstToken && !showStream}
+                      >
+                        {awaitingFirstToken && chatToolSteps.length === 0 ? (
+                          <div
+                            className="flex items-center py-1"
+                            aria-live="polite"
+                            aria-busy="true"
+                          >
+                            <TypingDots />
+                          </div>
+                        ) : null}
+                        {showStream ? (
+                          <>
+                            <ChatMarkdownBody
+                              className="chat-markdown break-words text-[15px] leading-relaxed text-slate-800 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+                              source={sanitizeChatDisplayText(liveStreamText)}
+                            />
+                            <span
+                              className="ml-1 inline-block h-4 w-0.5 animate-pulse bg-slate-500 align-middle opacity-70"
+                              aria-hidden
+                            />
+                          </>
+                        ) : null}
+                      </ChatToolStepsList>
+                    ) : null}
                     {tailAssistantMessages.map((msg, i) =>
                       renderChatMessageBubble(
                         msg,
                         `tail-${i}-${isRenderableChatMessage(msg) && typeof msg.timestamp === "number" ? msg.timestamp : i}`,
                       ),
                     )}
-                    {showAssistantOutput ? (
-                      <div className="flex w-full justify-start scroll-mt-4">
-                        <div className="max-w-[min(100%,42rem)] rounded-[22px] rounded-bl-lg bg-white/92 px-4 py-3 text-[15px] text-slate-800 shadow-sm shadow-slate-200/25 ring-1 ring-slate-200/60">
-                          {awaitingFirstToken ? (
-                            <div
-                              className="flex items-center py-1"
-                              aria-live="polite"
-                              aria-busy="true"
-                            >
-                              <TypingDots />
-                            </div>
-                          ) : null}
-                          {showStream ? (
-                            <>
-                              <ChatMarkdownBody
-                                className="chat-markdown break-words text-[15px] leading-relaxed text-slate-800 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
-                                source={sanitizeChatDisplayText(liveStreamText)}
-                              />
-                              <span
-                                className="ml-1 inline-block h-4 w-0.5 animate-pulse bg-slate-500 align-middle opacity-70"
-                                aria-hidden
-                              />
-                            </>
-                          ) : null}
-                        </div>
-                      </div>
-                    ) : null}
                   </div>
                 )}
               </div>
@@ -880,7 +911,7 @@ export function ChatPage() {
               ) : null}
             </div>
 
-            <div className="power-composer-fade relative shrink-0 px-3 pb-4 pt-9 sm:px-6 sm:pb-5 sm:pt-10">
+            <div className="power-composer-fade relative shrink-0 px-3 pb-6 pt-9 sm:px-6 sm:pb-8 sm:pt-10">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -1010,7 +1041,7 @@ export function ChatPage() {
                               BRAND.primary,
                               BRAND.primaryText,
                             )
-                          : "border border-slate-200/90 bg-[#f3f4f6] text-slate-400 shadow-sm shadow-slate-200/25 disabled:cursor-not-allowed",
+                          : "power-composer-send--idle disabled:cursor-not-allowed",
                     )}
                   >
                     {busy ? (

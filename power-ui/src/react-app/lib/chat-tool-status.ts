@@ -22,6 +22,20 @@ function truncateToolPreview(text: string, max = 180): string {
   return compact.length > max ? `${compact.slice(0, max - 1)}…` : compact;
 }
 
+function pathBasename(value: string): string {
+  const normalized = value.replaceAll("\\", "/").trim();
+  const parts = normalized.split("/").filter(Boolean);
+  return parts.length > 0 ? (parts[parts.length - 1] ?? normalized) : normalized;
+}
+
+/** 步骤条不展示完整路径，避免进度文案随绝对路径变化而跳动。 */
+function humanizePathTokens(text: string): string {
+  return text.replace(/(?:~\/|\/)[^\s'"`;|&]+/g, (segment) => {
+    const base = pathBasename(segment);
+    return base.length > 0 && base.length < segment.length ? base : segment;
+  });
+}
+
 function extractExecCommand(args: unknown): string {
   if (!args || typeof args !== "object") {
     return "";
@@ -53,13 +67,18 @@ function shortenExecCommandLabel(command: string): string {
   if (/\b(pip3?|uv)\s+install\b/i.test(firstClause)) {
     return "安装依赖";
   }
+  if (/^\s*cd\s+/i.test(firstClause)) {
+    return "切换工作目录";
+  }
   if (/\b(python3?|python)\s+\S+\.py\b/i.test(firstClause)) {
     const match = firstClause.match(/\b(python3?|python)\s+(\S+\.py)\b/i);
-    return `运行 ${match?.[2] ?? "Python 脚本"}`;
+    const script = match?.[2] ? pathBasename(match[2]) : "Python 脚本";
+    return `运行 ${script}`;
   }
   if (/\b(node|bun)\s+\S+\.(?:mjs|cjs|js|ts)\b/i.test(firstClause)) {
     const match = firstClause.match(/\b(node|bun)\s+(\S+)/i);
-    return `运行 ${match?.[2] ?? "脚本"}`;
+    const script = match?.[2] ? pathBasename(match[2]) : "脚本";
+    return `运行 ${script}`;
   }
   if (/\bfc-list\b/i.test(firstClause) || /\bfont\b/i.test(firstClause)) {
     return "检查字体";
@@ -88,7 +107,7 @@ function shortenExecCommandLabel(command: string): string {
     return "修改权限";
   }
 
-  return truncateToolPreview(firstClause, 48);
+  return truncateToolPreview(humanizePathTokens(firstClause), 48);
 }
 
 function friendlyToolLabel(name: string, args: unknown): string {
@@ -132,28 +151,13 @@ export function isGenericToolStepDetail(detail: string): boolean {
   return GENERIC_TOOL_STEP_DETAILS.has(detail.trim());
 }
 
-function friendlyToolDetail(params: {
+function friendlyToolDetail(_params: {
   args: unknown;
   complete: boolean;
   name: string;
   resultText: string;
 }): string {
-  if (params.complete && params.resultText) {
-    return params.resultText;
-  }
-  const argText = stringifyToolValue(params.args).toLowerCase();
-  if (params.name.toLowerCase().includes("exec")) {
-    if (params.complete) {
-      return "";
-    }
-    if (/\b(pdf|pandoc|pdflatex|wkhtmltopdf|reportlab|fpdf)\b/.test(argText)) {
-      return "正在准备 PDF 生成所需的依赖和文件。";
-    }
-    return "";
-  }
-  if (!params.complete) {
-    return "";
-  }
+  // 步骤条只展示稳定标题，不展示命令/工具输出，避免完成后副文案突变。
   return "";
 }
 
@@ -166,7 +170,7 @@ export function getToolStepFromMessage(
     return fallback
       ? {
           complete: true,
-          detail: truncateToolPreview(fallback),
+          detail: "",
           label: "工具结果",
         }
       : null;
@@ -257,6 +261,47 @@ export function collapseDuplicateToolSteps(steps: ChatToolStep[]): ChatToolStep[
   return merged;
 }
 
+function resolveToolStepKey(
+  message: Record<string, unknown>,
+  index: number,
+  keyPrefix: string,
+): string {
+  const toolCallId =
+    (typeof message.toolCallId === "string" && message.toolCallId.trim()) ||
+    (typeof message.tool_call_id === "string" && message.tool_call_id.trim()) ||
+    "";
+  if (toolCallId) {
+    return `${keyPrefix}-${toolCallId}`;
+  }
+  const runId = typeof message.runId === "string" ? message.runId.trim() : "";
+  if (runId) {
+    return `${keyPrefix}-${runId}-${index}`;
+  }
+  return `${keyPrefix}-${index}`;
+}
+
+/** 刷新步骤时保留已展示标题，仅更新完成状态，避免进度区文案来回变。 */
+export function mergeStableChatToolSteps(
+  prev: ChatToolStep[],
+  next: ChatToolStep[],
+): ChatToolStep[] {
+  if (prev.length === 0) {
+    return next;
+  }
+  const prevByKey = new Map(prev.map((step) => [step.key, step]));
+  return next.map((step) => {
+    const earlier = prevByKey.get(step.key);
+    if (!earlier) {
+      return step;
+    }
+    return {
+      ...step,
+      label: earlier.label,
+      detail: "",
+    };
+  });
+}
+
 export function buildChatToolSteps(messages: unknown[], keyPrefix = "tool"): ChatToolStep[] {
   const steps: ChatToolStep[] = [];
   for (let i = 0; i < messages.length; i++) {
@@ -264,12 +309,13 @@ export function buildChatToolSteps(messages: unknown[], keyPrefix = "tool"): Cha
     if (message == null || typeof message !== "object") {
       continue;
     }
-    const step = getToolStepFromMessage(message as Record<string, unknown>);
+    const record = message as Record<string, unknown>;
+    const step = getToolStepFromMessage(record);
     if (!step) {
       continue;
     }
     const detail = isGenericToolStepDetail(step.detail) ? "" : step.detail;
-    steps.push({ ...step, detail, key: `${keyPrefix}-${i}` });
+    steps.push({ ...step, detail, key: resolveToolStepKey(record, i, keyPrefix) });
   }
   return collapseDuplicateToolSteps(applyToolStepProgressInference(steps));
 }
