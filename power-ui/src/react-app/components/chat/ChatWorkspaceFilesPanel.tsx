@@ -307,9 +307,9 @@ export function ChatWorkspaceFilesPanel({
   }, [load, reloadToken]);
 
   const onUploadChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
+    const files = Array.from(e.target.files ?? []);
     e.target.value = "";
-    if (!files?.length) {
+    if (files.length === 0) {
       return;
     }
     const id = agentId.trim();
@@ -320,7 +320,7 @@ export function ChatWorkspaceFilesPanel({
     setUploading(true);
     setError(null);
     try {
-      const payload = Array.from(files).map((file) => ({ name: file.name, file }));
+      const payload = files.map((file) => ({ name: file.name, file }));
       const uploaded = await adapter.uploadProjectFiles(id, path, payload);
       if (uploaded.length > 0) {
         message.success(
@@ -756,7 +756,6 @@ function FileCard({
   onDownload: () => void;
   onDelete: () => void;
 }) {
-  const canPreview = entry.kind === "directory" || previewModeForEntry(entry) !== null;
   return (
     <div
       className={cn(
@@ -827,9 +826,6 @@ function FileCard({
       ) : (
         <span className="shrink-0 text-xs text-slate-400">进入</span>
       )}
-      {entry.kind === "file" && !canPreview ? (
-        <span className="hidden text-[10px] text-slate-400 sm:inline">不可预览</span>
-      ) : null}
     </div>
   );
 }

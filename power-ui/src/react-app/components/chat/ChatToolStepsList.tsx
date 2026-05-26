@@ -125,6 +125,11 @@ export function ChatToolStepsList({ steps, phase, fitContent = false, children }
                       >
                         {step.label}
                       </p>
+                      {step.detail ? (
+                        <p className="mt-1 truncate text-[11px] leading-snug text-slate-400">
+                          {step.detail}
+                        </p>
+                      ) : null}
                     </div>
                   </li>
                 );

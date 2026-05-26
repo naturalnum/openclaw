@@ -75,7 +75,7 @@ function pathTitle(pathname: string): string {
   if (pathname === ROUTES.settings || pathname.startsWith(`${ROUTES.settings}/`)) {
     return "设置";
   }
-  return "小龙虾助手";
+  return "龙虾试验版";
 }
 
 type NavProject = { id: string; name: string; workspace: string | null };

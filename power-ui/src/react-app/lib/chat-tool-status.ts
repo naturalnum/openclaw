@@ -57,6 +57,28 @@ function extractExecCommand(args: unknown): string {
   return "";
 }
 
+function summarizeToolArgs(args: unknown): string {
+  if (!args || typeof args !== "object") {
+    return truncateToolPreview(humanizePathTokens(stringifyToolValue(args)), 120);
+  }
+  const record = args as Record<string, unknown>;
+  const candidates = [
+    record.path,
+    record.filePath,
+    record.filename,
+    record.query,
+    record.pattern,
+    record.command,
+    record.cmd,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return truncateToolPreview(humanizePathTokens(candidate), 120);
+    }
+  }
+  return truncateToolPreview(humanizePathTokens(stringifyToolValue(args)), 120);
+}
+
 function shortenExecCommandLabel(command: string): string {
   const normalized = command.replace(/\s+/g, " ").trim();
   if (!normalized) {
@@ -86,6 +108,9 @@ function shortenExecCommandLabel(command: string): string {
   if (/\bwhich\s+\S+/i.test(firstClause)) {
     const match = firstClause.match(/\bwhich\s+(\S+)/i);
     return `查找 ${match?.[1] ?? "命令"}`;
+  }
+  if (/\bcurl\b|\bwget\b/i.test(firstClause)) {
+    return "请求网络数据";
   }
   if (/\b(pdf|pandoc|pdflatex|wkhtmltopdf|reportlab|fpdf)\b/i.test(firstClause)) {
     return "生成 PDF";
@@ -151,14 +176,34 @@ export function isGenericToolStepDetail(detail: string): boolean {
   return GENERIC_TOOL_STEP_DETAILS.has(detail.trim());
 }
 
-function friendlyToolDetail(_params: {
+function friendlyToolDetail(params: {
   args: unknown;
   complete: boolean;
   name: string;
   resultText: string;
 }): string {
-  // 步骤条只展示稳定标题，不展示命令/工具输出，避免完成后副文案突变。
-  return "";
+  const normalizedName = params.name.toLowerCase();
+  if (params.complete && params.resultText) {
+    return `结果：${params.resultText}`;
+  }
+  if (normalizedName.includes("exec")) {
+    const command = extractExecCommand(params.args);
+    return command ? `命令：${truncateToolPreview(humanizePathTokens(command), 140)}` : "";
+  }
+  const argSummary = summarizeToolArgs(params.args);
+  if (!argSummary) {
+    return params.complete ? "已完成，正在整理结果。" : "正在执行。";
+  }
+  if (normalizedName.includes("read")) {
+    return `文件：${argSummary}`;
+  }
+  if (normalizedName.includes("write") || normalizedName.includes("edit")) {
+    return `目标：${argSummary}`;
+  }
+  if (normalizedName.includes("search") || normalizedName.includes("rg")) {
+    return `查询：${argSummary}`;
+  }
+  return `参数：${argSummary}`;
 }
 
 export function getToolStepFromMessage(
@@ -297,7 +342,7 @@ export function mergeStableChatToolSteps(
     return {
       ...step,
       label: earlier.label,
-      detail: "",
+      detail: step.detail || earlier.detail,
     };
   });
 }

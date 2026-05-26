@@ -38,7 +38,42 @@ describe("chat-tool-status", () => {
       },
     ]);
     expect(steps[0]?.label).toBe("切换工作目录");
-    expect(steps[0]?.detail).toBe("");
+    expect(steps[0]?.detail).toBe("命令：cd hello");
+  });
+
+  it("shows concise details for running exec steps", () => {
+    const steps = buildChatToolSteps([
+      {
+        role: "assistant",
+        toolCallId: "call-3",
+        content: [
+          {
+            type: "toolcall",
+            name: "exec",
+            arguments: { command: 'curl -s "wttr.inBeijing?format=v2"' },
+          },
+        ],
+      },
+    ]);
+
+    expect(steps[0]?.label).toBe("请求网络数据");
+    expect(steps[0]?.detail).toBe('命令：curl -s "wttr.inBeijing?format=v2"');
+  });
+
+  it("shows result details for completed steps", () => {
+    const steps = buildChatToolSteps([
+      {
+        role: "assistant",
+        toolCallId: "call-4",
+        content: [
+          { type: "toolcall", name: "read", arguments: { path: "/tmp/report.md" } },
+          { type: "toolresult", name: "read", text: "Report body" },
+        ],
+      },
+    ]);
+
+    expect(steps[0]?.label).toBe("读取文件");
+    expect(steps[0]?.detail).toBe("结果：Report body");
   });
 
   it("keeps step labels stable across refreshes", () => {
@@ -55,14 +90,14 @@ describe("chat-tool-status", () => {
         toolCallId: "call-2",
         content: [
           { type: "toolcall", name: "exec", arguments: { command: "python3 gen.py" } },
-          { type: "toolresult", name: "exec", text: "long tool output that should not appear" },
+          { type: "toolresult", name: "exec", text: "script finished successfully" },
         ],
       },
     ]);
     const merged = mergeStableChatToolSteps(first, second);
     expect(merged[0]?.label).toBe(first[0]?.label);
     expect(merged[0]?.complete).toBe(true);
-    expect(merged[0]?.detail).toBe("");
+    expect(merged[0]?.detail).toBe("结果：script finished successfully");
   });
 
   it("collapses consecutive duplicate step titles", () => {

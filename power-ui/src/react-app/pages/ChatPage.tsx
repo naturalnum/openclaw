@@ -1,4 +1,4 @@
-import { ArrowUpOutlined, MenuUnfoldOutlined } from "@ant-design/icons";
+import { ArrowUpOutlined } from "@ant-design/icons";
 import { App } from "antd";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -10,7 +10,6 @@ import { parseAgentSessionKey } from "../../../../ui/src/ui/session-key";
 import type { ChatAttachment } from "../../../../ui/src/ui/ui-types";
 import type { WorkbenchAdapterEvent } from "../../adapters/workbench-adapter";
 import { extractText } from "../../compat/chat";
-import { isProtectedMainSessionKey } from "../../integrations/openclaw/session-keys";
 import { ChatMarkdownBody } from "../components/chat/ChatMarkdownBody";
 import { ChatModelPicker } from "../components/chat/ChatModelPicker";
 import { ChatToolStepsList, type ChatToolStepsPhase } from "../components/chat/ChatToolStepsList";
@@ -321,31 +320,19 @@ export function ChatPage() {
   const {
     previewActive: workspacePreviewActive,
     setPreviewActive: setWorkspacePreviewActive,
-    railOpen: workspaceSidebarOpen,
-    setRailOpen: setWorkspaceSidebarOpen,
     fullscreen: workspacePreviewFullscreen,
     canFullscreen: workspaceCanFullscreen,
     toggleFullscreen: toggleWorkspacePreviewFullscreen,
-    collapseRail: collapseWorkspaceRail,
   } = useWorkspaceRail();
 
-  const workspaceFilesEligible = useMemo(() => {
+  const workspaceAgentId = useMemo(() => {
     const list = snapshot?.agentsList?.agents ?? [];
     const def = snapshot?.agentsList?.defaultId ?? list[0]?.id ?? null;
-    const cur = snapshot?.currentProjectId ?? null;
+    const cur = snapshot?.currentProjectId?.trim() ?? "";
     const sessionAgentId = selectedSessionKey.trim()
       ? (parseAgentSessionKey(selectedSessionKey)?.agentId ?? null)
       : null;
-    if (!cur || (def && cur === def)) {
-      return false;
-    }
-    if (selectedSessionKey.trim() && isProtectedMainSessionKey(selectedSessionKey)) {
-      return false;
-    }
-    if (sessionAgentId && sessionAgentId !== cur) {
-      return false;
-    }
-    return true;
+    return cur || sessionAgentId || def || "";
   }, [
     selectedSessionKey,
     snapshot?.agentsList?.agents,
@@ -353,17 +340,11 @@ export function ChatPage() {
     snapshot?.currentProjectId,
   ]);
 
-  const workspaceAgentId = workspaceFilesEligible ? (snapshot?.currentProjectId ?? "").trim() : "";
+  const workspaceRailEligible = Boolean(workspaceAgentId);
 
   useEffect(() => {
-    if (!workspaceFilesEligible) {
-      setWorkspacePreviewActive(false);
-      setWorkspaceSidebarOpen(true);
-    }
-  }, [setWorkspacePreviewActive, setWorkspaceSidebarOpen, workspaceFilesEligible]);
-
-  const workspaceRailEligible = Boolean(workspaceFilesEligible && adapter && workspaceAgentId);
-  const workspaceRailOpen = workspaceRailEligible && workspaceSidebarOpen;
+    setWorkspacePreviewActive(false);
+  }, [setWorkspacePreviewActive, workspaceAgentId]);
 
   useEffect(() => {
     if (!adapter || !workspaceAgentId) {
@@ -763,26 +744,9 @@ export function ChatPage() {
               <p className="truncate text-sm text-slate-500">新建或选择会话以开始</p>
             )}
           </div>
-          {workspaceFilesEligible && adapter && workspaceAgentId ? (
-            <button
-              type="button"
-              title={workspaceSidebarOpen ? "收起最近修改" : "展开最近修改"}
-              aria-label={workspaceSidebarOpen ? "收起最近修改" : "展开最近修改"}
-              aria-pressed={workspaceSidebarOpen}
-              onClick={() => setWorkspaceSidebarOpen((open) => !open)}
-              className={cn(
-                "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition",
-                workspaceSidebarOpen
-                  ? "border-slate-300 bg-white text-slate-800 shadow-sm shadow-slate-200/40"
-                  : "border-slate-200/90 bg-white/70 text-slate-600 hover:border-slate-300 hover:bg-white hover:text-slate-900",
-              )}
-            >
-              <MenuUnfoldOutlined className="text-[15px]" aria-hidden />
-            </button>
-          ) : null}
         </header>
 
-        <div className="flex min-h-0 min-w-0 bg-white">
+        <div className="relative flex min-h-0 min-w-0 bg-white">
           <div className="power-chat-stage grid min-h-0 min-w-0 flex-1 grid-rows-[minmax(0,1fr)_auto] transition-[flex] duration-300 ease-out">
             <div className="relative min-h-0 min-w-0 overflow-hidden">
               <div
@@ -1063,29 +1027,35 @@ export function ChatPage() {
           {workspaceRailEligible ? (
             <aside
               className={cn(
-                "power-workspace-rail hidden min-h-0 shrink-0 overflow-hidden border-l border-slate-200/45 bg-white xl:block",
+                "power-workspace-rail block min-h-0 shrink-0 overflow-hidden border-l border-slate-200/45 bg-white",
                 workspacePreviewActive
                   ? "power-workspace-rail--preview"
                   : "power-workspace-rail--list",
-                workspaceRailOpen || workspacePreviewFullscreen
-                  ? "power-workspace-rail--open"
-                  : "power-workspace-rail--closed",
+                "power-workspace-rail--open",
                 workspacePreviewFullscreen && "power-workspace-rail--fullscreen",
               )}
-              aria-hidden={!workspaceRailOpen && !workspacePreviewFullscreen}
+              aria-hidden={false}
             >
               <div className="power-workspace-rail__inner">
-                <ChatWorkspaceFilesPanel
-                  adapter={adapter!}
-                  agentId={workspaceAgentId}
-                  showToolbar={false}
-                  onPreviewActiveChange={setWorkspacePreviewActive}
-                  reloadToken={workspaceFilesReloadToken}
-                  canFullscreen={workspaceCanFullscreen}
-                  previewFullscreen={workspacePreviewFullscreen}
-                  onToggleFullscreen={toggleWorkspacePreviewFullscreen}
-                  onCollapseRail={collapseWorkspaceRail}
-                />
+                {adapter ? (
+                  <ChatWorkspaceFilesPanel
+                    adapter={adapter}
+                    agentId={workspaceAgentId}
+                    showToolbar={false}
+                    onPreviewActiveChange={setWorkspacePreviewActive}
+                    reloadToken={workspaceFilesReloadToken}
+                    canFullscreen={workspaceCanFullscreen}
+                    previewFullscreen={workspacePreviewFullscreen}
+                    onToggleFullscreen={toggleWorkspacePreviewFullscreen}
+                  />
+                ) : (
+                  <div className="flex h-full flex-col bg-[#fafafa] px-4 py-5 text-sm text-slate-500">
+                    <div className="mb-2 text-[13px] font-semibold text-slate-800">最近修改</div>
+                    <div className="rounded-xl border border-slate-200/70 bg-white px-3 py-2 text-xs leading-relaxed">
+                      正在连接工作区文件服务…
+                    </div>
+                  </div>
+                )}
               </div>
             </aside>
           ) : null}
