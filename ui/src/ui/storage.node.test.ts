@@ -86,7 +86,7 @@ describe("loadSettings default gateway URL derivation", () => {
     setTestLocation({
       protocol: "http:",
       host: "localhost:5174",
-      pathname: "/react.html",
+      pathname: "/",
     });
     setViteDevPage(true);
 
@@ -97,7 +97,7 @@ describe("loadSettings default gateway URL derivation", () => {
     setTestLocation({
       protocol: "http:",
       host: "localhost:5174",
-      pathname: "/react.html",
+      pathname: "/",
     });
     setViteDevPage(true);
     localStorage.setItem(

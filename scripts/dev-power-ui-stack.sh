@@ -37,5 +37,5 @@ trap cleanup EXIT INT TERM
 # Give gateway a short head start so power-ui can connect.
 sleep 1
 
-echo "[dev-stack] starting power-ui:dev ..."
+echo "[dev-stack] starting power-ui:dev (default React at http://127.0.0.1:5174/, legacy Lit at /lit.html) ..."
 pnpm power-ui:dev
