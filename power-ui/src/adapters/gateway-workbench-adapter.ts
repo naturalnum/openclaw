@@ -174,6 +174,9 @@ function mimeTypeFromPath(path: string): string {
   return "application/octet-stream";
 }
 
+/** WebSocket upload is more reliable from the Vite dev UI than raw HTTP POST. */
+const WS_UPLOAD_MAX_BYTES = 12 * 1024 * 1024;
+
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -391,24 +394,64 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
     path: string | null,
     files: WorkbenchUploadedFile[],
   ): Promise<WorkbenchFileEntry[]> {
-    const payload = await Promise.all(
-      files.map(async (file) => {
-        file.onProgress?.({ loaded: file.file.size, total: file.file.size });
-        return {
-          name: file.name,
-          contentBase64: await fileToBase64(file.file),
-        };
-      }),
-    );
-    const result = await requiredRequest<{ entries?: WorkbenchFileEntry[] }>(
-      this.gateway.request("power.fs.uploadFiles", {
-        agentId,
-        path: this.toWorkspaceRelativePath(agentId, path),
-        files: payload,
-      }),
-      "power.fs.uploadFiles",
-    );
-    return Array.isArray(result.entries) ? result.entries : [];
+    const relativePath = this.toWorkspaceRelativePath(agentId, path);
+    const wsCandidates = files.filter((file) => file.file.size <= WS_UPLOAD_MAX_BYTES);
+    const httpCandidates = files.filter((file) => file.file.size > WS_UPLOAD_MAX_BYTES);
+    const uploaded: WorkbenchFileEntry[] = [];
+
+    if (wsCandidates.length > 0) {
+      const payload = await Promise.all(
+        wsCandidates.map(async (file) => {
+          file.onProgress?.({ loaded: 0, total: file.file.size });
+          const contentBase64 = await fileToBase64(file.file);
+          file.onProgress?.({ loaded: file.file.size, total: file.file.size });
+          return {
+            name: file.name,
+            contentBase64,
+          };
+        }),
+      );
+      const result = await requiredRequest<{ entries?: WorkbenchFileEntry[] }>(
+        this.gateway.request("power.fs.uploadFiles", {
+          agentId,
+          path: relativePath,
+          files: payload,
+        }),
+        "power.fs.uploadFiles",
+      );
+      uploaded.push(...(Array.isArray(result.entries) ? result.entries : []));
+    }
+
+    for (const file of httpCandidates) {
+      const response = await requiredRequest(
+        this.gateway.uploadHttpFile<{
+          ok?: boolean;
+          entry?: WorkbenchFileEntry;
+          error?: string;
+        }>({
+          routePath: "/api/power/fs/upload",
+          query: {
+            agentId,
+            path: relativePath || undefined,
+            name: file.name,
+          },
+          file: file.file,
+          onProgress: file.onProgress,
+        }),
+        "power.fs.upload",
+      );
+      const entry = response?.entry;
+      if (!entry) {
+        const detail = response?.error?.trim();
+        throw new Error(detail ? detail : `Upload returned no file entry for ${file.name}`);
+      }
+      uploaded.push(entry);
+    }
+
+    if (uploaded.length === 0 && files.length > 0) {
+      throw new Error("上传未写入任何文件，请检查网关与 power-backend 插件是否已加载");
+    }
+    return uploaded;
   }
 
   async installSkillArchive(file: File): Promise<void> {

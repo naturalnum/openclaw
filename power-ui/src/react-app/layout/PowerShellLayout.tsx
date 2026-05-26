@@ -1,5 +1,4 @@
 import {
-  AppstoreOutlined,
   CaretRightOutlined,
   EditOutlined,
   FolderAddOutlined,
@@ -44,7 +43,6 @@ const NAV = [
     icon: <MessageOutlined />,
     search: "?new=1",
   },
-  { key: "workbench", path: ROUTES.workbench, label: "工作台", icon: <AppstoreOutlined /> },
   { key: "skills", path: ROUTES.skills, label: "技能", icon: <ThunderboltOutlined /> },
 ] as const;
 
@@ -156,10 +154,13 @@ function SidebarNav({
   const shellTreeRow = "power-shell-tree-row";
   const shellNavSelected = "power-shell-tree-row--selected font-semibold text-neutral-900";
   const shellNavIdle = "text-neutral-600";
+  const shellNavHover =
+    "hover:bg-stone-100/80 focus-visible:bg-stone-100/80 aria-[current=page]:bg-stone-100/90";
 
   const sessionNavItemClass = (selected: boolean) =>
     cn(
       shellTreeRow,
+      shellNavHover,
       "group/session relative flex items-center gap-0.5 rounded-xl",
       selected ? shellNavSelected : shellNavIdle,
     );
@@ -410,11 +411,11 @@ function SidebarNav({
                 onClick={onToggleCollapsed}
                 className={cn(
                   "absolute inset-0 flex items-center justify-center rounded-lg",
-                  "bg-[#30343a]/88 text-white",
-                  "opacity-0 transition-opacity duration-150",
+                  "bg-stone-100/95 text-slate-700",
+                  "opacity-0 transition-[opacity,background-color,color] duration-150",
                   "pointer-events-none group-hover/brand:opacity-100 group-hover/brand:pointer-events-auto",
                   "[@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100",
-                  "focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400/40 focus-visible:ring-offset-1 focus-visible:ring-offset-white",
+                  "focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300/60 focus-visible:ring-offset-1 focus-visible:ring-offset-white",
                 )}
               >
                 <MenuUnfoldOutlined className="text-[15px] leading-none" />
@@ -441,7 +442,7 @@ function SidebarNav({
       )}
 
       <nav
-        className={cn("flex shrink-0 flex-col px-2", collapsed ? "gap-1.5 pt-2" : "gap-0 pt-1.5")}
+        className={cn("flex shrink-0 flex-col px-2", collapsed ? "gap-1.5 pt-2" : "gap-1.5 pt-1.5")}
         aria-label="主导航"
       >
         {NAV.map((item) => (
@@ -455,6 +456,7 @@ function SidebarNav({
               cn(
                 shellTreeRow,
                 navItemShell,
+                shellNavHover,
                 collapsed ? navItemCollapsed : navItemExpanded,
                 isActive ? shellNavSelected : shellNavIdle,
               )
@@ -504,13 +506,13 @@ function SidebarNav({
                   openCreateProject();
                 }}
                 disabled={!adapter || createProjectBusy}
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100/65 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300/60"
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-slate-500 transition hover:bg-transparent hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300/60"
               >
-                <FolderAddOutlined className="text-[18px]" />
+                <FolderAddOutlined className="text-[18px] leading-none [&_svg]:block" aria-hidden />
               </button>
             </div>
             {projectsOpen ? (
-              <div className="mt-1 flex flex-col gap-0 pb-1.5 pl-1">
+              <div className="mt-1 flex flex-col gap-1 pb-1.5 pl-1">
                 {projects.map((p) => {
                   const projectCollapsed = collapsedProjectIds.has(p.id);
                   const projectSessions = sessionsByProject.get(p.id) ?? [];
@@ -519,10 +521,11 @@ function SidebarNav({
                     ? projectSessions
                     : projectSessions.slice(0, 6);
                   return (
-                    <div key={p.id} className="flex flex-col gap-0">
+                    <div key={p.id} className="flex flex-col gap-1">
                       <div
                         className={cn(
                           shellTreeRow,
+                          shellNavHover,
                           "group relative flex items-center gap-0.5 rounded-2xl",
                           activeProjectId === p.id && !activeSessionKey
                             ? shellNavSelected
@@ -583,7 +586,7 @@ function SidebarNav({
                             pathname: ROUTES.root,
                             search: `?projectId=${encodeURIComponent(p.id)}`,
                           }}
-                          title={p.name}
+                          aria-label={p.name}
                           onClick={() => onPick?.()}
                           className={cn(
                             "min-w-0 flex-1 truncate rounded-xl py-1.5 pr-2 text-left text-[13px] font-semibold transition",
@@ -638,20 +641,18 @@ function SidebarNav({
                           </div>
                         ) : null}
                       </div>
-                      {!collapsedProjectIds.has(p.id)
-                        ? visibleProjectSessions.map((s) => {
+                      {!collapsedProjectIds.has(p.id) ? (
+                        <div className="ml-8 flex flex-col gap-1">
+                          {visibleProjectSessions.map((s) => {
                             const sessionSelected = activeSessionKey === s.key;
                             return (
-                              <div
-                                key={s.key}
-                                className={cn(sessionNavItemClass(sessionSelected), "ml-8")}
-                              >
+                              <div key={s.key} className={sessionNavItemClass(sessionSelected)}>
                                 <Link
                                   to={{
                                     pathname: ROUTES.root,
                                     search: `?sessionKey=${encodeURIComponent(s.key)}&projectId=${encodeURIComponent(p.id)}`,
                                   }}
-                                  title={s.label}
+                                  aria-label={s.label}
                                   onClick={() => {
                                     void onSelectSession?.(s.key, p.id);
                                     onPick?.();
@@ -706,12 +707,13 @@ function SidebarNav({
                                 ) : null}
                               </div>
                             );
-                          })
-                        : null}
+                          })}
+                        </div>
+                      ) : null}
                       {!collapsedProjectIds.has(p.id) && projectSessions.length > 6 ? (
                         <button
                           type="button"
-                          className="ml-8 mt-1 inline-flex h-6 items-center rounded-full border border-slate-200/70 bg-white/70 px-2.5 text-[11px] font-medium text-slate-500 shadow-sm shadow-slate-200/30 transition hover:border-slate-300 hover:bg-white hover:text-slate-900"
+                          className="ml-8 mt-0.5 inline-flex h-6 items-center rounded-full border border-slate-200/70 bg-white/70 px-2.5 text-[11px] font-medium text-slate-500 shadow-sm shadow-slate-200/30 transition hover:border-slate-300 hover:bg-white hover:text-slate-900"
                           onClick={() =>
                             setExpandedProjectSessionIds((prev) => {
                               const next = new Set(prev);
@@ -733,7 +735,9 @@ function SidebarNav({
                   );
                 })}
                 {!projectsLoading && projects.length === 0 ? (
-                  <p className="px-1.5 py-1 text-[11px] text-slate-500">暂无项目，可在工作台创建</p>
+                  <p className="px-1.5 py-1 text-[11px] text-slate-500">
+                    暂无项目，点击上方 + 创建
+                  </p>
                 ) : null}
               </div>
             ) : null}
@@ -769,7 +773,7 @@ function SidebarNav({
                     暂无会话
                   </p>
                 ) : null}
-                <div className="flex flex-col gap-0">
+                <div className="flex flex-col gap-1">
                   {recentOnlySessions.map((s) => {
                     const sessionSelected = activeSessionKey === s.key;
                     return (
@@ -779,7 +783,7 @@ function SidebarNav({
                             pathname: ROUTES.root,
                             search: `?sessionKey=${encodeURIComponent(s.key)}`,
                           }}
-                          title={s.label}
+                          aria-label={s.label}
                           onClick={() => {
                             const agentId = parseAgentSessionKey(s.key)?.agentId ?? null;
                             void onSelectSession?.(s.key, agentId);
@@ -861,6 +865,7 @@ function SidebarNav({
               className={cn(
                 shellTreeRow,
                 navItemShell,
+                shellNavHover,
                 navItemCollapsed,
                 isSettingsSection ? shellNavSelected : shellNavIdle,
               )}
@@ -882,6 +887,7 @@ function SidebarNav({
               className={cn(
                 shellTreeRow,
                 navItemShell,
+                shellNavHover,
                 navItemExpanded,
                 isSettingsSection ? shellNavSelected : shellNavIdle,
               )}

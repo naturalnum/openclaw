@@ -91,29 +91,32 @@
   background-color: rgba(28, 25, 23, 0.05);
 }
 
-#root .power-sidebar .power-shell-tree-row--selected {
-  background-color: #ffffff;
-  border-color: rgba(226, 232, 240, 0.72);
-}
-
-/* 收起侧栏：1px 边框 + 悬停仅底色，避免大框感 */
-#root .power-sidebar--collapsed .power-shell-tree-row {
-  border-width: 1px;
-  border-radius: 0.75rem;
-  box-shadow: none;
+#root .power-sidebar:not(.power-sidebar--collapsed) .power-shell-tree-row--selected {
+  background-color: rgba(28, 25, 23, 0.06);
+  border-color: transparent;
 }
 
 #root .power-sidebar--collapsed .power-shell-tree-row--selected {
-  background-color: #f5f5f4;
-  border-color: rgba(214, 214, 210, 0.95);
+  background-color: rgba(28, 25, 23, 0.06);
+  border-color: transparent;
+}
+
+/* 收起侧栏：与主导航一致，仅用底色区分悬停/选中，避免描边框风格不一 */
+#root .power-sidebar--collapsed .power-shell-tree-row {
+  border-width: 2px;
+  border-color: transparent;
+  border-radius: 0.75rem;
   box-shadow: none;
 }
 
 #root .power-sidebar--collapsed .power-shell-tree-row:not(.power-shell-tree-row--selected):hover,
 #root .power-sidebar--collapsed .power-shell-tree-row:not(.power-shell-tree-row--selected):has(a:hover),
-#root .power-sidebar--collapsed .power-shell-tree-row:not(.power-shell-tree-row--selected):has(button:hover) {
-  background-color: rgba(28, 25, 23, 0.05);
+#root .power-sidebar--collapsed .power-shell-tree-row:not(.power-shell-tree-row--selected):has(button:hover),
+#root .power-sidebar--collapsed .power-shell-tree-row--selected:has(a:hover),
+#root .power-sidebar--collapsed .power-shell-tree-row--selected:has(button:hover) {
+  background-color: rgba(28, 25, 23, 0.06);
   border-color: transparent;
+  box-shadow: none;
 }
 
 #root .power-sidebar--collapsed .power-shell-brand-header {

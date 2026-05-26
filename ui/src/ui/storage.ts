@@ -3,8 +3,27 @@ const LEGACY_SETTINGS_KEY = "openclaw.control.settings.v1";
 const LEGACY_TOKEN_SESSION_KEY = "openclaw.control.token.v1";
 const TOKEN_SESSION_KEY_PREFIX = "openclaw.control.token.v1:";
 const MAX_SCOPED_SESSION_ENTRIES = 10;
-const VITE_DEV_GATEWAY_PORT = "19001";
-const LEGACY_VITE_DEV_GATEWAY_PORT = "18789";
+const DEFAULT_VITE_DEV_GATEWAY_PORT = "19001";
+const ALT_VITE_DEV_GATEWAY_PORT = "18789";
+
+function readConfiguredViteDevGatewayPort(): string | null {
+  if (typeof import.meta === "undefined") {
+    return null;
+  }
+  const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
+  const raw = env?.VITE_OPENCLAW_GATEWAY_PORT?.trim();
+  return raw || null;
+}
+
+function resolveViteDevGatewayPorts(): { primary: string; legacy: string } {
+  const configured = readConfiguredViteDevGatewayPort();
+  const primary = configured ?? DEFAULT_VITE_DEV_GATEWAY_PORT;
+  const legacy =
+    primary === DEFAULT_VITE_DEV_GATEWAY_PORT
+      ? ALT_VITE_DEV_GATEWAY_PORT
+      : DEFAULT_VITE_DEV_GATEWAY_PORT;
+  return { primary, legacy };
+}
 
 function settingsKeyForGateway(gatewayUrl: string): string {
   return `${SETTINGS_KEY_PREFIX}${normalizeGatewayTokenScope(gatewayUrl)}`;
@@ -94,8 +113,9 @@ function deriveDefaultGatewayUrl(): {
   if (!isViteDevPage()) {
     return { pageUrl, effectiveUrl: pageUrl };
   }
-  const effectiveUrl = `${proto}://${formatHostWithPort(location.hostname, VITE_DEV_GATEWAY_PORT)}`;
-  const legacyEffectiveUrl = `${proto}://${formatHostWithPort(location.hostname, LEGACY_VITE_DEV_GATEWAY_PORT)}`;
+  const { primary, legacy } = resolveViteDevGatewayPorts();
+  const effectiveUrl = `${proto}://${formatHostWithPort(location.hostname, primary)}`;
+  const legacyEffectiveUrl = `${proto}://${formatHostWithPort(location.hostname, legacy)}`;
   return { pageUrl, effectiveUrl, legacyEffectiveUrl };
 }
 
@@ -230,10 +250,25 @@ export function loadSettings(): UiSettings {
     }
     const parsed = JSON.parse(raw) as PersistedUiSettings;
     const parsedGatewayUrl = normalizeOptionalString(parsed.gatewayUrl) ?? defaults.gatewayUrl;
-    const gatewayUrl =
+    let gatewayUrl =
       parsedGatewayUrl === pageDerivedUrl || parsedGatewayUrl === legacyEffectiveUrl
         ? defaultUrl
         : parsedGatewayUrl;
+    if (
+      isViteDevPage() &&
+      readConfiguredViteDevGatewayPort() === ALT_VITE_DEV_GATEWAY_PORT &&
+      legacyEffectiveUrl
+    ) {
+      try {
+        const parsedUrl = new URL(parsedGatewayUrl);
+        const legacyUrl = new URL(legacyEffectiveUrl);
+        if (parsedUrl.hostname === legacyUrl.hostname && parsedUrl.port === legacyUrl.port) {
+          gatewayUrl = defaultUrl;
+        }
+      } catch {
+        // keep parsed gatewayUrl
+      }
+    }
     const scopedSessionSelection = resolveScopedSessionSelection(gatewayUrl, parsed, defaults);
     const { theme, mode } = parseThemeSelection(
       (parsed as { theme?: unknown }).theme,

@@ -41,6 +41,8 @@ export default defineConfig(() => {
     define: {
       __OPENCLAW_VERSION__: JSON.stringify(rootPackageJson.version ?? "0.0.0"),
       __POWER_UI_VERSION__: JSON.stringify(powerUiPackageJson.version ?? "0.0"),
+      // nStart uses gateway:local on 18789; Control UI dev still defaults to 19001.
+      "import.meta.env.VITE_OPENCLAW_GATEWAY_PORT": JSON.stringify("18789"),
     },
     build: {
       outDir: path.resolve(here, "../dist/power-ui"),

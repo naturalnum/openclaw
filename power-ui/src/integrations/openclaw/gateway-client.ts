@@ -129,8 +129,16 @@ export class PowerGatewayClient {
       xhr.addEventListener("abort", () => reject(new Error("upload aborted")));
       xhr.addEventListener("load", () => {
         if (xhr.status < 200 || xhr.status >= 300) {
-          reject(new Error(xhr.responseText?.trim() || `HTTP ${xhr.status}`));
-          return;
+          const text = xhr.responseText?.trim() ?? "";
+          try {
+            const parsed = JSON.parse(text) as { error?: string; message?: string };
+            const detail = parsed.error?.trim() || parsed.message?.trim();
+            reject(new Error(detail || `HTTP ${xhr.status}`));
+            return;
+          } catch {
+            reject(new Error(text || `HTTP ${xhr.status}`));
+            return;
+          }
         }
         const text = xhr.responseText?.trim();
         if (!text) {

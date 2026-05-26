@@ -98,10 +98,10 @@ function renderChatMessageBubble(msg: unknown, key: string) {
       <div
         aria-label={isUser ? "用户消息" : "助手消息"}
         className={cn(
-          "max-w-[min(100%,42rem)] rounded-[22px] px-4 py-2.5 text-[15px] leading-relaxed transition-shadow",
+          "max-w-[min(100%,42rem)] rounded-2xl px-3 py-2 text-sm leading-snug",
           isUser
-            ? "rounded-br-lg bg-[#fbfbfa] text-slate-900 shadow-sm shadow-slate-200/18 ring-1 ring-slate-200/70"
-            : "rounded-bl-lg bg-white/92 px-4 py-3 text-slate-800 shadow-sm shadow-slate-200/25 ring-1 ring-slate-200/60",
+            ? "rounded-br-md bg-[#fbfbfa] text-slate-900 ring-1 ring-slate-200/60"
+            : "rounded-bl-md bg-white text-slate-800 ring-1 ring-slate-200/50",
         )}
       >
         {isAssistant ? (
@@ -478,7 +478,7 @@ export function ChatPage() {
       return "正在执行任务…";
     }
     if (runActive || sending) {
-      return "正在生成回复…";
+      return null;
     }
     return "发送中…";
   }, [chatToolSteps, runActive, sending, showStream, awaitingFirstToken]);
@@ -816,7 +816,7 @@ export function ChatPage() {
                 ) : (
                   <div
                     ref={messagesColumnRef}
-                    className="mx-auto flex w-full max-w-[760px] flex-col gap-5 px-2 py-5 sm:px-4"
+                    className="mx-auto flex w-full max-w-[760px] flex-col gap-3 px-2 py-4 sm:px-3"
                   >
                     {leadMessages.map((msg, i) =>
                       renderChatMessageBubble(
@@ -836,7 +836,7 @@ export function ChatPage() {
                       return (extractText(m) ?? "").trim() === optimisticUserBubble.text.trim();
                     }) ? (
                       <div className="flex w-full justify-end">
-                        <div className="max-w-[min(100%,42rem)] rounded-[22px] rounded-br-lg bg-[#fbfbfa] px-4 py-2.5 text-[15px] leading-relaxed text-slate-900 shadow-sm shadow-slate-200/18 ring-1 ring-slate-200/70">
+                        <div className="max-w-[min(100%,42rem)] rounded-2xl rounded-br-md bg-[#fbfbfa] px-3 py-2 text-sm leading-snug text-slate-900 ring-1 ring-slate-200/60">
                           <span className="whitespace-pre-wrap break-words">
                             {optimisticUserBubble.text || "（仅附件消息）"}
                           </span>
@@ -850,9 +850,9 @@ export function ChatPage() {
                     ) : null}
                     {visibleStreamSegments.map((seg, i) => (
                       <div key={`seg-${seg.ts}-${i}`} className="flex w-full justify-start">
-                        <div className="max-w-[min(100%,42rem)] rounded-[22px] rounded-bl-lg bg-white/92 px-4 py-3 text-sm text-slate-600 shadow-sm shadow-slate-200/25 ring-1 ring-slate-200/60">
+                        <div className="max-w-[min(100%,42rem)] rounded-2xl rounded-bl-md bg-white px-3 py-2 text-sm text-slate-700 ring-1 ring-slate-200/50">
                           <ChatMarkdownBody
-                            className="chat-markdown break-words text-sm leading-relaxed text-slate-600 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+                            className="chat-markdown break-words text-sm leading-snug text-slate-700 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
                             source={sanitizeChatDisplayText(seg.text)}
                           />
                         </div>
@@ -876,7 +876,7 @@ export function ChatPage() {
                         {showStream ? (
                           <>
                             <ChatMarkdownBody
-                              className="chat-markdown break-words text-[15px] leading-relaxed text-slate-800 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+                              className="chat-markdown break-words text-sm leading-snug text-slate-800 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
                               source={sanitizeChatDisplayText(liveStreamText)}
                             />
                             <span

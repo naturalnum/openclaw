@@ -13,29 +13,45 @@ const mdComponents: Components = {
       {children}
     </a>
   ),
-  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-  ul: ({ children }) => <ul className="mb-2 list-disc space-y-1 pl-5 last:mb-0">{children}</ul>,
-  ol: ({ children }) => <ol className="mb-2 list-decimal space-y-1 pl-5 last:mb-0">{children}</ol>,
-  li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-  h1: ({ children }) => <h1 className="mb-2 mt-3 text-lg font-semibold first:mt-0">{children}</h1>,
-  h2: ({ children }) => <h2 className="mb-2 mt-3 text-base font-semibold first:mt-0">{children}</h2>,
-  h3: ({ children }) => <h3 className="mb-1.5 mt-2 text-[15px] font-semibold first:mt-0">{children}</h3>,
+  p: ({ children }) => <p className="mb-1.5 last:mb-0">{children}</p>,
+  ul: ({ children }) => <ul className="mb-1.5 list-disc space-y-0.5 pl-4 last:mb-0">{children}</ul>,
+  ol: ({ children }) => (
+    <ol className="mb-1.5 list-decimal space-y-0.5 pl-4 last:mb-0">{children}</ol>
+  ),
+  li: ({ children }) => <li className="leading-snug">{children}</li>,
+  h1: ({ children }) => (
+    <h1 className="mb-1.5 mt-2 text-base font-semibold first:mt-0">{children}</h1>
+  ),
+  h2: ({ children }) => (
+    <h2 className="mb-1.5 mt-2 text-sm font-semibold first:mt-0">{children}</h2>
+  ),
+  h3: ({ children }) => (
+    <h3 className="mb-1 mt-1.5 text-sm font-semibold first:mt-0">{children}</h3>
+  ),
   blockquote: ({ children }) => (
-    <blockquote className="my-2 border-l-4 border-slate-200 pl-3 text-slate-600">{children}</blockquote>
+    <blockquote className="my-2 border-l-4 border-slate-200 pl-3 text-slate-600">
+      {children}
+    </blockquote>
   ),
   hr: () => <hr className="my-3 border-slate-200" />,
   strong: ({ children }) => <strong className="font-semibold text-slate-900">{children}</strong>,
   em: ({ children }) => <em className="italic">{children}</em>,
   table: ({ children }) => (
     <div className="my-2 max-w-full overflow-x-auto rounded-lg border border-slate-200">
-      <table className="w-full min-w-[12rem] border-collapse text-left text-[13px]">{children}</table>
+      <table className="w-full min-w-[12rem] border-collapse text-left text-[13px]">
+        {children}
+      </table>
     </div>
   ),
   thead: ({ children }) => <thead className="bg-slate-50">{children}</thead>,
   th: ({ children }) => (
-    <th className="border-b border-slate-200 px-2 py-1.5 font-semibold text-slate-800">{children}</th>
+    <th className="border-b border-slate-200 px-2 py-1.5 font-semibold text-slate-800">
+      {children}
+    </th>
   ),
-  td: ({ children }) => <td className="border-b border-slate-100 px-2 py-1.5 text-slate-700">{children}</td>,
+  td: ({ children }) => (
+    <td className="border-b border-slate-100 px-2 py-1.5 text-slate-700">{children}</td>
+  ),
   tr: ({ children }) => <tr>{children}</tr>,
   code: ({ className, children, ...props }) => {
     const isInline = !className;
@@ -73,7 +89,7 @@ export function ChatMarkdownBody({ source, className }: ChatMarkdownBodyProps) {
     <div
       className={
         className ??
-        "chat-markdown break-words text-[15px] leading-relaxed text-slate-800 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+        "chat-markdown break-words text-sm leading-snug text-slate-800 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
       }
     >
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>

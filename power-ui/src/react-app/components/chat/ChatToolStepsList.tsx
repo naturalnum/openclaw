@@ -48,12 +48,12 @@ type Props = {
   children?: ReactNode;
 };
 
-function phaseTitle(phase: ChatToolStepsPhase, stepCount: number): string {
+function phaseTitle(phase: ChatToolStepsPhase, stepCount: number): string | null {
   if (phase === "running") {
     return "正在处理";
   }
   if (phase === "waiting_reply") {
-    return "正在生成回复";
+    return null;
   }
   return stepCount > 0 ? "处理完成" : "处理中";
 }
@@ -63,9 +63,9 @@ export function ChatToolStepsList({ steps, phase, fitContent = false, children }
     return null;
   }
 
-  const hasActiveStep = steps.some((step) => !step.complete);
   const activeIndex = steps.findIndex((step) => !step.complete);
   const showSteps = steps.length > 0;
+  const title = phaseTitle(phase, steps.length);
 
   return (
     <div
@@ -74,20 +74,22 @@ export function ChatToolStepsList({ steps, phase, fitContent = false, children }
     >
       <div
         className={cn(
-          "max-w-[min(100%,42rem)] rounded-[22px] rounded-bl-lg border border-slate-200/65 bg-white/92 text-slate-700 shadow-sm shadow-slate-200/25",
+          "max-w-[min(100%,42rem)] rounded-2xl rounded-bl-md border border-slate-200/55 bg-white text-slate-700 shadow-sm shadow-slate-200/15",
           fitContent ? "w-fit" : "w-full",
         )}
       >
         {showSteps ? (
-          <div className="px-4 py-3">
-            <p className="mb-2.5 flex items-center justify-between gap-2 text-[11px] font-semibold text-slate-500">
-              <span>{phaseTitle(phase, steps.length)}</span>
-              {steps.length > 1 ? (
-                <span className="font-normal tabular-nums text-slate-400">
-                  共 {steps.length} 步
-                </span>
-              ) : null}
-            </p>
+          <div className="px-3 py-2">
+            {title || steps.length > 1 ? (
+              <p className="mb-2.5 flex items-center justify-between gap-2 text-[11px] font-semibold text-slate-500">
+                {title ? <span>{title}</span> : <span aria-hidden />}
+                {steps.length > 1 ? (
+                  <span className="font-normal tabular-nums text-slate-400">
+                    共 {steps.length} 步
+                  </span>
+                ) : null}
+              </p>
+            ) : null}
             <ol className="m-0 list-none space-y-0 p-0">
               {steps.map((step, index) => {
                 const isActive = !step.complete && index === activeIndex;
@@ -128,20 +130,14 @@ export function ChatToolStepsList({ steps, phase, fitContent = false, children }
                 );
               })}
             </ol>
-            {phase === "waiting_reply" && !hasActiveStep ? (
-              <p className="mt-2.5 flex items-center gap-2 text-[12px] text-slate-500">
-                <LoadingOutlined spin className="text-[11px]" aria-hidden />
-                正在整理回复内容…
-              </p>
-            ) : null}
           </div>
         ) : null}
         {children ? (
           <div
             className={cn(
               "text-[15px] leading-relaxed text-slate-800",
-              fitContent ? "px-3.5 py-2.5" : "px-4 pb-3",
-              showSteps ? "border-t border-slate-200/50 pt-3" : fitContent ? "" : "pt-3",
+              fitContent ? "px-3 py-2" : "px-3 pb-2.5",
+              showSteps ? "border-t border-slate-200/50 pt-2" : fitContent ? "" : "pt-2",
             )}
           >
             {children}

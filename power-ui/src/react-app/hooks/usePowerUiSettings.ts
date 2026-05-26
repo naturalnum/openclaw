@@ -1,12 +1,14 @@
 import { useCallback, useState } from "react";
-
 import { loadSettings, saveSettings, type UiSettings } from "../../compat/ui-core";
+import { bootstrapSettingsFromUrl } from "../lib/bootstrap-settings-from-url";
 
 /**
  * Local mirror of persisted Control UI settings (same keys as Lit workbench).
  */
 export function usePowerUiSettings() {
-  const [settings, setSettings] = useState<UiSettings>(() => loadSettings());
+  const [settings, setSettings] = useState<UiSettings>(() =>
+    bootstrapSettingsFromUrl(loadSettings()),
+  );
 
   const refresh = useCallback(() => {
     setSettings(loadSettings());

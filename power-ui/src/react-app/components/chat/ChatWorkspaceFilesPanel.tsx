@@ -1,7 +1,6 @@
 import {
   DeleteOutlined,
   DownloadOutlined,
-  DownOutlined,
   FileTextOutlined,
   FolderOpenOutlined,
   FullscreenExitOutlined,
@@ -10,7 +9,7 @@ import {
   UploadOutlined,
 } from "@ant-design/icons";
 import { App } from "antd";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
@@ -262,7 +261,7 @@ export function ChatWorkspaceFilesPanel({
   onToggleFullscreen,
   onCollapseRail,
 }: Props) {
-  const { modal } = App.useApp();
+  const { modal, message } = App.useApp();
   const [path, setPath] = useState<string | null>(null);
   const [entries, setEntries] = useState<WorkbenchFileEntry[]>([]);
   const [parentPath, setParentPath] = useState<string | null>(null);
@@ -278,9 +277,7 @@ export function ChatWorkspaceFilesPanel({
   });
   const [paneMode, setPaneMode] = useState<PaneMode>("split");
   const [showAllFiles, setShowAllFiles] = useState(false);
-  const [recentCollapsed, setRecentCollapsed] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<"idle" | "ok" | "fail">("idle");
-  const uploadRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     const id = agentId.trim();
@@ -315,23 +312,39 @@ export function ChatWorkspaceFilesPanel({
     if (!files?.length) {
       return;
     }
+    const id = agentId.trim();
+    if (!id) {
+      message.error("请先选择项目后再上传");
+      return;
+    }
     setUploading(true);
     setError(null);
     try {
       const payload = Array.from(files).map((file) => ({ name: file.name, file }));
-      const uploaded = await adapter.uploadProjectFiles(agentId.trim(), path, payload);
+      const uploaded = await adapter.uploadProjectFiles(id, path, payload);
       if (uploaded.length > 0) {
+        message.success(
+          uploaded.length === 1
+            ? `已上传「${uploaded[0]?.name ?? "文件"}」`
+            : `已上传 ${uploaded.length} 个文件`,
+        );
+        setShowAllFiles(true);
         setEntries((current) => {
           const uploadedPaths = new Set(uploaded.map((entry) => entry.path));
-          return [...uploaded, ...current.filter((entry) => !uploadedPaths.has(entry.path))];
+          const merged = [
+            ...uploaded,
+            ...current.filter((entry) => !uploadedPaths.has(entry.path)),
+          ];
+          return merged;
         });
+        await load();
+      } else {
+        message.warning("未收到上传结果，请刷新后重试");
       }
-      await load();
-      window.setTimeout(() => {
-        void load();
-      }, 600);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const text = err instanceof Error ? err.message : String(err);
+      setError(text);
+      message.error(text);
     } finally {
       setUploading(false);
     }
@@ -462,17 +475,31 @@ export function ChatWorkspaceFilesPanel({
     onPreviewActiveChange?.(showPreviewPane);
   }, [onPreviewActiveChange, showPreviewPane]);
 
-  return (
-    <div className="flex h-full min-h-0 flex-col bg-transparent">
+  const uploadFileTrigger = (label: string, className: string, iconClassName = "text-[11px]") => (
+    <label
+      className={cn(
+        "relative inline-flex cursor-pointer items-center gap-1",
+        className,
+        uploading && "pointer-events-none cursor-not-allowed opacity-50",
+      )}
+    >
       <input
-        ref={uploadRef}
         type="file"
         multiple
-        className="sr-only"
-        aria-hidden
-        tabIndex={-1}
+        className="absolute inset-0 z-[1] h-full w-full cursor-pointer opacity-0"
         onChange={(e) => void onUploadChange(e)}
+        disabled={uploading}
+        aria-label={label}
       />
+      <span className="pointer-events-none inline-flex items-center gap-1">
+        <UploadOutlined className={iconClassName} />
+        {uploading ? "上传中…" : label}
+      </span>
+    </label>
+  );
+
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-transparent">
       {showToolbar ? (
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200/70 bg-white px-4 py-3">
           <div className="min-w-0 flex-1">
@@ -488,15 +515,11 @@ export function ChatWorkspaceFilesPanel({
             >
               上级
             </button>
-            <button
-              type="button"
-              disabled={uploading || loading}
-              onClick={() => uploadRef.current?.click()}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <UploadOutlined className="text-[12px]" />
-              {uploading ? "上传中…" : "上传到工作区"}
-            </button>
+            {uploadFileTrigger(
+              "上传到工作区",
+              "inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950",
+              "text-[12px]",
+            )}
             <Link
               to={ROUTES.workbench}
               className="power-soft-button rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50"
@@ -529,78 +552,48 @@ export function ChatWorkspaceFilesPanel({
               {error}
             </div>
           ) : null}
-          {loading ? (
-            <div className="py-10 text-center text-sm text-slate-500">加载中…</div>
-          ) : entries.length === 0 ? (
-            <div className="py-10 text-center text-sm text-slate-500">此目录暂无文件</div>
-          ) : (
-            <div className="mx-auto max-w-[19.5rem]">
-              <div className="rounded-[22px] border border-[rgba(226,232,240,0.5)] bg-[#fafafa] p-3 shadow-sm shadow-neutral-900/[0.04]">
-                <div className="flex items-start justify-between gap-3 px-1 pb-3 pt-0.5">
-                  <button
-                    type="button"
-                    aria-expanded={!recentCollapsed}
-                    onClick={() => setRecentCollapsed((v) => !v)}
-                    className="flex min-w-0 flex-1 items-start gap-1.5 rounded-lg text-left transition hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300/60"
-                  >
-                    <DownOutlined
-                      className={cn(
-                        "mt-0.5 shrink-0 text-[10px] text-slate-400 transition-transform",
-                        recentCollapsed ? "-rotate-90" : "",
-                      )}
-                      aria-hidden
-                    />
-                    <span className="min-w-0">
-                      <span className="block text-[13px] font-semibold text-slate-800">
-                        最近修改
-                      </span>
-                      <span className="mt-0.5 block text-[11px] text-slate-400">
-                        默认展示最近修改的 6 个文件
-                      </span>
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    disabled={uploading || loading}
-                    onClick={() => uploadRef.current?.click()}
-                    className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-[rgba(226,232,240,0.65)] bg-white px-2.5 text-xs font-semibold text-neutral-700 shadow-sm shadow-neutral-900/[0.04] transition hover:border-[rgba(203,213,225,0.85)] hover:bg-[#f5f5f4] hover:text-neutral-900 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <UploadOutlined className="text-[12px]" />
-                    {uploading ? "上传中…" : "上传文件"}
-                  </button>
-                </div>
-                {!recentCollapsed ? (
-                  <div className="space-y-2">
-                    {recentFiles.length === 0 ? (
-                      <p className="px-2 py-4 text-center text-xs text-slate-500">
-                        当前目录暂无文件
-                      </p>
-                    ) : (
-                      visibleFiles.map((entry) => (
-                        <FileCard
-                          key={`${entry.kind}:${entry.path}`}
-                          entry={entry}
-                          active={preview.entry?.path === entry.path}
-                          onOpen={() => void openPreview(entry)}
-                          onDownload={() => void onDownload(entry)}
-                          onDelete={() => onDelete(entry)}
-                        />
-                      ))
-                    )}
-                  </div>
-                ) : null}
-                {hasMoreFiles && !recentCollapsed ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowAllFiles((v) => !v)}
-                    className="mt-3 flex w-full items-center justify-center rounded-xl border border-[rgba(226,232,240,0.55)] bg-[#f5f5f4] px-3 py-2 text-xs font-medium text-neutral-600 transition hover:border-[rgba(226,232,240,0.72)] hover:bg-white hover:text-neutral-900"
-                  >
-                    {showAllFiles ? "收起" : `更多，查看全部 ${sortedFiles.length} 个文件`}
-                  </button>
-                ) : null}
+          <div className="mx-auto max-w-[19.5rem]">
+            <div className="rounded-2xl border border-slate-200/50 bg-[#fafafa] p-2.5 shadow-sm shadow-neutral-900/[0.03]">
+              <div className="mb-2 flex items-center justify-between gap-2 px-0.5">
+                <span className="text-[13px] font-semibold text-slate-800">最近修改</span>
+                {uploadFileTrigger(
+                  "上传文件",
+                  "inline-flex h-7 shrink-0 items-center gap-1 rounded-full border border-slate-200/70 bg-white px-2 text-[11px] font-medium text-neutral-700 transition hover:border-slate-300 hover:bg-slate-50",
+                )}
               </div>
+              {loading ? (
+                <div className="py-6 text-center text-xs text-slate-500">加载中…</div>
+              ) : recentFiles.length > 0 ? (
+                <div className="space-y-1.5">
+                  {visibleFiles.map((entry) => (
+                    <FileCard
+                      key={`${entry.kind}:${entry.path}`}
+                      entry={entry}
+                      active={preview.entry?.path === entry.path}
+                      onOpen={() => void openPreview(entry)}
+                      onDownload={() => void onDownload(entry)}
+                      onDelete={() => onDelete(entry)}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <p className="px-0.5 py-2 text-center text-xs text-slate-500">
+                  {entries.length > 0
+                    ? "暂无用户文件，上传后将显示在这里"
+                    : "此目录暂无文件，可先上传"}
+                </p>
+              )}
+              {!loading && hasMoreFiles ? (
+                <button
+                  type="button"
+                  onClick={() => setShowAllFiles((v) => !v)}
+                  className="mt-3 flex w-full items-center justify-center rounded-xl border border-[rgba(226,232,240,0.55)] bg-[#f5f5f4] px-3 py-2 text-xs font-medium text-neutral-600 transition hover:border-[rgba(226,232,240,0.72)] hover:bg-white hover:text-neutral-900"
+                >
+                  {showAllFiles ? "收起" : `更多，查看全部 ${sortedFiles.length} 个文件`}
+                </button>
+              ) : null}
             </div>
-          )}
+          </div>
         </section>
 
         <section
@@ -767,7 +760,7 @@ function FileCard({
   return (
     <div
       className={cn(
-        "group flex items-center gap-2 rounded-2xl border px-2.5 py-2.5 transition-[background-color,border-color,box-shadow,transform]",
+        "group flex items-center gap-2 rounded-xl border px-2 py-2 transition-[background-color,border-color,box-shadow,transform]",
         active
           ? "border-[rgba(226,232,240,0.72)] bg-white shadow-sm shadow-neutral-900/[0.05]"
           : "border-transparent bg-[#f5f5f4] hover:border-[rgba(226,232,240,0.55)] hover:bg-white hover:shadow-sm hover:shadow-neutral-900/[0.04]",
