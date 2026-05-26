@@ -17,17 +17,18 @@ kill_listeners_on_port() {
 }
 
 echo "[dev-stack] preflight: freeing common dev ports ..."
+kill_listeners_on_port 18789
 kill_listeners_on_port 19001
 kill_listeners_on_port 19003
 kill_listeners_on_port 5174
 
-echo "[dev-stack] starting gateway:dev ..."
-OPENCLAW_SKIP_CHANNELS=1 node scripts/run-node.mjs --dev gateway --auth none &
+echo "[dev-stack] starting gateway (default ~/.openclaw config, not --dev) ..."
+pnpm gateway:local &
 GATEWAY_PID=$!
 
 cleanup() {
   if kill -0 "$GATEWAY_PID" >/dev/null 2>&1; then
-    echo "[dev-stack] stopping gateway:dev (pid=$GATEWAY_PID) ..."
+    echo "[dev-stack] stopping gateway (pid=$GATEWAY_PID) ..."
     kill "$GATEWAY_PID" >/dev/null 2>&1 || true
   fi
 }
@@ -37,5 +38,5 @@ trap cleanup EXIT INT TERM
 # Give gateway a short head start so power-ui can connect.
 sleep 1
 
-echo "[dev-stack] starting power-ui:dev (default React at http://127.0.0.1:5174/, legacy Lit at /lit.html) ..."
+echo "[dev-stack] starting power-ui:dev (default React at http://127.0.0.1:5174/, legacy Lit at /lit.html, gateway ws://127.0.0.1:18789) ..."
 pnpm power-ui:dev
