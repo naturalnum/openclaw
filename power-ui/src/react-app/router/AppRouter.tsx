@@ -1,9 +1,8 @@
 import { Navigate, Route, Routes } from "react-router-dom";
-
 import { PowerShellLayout } from "../layout/PowerShellLayout";
 import { ChatPage } from "../pages/ChatPage";
-import { SettingsConnectorsPage } from "../pages/settings/SettingsConnectorsPage";
 import { SettingsConnectionPage } from "../pages/settings/SettingsConnectionPage";
+import { SettingsConnectorsPage } from "../pages/settings/SettingsConnectorsPage";
 import { SettingsLayout } from "../pages/settings/SettingsLayout";
 import { SettingsMcpPage } from "../pages/settings/SettingsMcpPage";
 import { SettingsModelsPage } from "../pages/settings/SettingsModelsPage";
@@ -11,7 +10,7 @@ import { SkillsPage } from "../pages/SkillsPage";
 import { WorkbenchPage } from "../pages/WorkbenchPage";
 
 /**
- * Hash-based routes so navigation works when the app is served from `react.html` (any pathname).
+ * Hash-based routes so navigation works when the app is served from `/` or a subpath mount.
  */
 export function AppRouter() {
   return (

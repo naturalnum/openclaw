@@ -2,10 +2,11 @@
 
 Two entry points after `pnpm power-ui:build` (or `pnpm power-ui:dev`):
 
-| Entry | Stack | Typical URL (dev) |
-|-------|--------|-------------------|
-| `index.html` | Lit (legacy workbench) | `http://localhost:5174/` |
-| `react.html` | React + Tailwind + Ant Design (incremental migration) | `http://localhost:5174/react.html` |
+| Entry        | Stack                                       | Typical URL (dev / packaged default) |
+| ------------ | ------------------------------------------- | ------------------------------------ |
+| `index.html` | React + Tailwind + Ant Design (**default**) | `http://localhost:5174/`             |
+| `lit.html`   | Lit (legacy workbench, retained)            | `http://localhost:5174/lit.html`     |
+| `react.html` | Redirect → `/` (compat)                     | `http://localhost:5174/react.html`   |
 
 See `src/react-app/README.md` for the React app layout and parity checklist.
 

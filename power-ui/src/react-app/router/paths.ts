@@ -1,5 +1,5 @@
 /**
- * In-app paths for HashRouter (e.g. `react.html#/`, `react.html#/skills`).
+ * In-app paths for HashRouter (e.g. `#/`, `#/skills` on the default `index.html` entry).
  */
 export const ROUTES = {
   /** React 对话首页 */

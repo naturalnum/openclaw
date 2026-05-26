@@ -49,8 +49,8 @@ export default defineConfig(() => {
       chunkSizeWarningLimit: 1024,
       rollupOptions: {
         input: {
-          main: path.resolve(here, "index.html"),
-          react: path.resolve(here, "react.html"),
+          index: path.resolve(here, "index.html"),
+          lit: path.resolve(here, "lit.html"),
         },
       },
     },
@@ -68,7 +68,7 @@ export default defineConfig(() => {
       dedupe: ["react", "react-dom"],
     },
     optimizeDeps: {
-      entries: [path.resolve(here, "index.html"), path.resolve(here, "react.html")],
+      entries: [path.resolve(here, "index.html"), path.resolve(here, "lit.html")],
       include: [
         "lit/directives/repeat.js",
         "react",
