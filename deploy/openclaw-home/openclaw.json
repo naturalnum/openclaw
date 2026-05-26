@@ -146,11 +146,20 @@
         "id": "main",
         "name": "main",
         "workspace": "/home/node/.openclaw/workspace"
+      },
+      {
+        "id": "test",
+        "name": "test",
+        "workspace": "/home/node/.openclaw/workspace/test",
+        "identity": {
+          "name": "test"
+        },
+        "agentDir": "/home/node/.openclaw/agents/test/agent"
       }
     ]
   },
   "meta": {
     "lastTouchedVersion": "2026.4.12",
-    "lastTouchedAt": "2026-05-08T11:35:44.053Z"
+    "lastTouchedAt": "2026-05-22T09:04:56.405Z"
   }
 }
