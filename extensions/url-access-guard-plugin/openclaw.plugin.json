@@ -1,0 +1,26 @@
+{
+  "id": "url-access-guard-plugin",
+  "name": "URL Access Guard Plugin",
+  "description": "Controls agent URL access via blocklist/allowlist filtering.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "mode": {
+        "type": "string",
+        "enum": ["blocklist", "allowlist"],
+        "description": "Filtering mode: blocklist blocks matching URLs, allowlist only permits matching URLs."
+      },
+      "blocklist": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "URL patterns to block (domains or domain globs)."
+      },
+      "allowlist": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "URL patterns to allow (domains or domain globs). Only used in allowlist mode."
+      }
+    }
+  }
+}

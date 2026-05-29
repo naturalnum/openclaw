@@ -1,0 +1,25 @@
+{
+  "id": "file-encryption-plugin",
+  "name": "File Encryption Plugin",
+  "description": "Transparent encryption/decryption for config and memory files.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "encryptionKey": {
+        "type": "string",
+        "description": "AES-256 encryption key (base64 encoded, 32 bytes). Use OPENCLAW_FILE_ENCRYPTION_KEY env var for security."
+      },
+      "encryptedPaths": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "File path patterns to encrypt (supports * wildcard). Default: ['**/memory/**', '**/.openclaw/config.*']"
+      },
+      "mode": {
+        "type": "string",
+        "enum": ["encrypt", "decrypt", "both"],
+        "description": "Operation mode: 'encrypt' encrypts on write, 'decrypt' decrypts on read, 'both' does both."
+      }
+    }
+  }
+}

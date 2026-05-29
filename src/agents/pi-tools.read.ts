@@ -10,6 +10,7 @@ import {
   writeFileWithinRoot,
 } from "../infra/fs-safe.js";
 import { trySafeFileURLToPath } from "../infra/local-file-access.js";
+import { logDebug, logError as _logError } from "../logger.js";
 import { detectMime } from "../media/mime.js";
 import { sniffMimeFromBase64 } from "../media/sniff-mime-from-base64.js";
 import type { ImageSanitizationLimits } from "./image-sanitization.js";
@@ -86,6 +87,77 @@ function formatBytes(bytes: number): string {
     return `${Math.round(bytes / 1024)}KB`;
   }
   return `${bytes}B`;
+}
+
+// =========================================================================
+// Auto-Decryption for Encrypted Files
+// =========================================================================
+
+function isEncryptedContent(data: string): boolean {
+  // Check if data matches the encrypted format: iv:authTag:content
+  const parts = data.split(":");
+  if (parts.length !== 3) {
+    return false;
+  }
+
+  try {
+    // Try to decode base64 parts
+    Buffer.from(parts[0], "base64");
+    Buffer.from(parts[1], "base64");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function decryptContentBase64(encryptedData: string, keyBase64: string): string {
+  const crypto = require("node:crypto");
+
+  const parts = encryptedData.split(":");
+  if (parts.length !== 3) {
+    throw new Error("Invalid encrypted data format");
+  }
+
+  const [ivBase64, authTagBase64, encrypted] = parts;
+  const key = Buffer.from(keyBase64, "base64");
+  const iv = Buffer.from(ivBase64, "base64");
+  const authTag = Buffer.from(authTagBase64, "base64");
+
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+  decipher.setAuthTag(authTag);
+
+  let decrypted = decipher.update(encrypted, "base64", "utf8");
+  decrypted += decipher.final("utf8");
+
+  return decrypted;
+}
+
+function tryDecryptReadResult(
+  result: AgentToolResult<unknown>,
+  keyBase64: string,
+): AgentToolResult<unknown> | null {
+  const content = Array.isArray(result.content) ? result.content : [];
+  if (content.length === 0) {
+    return null;
+  }
+
+  const textBlock = content.find(
+    (block): block is TextContentBlock =>
+      !!block &&
+      typeof block === "object" &&
+      (block as { type?: unknown }).type === "text" &&
+      typeof (block as { text?: unknown }).text === "string",
+  );
+
+  if (!textBlock || !isEncryptedContent(textBlock.text)) {
+    return null;
+  }
+
+  // Try to decrypt
+  const decrypted = decryptContentBase64(textBlock.text, keyBase64);
+
+  // Replace the encrypted text with decrypted content
+  return withToolResultText(result, decrypted);
 }
 
 function getToolResultText(result: AgentToolResult<unknown>): string | undefined {
@@ -656,11 +728,29 @@ export function createOpenClawReadTool(
       const filePath = typeof record?.path === "string" ? record.path : "<unknown>";
       const strippedDetailsResult = stripReadTruncationContentDetails(result);
       const normalizedResult = await normalizeReadImageResult(strippedDetailsResult, filePath);
-      return sanitizeToolResultImages(
+      const sanitizedResult = await sanitizeToolResultImages(
         normalizedResult,
         `read:${filePath}`,
         options?.imageSanitization,
       );
+
+      // Auto-decrypt encrypted file content
+      const decryptionKey = process.env.OPENCLAW_FILE_ENCRYPTION_KEY;
+      if (decryptionKey) {
+        try {
+          const decryptedResult = tryDecryptReadResult(sanitizedResult, decryptionKey);
+          if (decryptedResult) {
+            return decryptedResult;
+          }
+        } catch (err) {
+          // Decryption failed, return original result
+          logDebug(
+            `read: auto-decryption failed for ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
+      return sanitizedResult;
     },
   };
 }

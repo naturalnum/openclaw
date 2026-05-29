@@ -18,6 +18,7 @@
     "target": "es2023",
     "types": ["node"],
     "useDefineForClassFields": false,
+    "sourceMap": true,
     "paths": {
       "openclaw/extension-api": ["./src/extensionAPI.ts"],
       "openclaw/plugin-sdk": ["./src/plugin-sdk/index.ts"],
