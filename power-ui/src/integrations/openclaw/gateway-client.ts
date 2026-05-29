@@ -67,6 +67,9 @@ function formatGatewayCloseError(params: {
   if (rawMessage) {
     return rawMessage;
   }
+  if (params.code === 1006) {
+    return "gateway closed (1006): verify gateway is running and set the token under Settings → Connection";
+  }
   return `gateway closed (${params.code})`;
 }
 

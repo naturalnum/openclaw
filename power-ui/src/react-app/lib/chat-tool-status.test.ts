@@ -107,8 +107,34 @@ describe("chat-tool-status", () => {
       { key: "c", label: "写入文件", detail: "", complete: false },
     ]);
     expect(merged).toHaveLength(2);
-    expect(merged[0]?.label).toBe("运行命令（×2）");
+    expect(merged[0]?.label).toBe("运行命令");
     expect(merged[1]?.label).toBe("写入文件");
+  });
+
+  it("hides low-signal environment probing exec commands", () => {
+    const steps = buildChatToolSteps([
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "toolcall",
+            name: "exec",
+            arguments: { command: "which python3 && pip3 list 2>/null | grep -i docx" },
+          },
+        ],
+      },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "toolcall",
+            name: "exec",
+            arguments: { command: 'python3 -c "import docx; print(1)"' },
+          },
+        ],
+      },
+    ]);
+    expect(steps).toHaveLength(0);
   });
 });
 

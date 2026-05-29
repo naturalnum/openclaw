@@ -57,12 +57,16 @@ export type WorkbenchUploadedFile = {
   onProgress?: (progress: { loaded: number; total: number | null }) => void;
 };
 
-export type WorkbenchFilePreviewMode = "text" | "image" | "pdf";
+export type WorkbenchFilePreviewMode = "text" | "image" | "pdf" | "word";
 
 export type WorkbenchFilePreviewResult =
   | {
       mode: "text";
       content: string;
+    }
+  | {
+      mode: "word";
+      html: string;
     }
   | {
       mode: "image" | "pdf";

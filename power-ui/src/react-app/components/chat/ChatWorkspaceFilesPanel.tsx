@@ -3,13 +3,16 @@ import {
   DownloadOutlined,
   FileTextOutlined,
   FolderOpenOutlined,
+  MinusOutlined,
   FullscreenExitOutlined,
   FullscreenOutlined,
+  PlusOutlined,
   PicRightOutlined,
+  RedoOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
 import { App } from "antd";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
@@ -116,8 +119,15 @@ function formatUpdatedAt(ms: number | undefined): string {
 
 function previewModeForEntry(entry: WorkbenchFileEntry): WorkbenchFilePreviewMode | null {
   const lower = entry.name.toLowerCase();
+  const imageExts = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"] as const;
+  if (imageExts.some((ext) => lower.endsWith(ext))) {
+    return "image";
+  }
   if (lower.endsWith(".pdf")) {
     return "pdf";
+  }
+  if (lower.endsWith(".docx")) {
+    return "word";
   }
   const codeTextExts = [
     ".txt",
@@ -278,6 +288,15 @@ export function ChatWorkspaceFilesPanel({
   const [paneMode, setPaneMode] = useState<PaneMode>("split");
   const [showAllFiles, setShowAllFiles] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<"idle" | "ok" | "fail">("idle");
+  const [imageZoom, setImageZoom] = useState(1);
+  const [imageOffset, setImageOffset] = useState({ x: 0, y: 0 });
+  const [isImageDragging, setIsImageDragging] = useState(false);
+  const dragStateRef = useRef<{
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+  } | null>(null);
 
   const load = useCallback(async () => {
     const id = agentId.trim();
@@ -425,7 +444,11 @@ export function ChatWorkspaceFilesPanel({
   const hasMoreFiles = sortedFiles.length > recentFiles.length;
 
   const previewBlobUrl = useMemo(() => {
-    if (preview.status !== "ready" || !preview.result || preview.result.mode === "text") {
+    if (
+      preview.status !== "ready" ||
+      !preview.result ||
+      (preview.result.mode !== "image" && preview.result.mode !== "pdf")
+    ) {
       return "";
     }
     return URL.createObjectURL(preview.result.blob);
@@ -437,6 +460,27 @@ export function ChatWorkspaceFilesPanel({
     }
     return `${previewBlobUrl}#zoom=100`;
   }, [previewBlobUrl]);
+
+  const wordPreviewSrcDoc = useMemo(() => {
+    if (preview.status !== "ready" || preview.result.mode !== "word") {
+      return "";
+    }
+    return `<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      html, body { margin: 0; padding: 0; background: #fff; color: #1f2937; font: 14px/1.7 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif; }
+      body { padding: 20px 24px; }
+      img, table { max-width: 100%; }
+      table { border-collapse: collapse; }
+      td, th { border: 1px solid #e5e7eb; padding: 4px 8px; vertical-align: top; }
+      p { margin: 0 0 0.75em; }
+    </style>
+  </head>
+  <body>${preview.result.html}</body>
+</html>`;
+  }, [preview]);
 
   useEffect(() => {
     return () => {
@@ -457,6 +501,80 @@ export function ChatWorkspaceFilesPanel({
   useEffect(() => {
     setCopyFeedback("idle");
   }, [preview.entry?.path]);
+
+  useEffect(() => {
+    if (preview.status !== "ready" || preview.result.mode !== "image") {
+      setImageZoom(1);
+      setImageOffset({ x: 0, y: 0 });
+    }
+  }, [preview]);
+
+  const applyImageZoom = useCallback(
+    (next: number, anchor?: { x: number; y: number }) => {
+      const clamped = Math.min(4, Math.max(0.25, next));
+      setImageOffset((current) => {
+        if (!anchor || imageZoom <= 0) {
+          return current;
+        }
+        const ratio = clamped / imageZoom;
+        return {
+          x: anchor.x * (1 - ratio) + current.x * ratio,
+          y: anchor.y * (1 - ratio) + current.y * ratio,
+        };
+      });
+      setImageZoom(clamped);
+    },
+    [imageZoom],
+  );
+
+  const onImageWheel = useCallback(
+    (event: React.WheelEvent<HTMLDivElement>) => {
+      if (preview.status !== "ready" || preview.result.mode !== "image") {
+        return;
+      }
+      event.preventDefault();
+      const rect = event.currentTarget.getBoundingClientRect();
+      const anchor = {
+        x: event.clientX - rect.left - rect.width / 2,
+        y: event.clientY - rect.top - rect.height / 2,
+      };
+      const next = event.deltaY < 0 ? imageZoom * 1.1 : imageZoom * 0.9;
+      applyImageZoom(next, anchor);
+    },
+    [applyImageZoom, imageZoom, preview],
+  );
+
+  const onImageMouseDown = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      if (preview.status !== "ready" || preview.result.mode !== "image") {
+        return;
+      }
+      dragStateRef.current = {
+        startX: event.clientX,
+        startY: event.clientY,
+        originX: imageOffset.x,
+        originY: imageOffset.y,
+      };
+      setIsImageDragging(true);
+    },
+    [imageOffset.x, imageOffset.y, preview],
+  );
+
+  const onImageMouseMove = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (!dragStateRef.current) {
+      return;
+    }
+    const { startX, startY, originX, originY } = dragStateRef.current;
+    setImageOffset({
+      x: originX + (event.clientX - startX),
+      y: originY + (event.clientY - startY),
+    });
+  }, []);
+
+  const stopImageDrag = useCallback(() => {
+    dragStateRef.current = null;
+    setIsImageDragging(false);
+  }, []);
 
   const onCopyPreview = useCallback(async () => {
     if (preview.status !== "ready" || preview.result.mode !== "text") {
@@ -731,6 +849,73 @@ export function ChatWorkspaceFilesPanel({
                   <iframe
                     title={preview.entry.name}
                     src={pdfPreviewSrc}
+                    className="h-full w-full border-0 bg-white"
+                  />
+                ) : preview.status === "ready" && preview.result.mode === "image" ? (
+                  <div className="flex h-full min-h-0 flex-col bg-[#f8fafc]">
+                    <div className="flex shrink-0 items-center justify-between border-b border-slate-200/70 bg-white/90 px-3 py-2 text-xs text-slate-600">
+                      <span>缩放：{Math.round(imageZoom * 100)}%</span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50"
+                          onClick={() => applyImageZoom(imageZoom - 0.1)}
+                          title="缩小"
+                          aria-label="缩小"
+                        >
+                          <MinusOutlined className="text-[12px]" />
+                        </button>
+                        <button
+                          type="button"
+                          className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50"
+                          onClick={() => {
+                            setImageZoom(1);
+                            setImageOffset({ x: 0, y: 0 });
+                          }}
+                          title="重置"
+                          aria-label="重置"
+                        >
+                          <RedoOutlined className="text-[12px]" />
+                        </button>
+                        <button
+                          type="button"
+                          className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50"
+                          onClick={() => applyImageZoom(imageZoom + 0.1)}
+                          title="放大"
+                          aria-label="放大"
+                        >
+                          <PlusOutlined className="text-[12px]" />
+                        </button>
+                      </div>
+                    </div>
+                    <div
+                      className={cn(
+                        "power-chat-scroll flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4",
+                        isImageDragging ? "cursor-grabbing" : "cursor-grab",
+                      )}
+                      onWheel={onImageWheel}
+                      onMouseDown={onImageMouseDown}
+                      onMouseMove={onImageMouseMove}
+                      onMouseUp={stopImageDrag}
+                      onMouseLeave={stopImageDrag}
+                    >
+                      <img
+                        src={previewBlobUrl}
+                        alt={preview.entry.name}
+                        className="max-h-full max-w-full rounded-lg border border-slate-200/70 bg-white object-contain shadow-sm transition-transform duration-100"
+                        style={{
+                          transform: `translate(${imageOffset.x}px, ${imageOffset.y}px) scale(${imageZoom})`,
+                          transformOrigin: "center center",
+                        }}
+                        draggable={false}
+                      />
+                    </div>
+                  </div>
+                ) : preview.status === "ready" && preview.result.mode === "word" ? (
+                  <iframe
+                    title={preview.entry.name}
+                    sandbox="allow-same-origin"
+                    srcDoc={wordPreviewSrcDoc}
                     className="h-full w-full border-0 bg-white"
                   />
                 ) : null}

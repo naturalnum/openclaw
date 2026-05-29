@@ -188,6 +188,39 @@ function loadSessionToken(gatewayUrl: string): string {
   }
 }
 
+/** Reuse token scoped to a legacy dev gateway URL (e.g. 19001 → 18789 migration). */
+function resolveSessionToken(
+  gatewayUrl: string,
+  legacyGatewayUrls: Array<string | undefined>,
+): string {
+  const primary = loadSessionToken(gatewayUrl);
+  if (primary) {
+    return primary;
+  }
+  for (const legacyUrl of legacyGatewayUrls) {
+    const normalized = normalizeOptionalString(legacyUrl);
+    if (!normalized || normalized === gatewayUrl) {
+      continue;
+    }
+    const legacyToken = loadSessionToken(normalized);
+    if (legacyToken) {
+      persistSessionToken(gatewayUrl, legacyToken);
+      return legacyToken;
+    }
+  }
+  try {
+    const storage = getSessionStorage();
+    const legacy = normalizeOptionalString(storage?.getItem(LEGACY_TOKEN_SESSION_KEY));
+    if (legacy) {
+      persistSessionToken(gatewayUrl, legacy);
+      return legacy;
+    }
+  } catch {
+    // best-effort
+  }
+  return "";
+}
+
 function persistSessionToken(gatewayUrl: string, token: string) {
   try {
     const storage = getSessionStorage();
@@ -220,7 +253,7 @@ export function loadSettings(): UiSettings {
 
   const defaults: UiSettings = {
     gatewayUrl: defaultUrl,
-    token: loadSessionToken(defaultUrl),
+    token: resolveSessionToken(defaultUrl, [legacyEffectiveUrl, pageDerivedUrl]),
     sessionKey: "main",
     lastActiveSessionKey: "main",
     theme: "claw",
@@ -277,7 +310,11 @@ export function loadSettings(): UiSettings {
     const settings = {
       gatewayUrl,
       // Gateway auth is intentionally in-memory only; scrub any legacy persisted token on load.
-      token: loadSessionToken(gatewayUrl),
+      token: resolveSessionToken(gatewayUrl, [
+        legacyEffectiveUrl,
+        pageDerivedUrl,
+        parsedGatewayUrl,
+      ]),
       sessionKey: scopedSessionSelection.sessionKey,
       lastActiveSessionKey: scopedSessionSelection.lastActiveSessionKey,
       theme,

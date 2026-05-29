@@ -62,6 +62,12 @@ function summarizeToolArgs(args: unknown): string {
     return truncateToolPreview(humanizePathTokens(stringifyToolValue(args)), 120);
   }
   const record = args as Record<string, unknown>;
+  if (typeof record.url === "string" && record.url.trim()) {
+    return truncateToolPreview(humanizePathTokens(record.url), 120);
+  }
+  if (typeof record.urls === "string" && record.urls.trim()) {
+    return truncateToolPreview(humanizePathTokens(record.urls), 120);
+  }
   const candidates = [
     record.path,
     record.filePath,
@@ -135,9 +141,28 @@ function shortenExecCommandLabel(command: string): string {
   return truncateToolPreview(humanizePathTokens(firstClause), 48);
 }
 
+function isLowSignalExecCommand(command: string): boolean {
+  const normalized = command.replace(/\s+/g, " ").trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return (
+    /^which\s+\S+/.test(normalized) ||
+    /\bpip3?\s+list\b/.test(normalized) ||
+    /\bpython3?\s+-c\s+["']?import\s+[a-z0-9_.-]+/.test(normalized) ||
+    /\bnode\s+-e\b/.test(normalized)
+  );
+}
+
 function friendlyToolLabel(name: string, args: unknown): string {
   const normalizedName = name.toLowerCase();
   const argText = stringifyToolValue(args).toLowerCase();
+  if (normalizedName === "web_fetch" || normalizedName.includes("webfetch")) {
+    return "抓取网页";
+  }
+  if (normalizedName === "web_search" || normalizedName.includes("websearch")) {
+    return "搜索资料";
+  }
   if (normalizedName.includes("exec")) {
     const command = extractExecCommand(args);
     if (command) {
@@ -163,6 +188,31 @@ function friendlyToolLabel(name: string, args: unknown): string {
   return name;
 }
 
+function summarizeWebTarget(args: unknown): string {
+  if (!args || typeof args !== "object") {
+    return "";
+  }
+  const record = args as Record<string, unknown>;
+  const raw =
+    (typeof record.url === "string" && record.url.trim()) ||
+    (typeof record.query === "string" && record.query.trim()) ||
+    (typeof record.keyword === "string" && record.keyword.trim()) ||
+    "";
+  if (!raw) {
+    return "";
+  }
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const target = new URL(raw);
+      const shownPath = target.pathname === "/" ? "" : target.pathname;
+      return truncateToolPreview(`${target.host}${shownPath}`, 100);
+    } catch {
+      return truncateToolPreview(raw, 100);
+    }
+  }
+  return truncateToolPreview(raw, 100);
+}
+
 const GENERIC_TOOL_STEP_DETAILS = new Set([
   "正在处理，请稍候。",
   "正在执行必要的本地步骤。",
@@ -186,6 +236,14 @@ function friendlyToolDetail(params: {
   if (params.complete && params.resultText) {
     return `结果：${params.resultText}`;
   }
+  if (normalizedName === "web_fetch" || normalizedName.includes("webfetch")) {
+    const target = summarizeWebTarget(params.args);
+    return target ? `页面：${target}` : "";
+  }
+  if (normalizedName === "web_search" || normalizedName.includes("websearch")) {
+    const target = summarizeWebTarget(params.args);
+    return target ? `关键词：${target}` : "";
+  }
   if (normalizedName.includes("exec")) {
     const command = extractExecCommand(params.args);
     return command ? `命令：${truncateToolPreview(humanizePathTokens(command), 140)}` : "";
@@ -203,7 +261,36 @@ function friendlyToolDetail(params: {
   if (normalizedName.includes("search") || normalizedName.includes("rg")) {
     return `查询：${argSummary}`;
   }
-  return `参数：${argSummary}`;
+  return "";
+}
+
+function shouldExposeToolStep(name: string): boolean {
+  const normalized = name.trim().toLowerCase();
+  if (!normalized) {
+    return true;
+  }
+  // Hide internal bookkeeping steps; keep user-visible operations.
+  return !(
+    normalized.includes("heartbeat") ||
+    normalized.includes("telemetry") ||
+    normalized.includes("trace") ||
+    normalized.includes("metrics") ||
+    normalized.includes("debug") ||
+    normalized.includes("thinking") ||
+    normalized.includes("reasoning")
+  );
+}
+
+function shouldExposeToolStepByArgs(name: string, args: unknown): boolean {
+  const normalized = name.trim().toLowerCase();
+  if (!normalized.includes("exec")) {
+    return true;
+  }
+  const command = extractExecCommand(args);
+  if (!command) {
+    return true;
+  }
+  return !isLowSignalExecCommand(command);
 }
 
 export function getToolStepFromMessage(
@@ -230,12 +317,18 @@ export function getToolStepFromMessage(
     (typeof call?.name === "string" && call.name.trim()) ||
     (typeof result?.name === "string" && result.name.trim()) ||
     "工具";
+  if (!shouldExposeToolStep(rawName)) {
+    return null;
+  }
   const resultTextRaw =
     (typeof result?.text === "string" && result.text) ||
     (typeof result?.content === "string" && result.content) ||
     "";
   const resultText = resultTextRaw.trim() ? truncateToolPreview(resultTextRaw) : "";
   const args = call?.arguments ?? call?.args;
+  if (!shouldExposeToolStepByArgs(rawName, args)) {
+    return null;
+  }
   const label = friendlyToolLabel(rawName, args);
   const hasResult = Boolean(result) || resultText.length > 0;
 
@@ -289,15 +382,12 @@ export function collapseDuplicateToolSteps(steps: ChatToolStep[]): ChatToolStep[
   for (const step of steps) {
     const prev = merged[merged.length - 1];
     if (prev && prev.label === step.label) {
-      const countMatch = prev.label.match(/（×(\d+)）$/);
-      const base = prev.label.replace(/（×\d+）$/, "");
-      const count = countMatch ? Number.parseInt(countMatch[1] ?? "1", 10) + 1 : 2;
       merged[merged.length - 1] = {
         ...step,
         complete: prev.complete && step.complete,
         detail: step.detail || prev.detail,
         key: step.key,
-        label: `${base}（×${count}）`,
+        label: step.label,
       };
       continue;
     }

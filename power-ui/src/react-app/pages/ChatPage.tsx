@@ -82,6 +82,38 @@ function splitMessagesForTurnLayout(messages: unknown[], pinToolStepsBeforeAssis
   };
 }
 
+function shouldHideAsLowSignalStepLabel(label: string): boolean {
+  const normalized = label.trim();
+  if (!normalized) {
+    return true;
+  }
+  return (
+    normalized === "运行命令" ||
+    normalized === "安装依赖" ||
+    normalized === "检查本地环境" ||
+    normalized === "切换工作目录" ||
+    normalized.startsWith("查找 ")
+  );
+}
+
+function shouldShowToolStepsList(steps: Array<{ label: string; detail: string }>): boolean {
+  if (steps.length === 0) {
+    return false;
+  }
+  const informative = steps.filter((step) => {
+    const detail = step.detail.trim();
+    if (detail.startsWith("结果：")) {
+      return true;
+    }
+    if (shouldHideAsLowSignalStepLabel(step.label)) {
+      return false;
+    }
+    return detail.length > 0;
+  });
+  // Default to loading; only show steps when there is enough signal.
+  return informative.length >= 2;
+}
+
 function renderChatMessageBubble(msg: unknown, key: string) {
   if (!isRenderableChatMessage(msg) || !messageHasVisibleText(msg)) {
     return null;
@@ -402,7 +434,11 @@ export function ChatPage() {
   }, [effectiveModelRef, snapshot?.modelCatalog]);
 
   const chatToolSteps = activeRuntime?.displayToolSteps ?? [];
-  const pinToolStepsBeforeAssistant = chatToolSteps.length > 0;
+  const visibleToolSteps = useMemo(
+    () => (shouldShowToolStepsList(chatToolSteps) ? chatToolSteps : []),
+    [chatToolSteps],
+  );
+  const pinToolStepsBeforeAssistant = visibleToolSteps.length > 0;
   const { leadMessages, tailAssistantMessages } = useMemo(
     () =>
       splitMessagesForTurnLayout(activeRuntime?.chatMessages ?? [], pinToolStepsBeforeAssistant),
@@ -442,27 +478,27 @@ export function ChatPage() {
   const awaitingFirstToken = runActive && !showLiveStream && !activeRuntime?.lastError;
   const showAssistantOutput = awaitingFirstToken || showStream;
   const toolStepsPhase = useMemo((): ChatToolStepsPhase => {
-    if (chatToolSteps.some((step) => !step.complete)) {
+    if (visibleToolSteps.some((step) => !step.complete)) {
       return "running";
     }
     if (runActive || sending) {
       return "waiting_reply";
     }
     return "done";
-  }, [chatToolSteps, runActive, sending]);
-  const showAssistantActivityCard = chatToolSteps.length > 0 || showAssistantOutput;
+  }, [visibleToolSteps, runActive, sending]);
+  const showAssistantActivityCard = visibleToolSteps.length > 0 || showAssistantOutput;
   const runStatusHint = useMemo(() => {
     if (!runActive && !sending) {
       return null;
     }
-    if (chatToolSteps.some((step) => !step.complete)) {
+    if (visibleToolSteps.some((step) => !step.complete)) {
       return "正在执行任务…";
     }
     if (runActive || sending) {
       return null;
     }
     return "发送中…";
-  }, [chatToolSteps, runActive, sending, showStream, awaitingFirstToken]);
+  }, [visibleToolSteps, runActive, sending, showStream, awaitingFirstToken]);
   const errorText = snapshotError ?? activeRuntime?.lastError ?? null;
   useEffect(() => {
     if (!optimisticUserBubble) {
@@ -824,11 +860,13 @@ export function ChatPage() {
                     ))}
                     {showAssistantActivityCard ? (
                       <ChatToolStepsList
-                        steps={chatToolSteps}
+                        steps={visibleToolSteps}
                         phase={toolStepsPhase}
-                        fitContent={chatToolSteps.length === 0 && awaitingFirstToken && !showStream}
+                        fitContent={
+                          visibleToolSteps.length === 0 && awaitingFirstToken && !showStream
+                        }
                       >
-                        {awaitingFirstToken && chatToolSteps.length === 0 ? (
+                        {awaitingFirstToken && visibleToolSteps.length === 0 ? (
                           <div
                             className="flex items-center py-1"
                             aria-live="polite"

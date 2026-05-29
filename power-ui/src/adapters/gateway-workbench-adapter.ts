@@ -135,6 +135,12 @@ function mimeTypeFromPath(path: string): string {
   if (lower.endsWith(".pdf")) {
     return "application/pdf";
   }
+  if (lower.endsWith(".doc")) {
+    return "application/msword";
+  }
+  if (lower.endsWith(".docx")) {
+    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  }
   if (lower.endsWith(".png")) {
     return "image/png";
   }
@@ -172,6 +178,17 @@ function mimeTypeFromPath(path: string): string {
     return "text/css;charset=utf-8";
   }
   return "application/octet-stream";
+}
+
+async function convertWordBlobToHtml(blob: Blob): Promise<string> {
+  const mammoth = await import("mammoth/mammoth.browser");
+  const arrayBuffer = await blob.arrayBuffer();
+  const result = await mammoth.convertToHtml({ arrayBuffer });
+  const html = result.value?.trim();
+  if (!html) {
+    throw new Error("Word 文档内容为空，无法预览");
+  }
+  return html;
 }
 
 /** WebSocket upload is more reliable from the Vite dev UI than raw HTTP POST. */
@@ -474,6 +491,12 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
       return {
         mode,
         content: await blob.text(),
+      };
+    }
+    if (mode === "word") {
+      return {
+        mode,
+        html: await convertWordBlobToHtml(blob),
       };
     }
     return {

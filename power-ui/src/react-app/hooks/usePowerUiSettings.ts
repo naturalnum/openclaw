@@ -1,6 +1,13 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { loadSettings, saveSettings, type UiSettings } from "../../compat/ui-core";
 import { bootstrapSettingsFromUrl } from "../lib/bootstrap-settings-from-url";
+
+function isViteDevPage(): boolean {
+  if (typeof document === "undefined") {
+    return false;
+  }
+  return Boolean(document.querySelector('script[src*="/@vite/client"]'));
+}
 
 /**
  * Local mirror of persisted Control UI settings (same keys as Lit workbench).
@@ -9,6 +16,36 @@ export function usePowerUiSettings() {
   const [settings, setSettings] = useState<UiSettings>(() =>
     bootstrapSettingsFromUrl(loadSettings()),
   );
+
+  useEffect(() => {
+    if (settings.token.trim() || !isViteDevPage()) {
+      return undefined;
+    }
+    let cancelled = false;
+    void fetch("/__openclaw/dev-gateway.json")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload: { gatewayUrl?: string; token?: string } | null) => {
+        if (cancelled) {
+          return;
+        }
+        const token = payload?.token?.trim() ?? "";
+        if (!token) {
+          return;
+        }
+        const current = loadSettings();
+        const next: UiSettings = {
+          ...current,
+          gatewayUrl: payload?.gatewayUrl?.trim() || current.gatewayUrl,
+          token,
+        };
+        saveSettings(next);
+        setSettings(next);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [settings.token]);
 
   const refresh = useCallback(() => {
     setSettings(loadSettings());
