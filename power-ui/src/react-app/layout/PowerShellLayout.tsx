@@ -536,7 +536,13 @@ function SidebarNav({
       {!collapsed ? (
         <>
           <div className="mt-3 flex min-h-0 max-h-[58%] shrink flex-col overflow-hidden border-t border-slate-200/70 px-2 pb-2 pt-3">
-            <div className={cn(sectionHeaderRowClass, "group/project-header")}>
+            <div
+              className={cn(
+                sectionHeaderRowClass,
+                "group/project-header",
+                createProjectDialogOpen && "bg-[rgba(28,25,23,0.05)]",
+              )}
+            >
               <button
                 type="button"
                 aria-expanded={projectsOpen}
@@ -567,6 +573,7 @@ function SidebarNav({
                 className={cn(
                   "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-slate-500 opacity-0 transition hover:bg-slate-100/70 hover:text-slate-800 focus:opacity-100 focus-visible:outline-none group-hover/project-header:opacity-100 group-focus-within/project-header:opacity-100",
                   (projectsOpen || createProjectDialogOpen) && "opacity-70",
+                  createProjectDialogOpen && "bg-slate-100/70 text-slate-800 opacity-100",
                   (!adapter || createProjectBusy) && "cursor-not-allowed opacity-30",
                 )}
               >
