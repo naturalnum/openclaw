@@ -1,15 +1,15 @@
-import {
-  extractAskDbTimeResolutions,
-  formatLocalYmd,
-  type AskDbTimeResolution,
-} from "./time-anchor.js";
+import { splitAskDbNaturalLanguage, type AskDbSlots } from "./split.js";
 import {
   collectKeywordsFromSlots,
   rankSchemaTablesByKeywords,
   type AskDbTableRank,
   type SchemaTableRow,
 } from "./table-hints.js";
-import { splitAskDbNaturalLanguage, type AskDbSlots } from "./split.js";
+import {
+  extractAskDbTimeResolutions,
+  formatLocalYmd,
+  type AskDbTimeResolution,
+} from "./time-anchor.js";
 
 export type AskDbQueryEnrichment = {
   anchorLocalDate: string;
@@ -88,7 +88,9 @@ export function formatAskDbEnrichmentEnglish(e: AskDbQueryEnrichment): string {
     lines.push("");
   }
 
-  lines.push(`Table hints — top ${e.topTableCandidates.length} (lexical overlap with slots/question):`);
+  lines.push(
+    `Table hints — top ${e.topTableCandidates.length} (lexical overlap with slots/question):`,
+  );
   for (const row of e.topTableCandidates) {
     const mt = row.matchedTokens.length ? row.matchedTokens.join("; ") : "(no keyword hit)";
     lines.push(`- ${row.qualifiedName} (score=${row.score}) — ${mt}`);

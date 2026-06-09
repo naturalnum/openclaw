@@ -159,7 +159,11 @@ describe("retrieve enrichment", () => {
       example: [],
     });
     const base = buildAskDbHeuristicPlan("今年总部人工智能项目金额前三");
-    const enriched = enrichAskDbHeuristicPlanWithRetrieve("今年总部人工智能项目金额前三", base, provider);
+    const enriched = enrichAskDbHeuristicPlanWithRetrieve(
+      "今年总部人工智能项目金额前三",
+      base,
+      provider,
+    );
     expect(enriched.searchQuery).toContain("total_amount");
     expect(enriched.orgConstraint).toBe("总部");
     expect(enriched.domainConstraint).toBe("人工智能");

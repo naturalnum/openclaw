@@ -5,7 +5,10 @@ describe("parseAskDbArgText", () => {
   it("parses summary, schema, count, query", () => {
     expect(parseAskDbArgText("")).toEqual({ kind: "summary" });
     expect(parseAskDbArgText("schema")).toEqual({ kind: "schema" });
-    expect(parseAskDbArgText("count public.users")).toEqual({ kind: "count", table: "public.users" });
+    expect(parseAskDbArgText("count public.users")).toEqual({
+      kind: "count",
+      table: "public.users",
+    });
     expect(parseAskDbArgText("近7天")).toEqual({ kind: "query", prompt: "近7天" });
   });
 });
@@ -24,7 +27,9 @@ describe("splitAskDbNaturalLanguage", () => {
   });
 
   it("includes format output", () => {
-    const text = formatAskDbSlotsEnglish(splitAskDbNaturalLanguage("中国电科院2025年获得了国家科学技术奖"));
+    const text = formatAskDbSlotsEnglish(
+      splitAskDbNaturalLanguage("中国电科院2025年获得了国家科学技术奖"),
+    );
     expect(text).toContain("中国电科院");
     expect(text).toContain("国家科学技术奖");
   });

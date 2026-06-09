@@ -35,15 +35,9 @@
 
 ```json
 {
-  "unit": [
-    { "key": "公司总部", "content": "总部" }
-  ],
-  "domain": [
-    { "key": "AI", "content": "人工智能,AI" }
-  ],
-  "term": [
-    { "key": "项目金额", "content": "project amount total_amount payment_amount gmv" }
-  ]
+  "unit": [{ "key": "公司总部", "content": "总部" }],
+  "domain": [{ "key": "AI", "content": "人工智能,AI" }],
+  "term": [{ "key": "项目金额", "content": "project amount total_amount payment_amount gmv" }]
 }
 ```
 

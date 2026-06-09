@@ -81,7 +81,9 @@ async function runConnectorAction(params: {
   );
 }
 
-async function fetchSchemaTables(instanceId: string): Promise<Array<{ table_schema?: string; table_name?: string }>> {
+async function fetchSchemaTables(
+  instanceId: string,
+): Promise<Array<{ table_schema?: string; table_name?: string }>> {
   const schemaResult = await runConnectorAction({
     instanceId,
     action: "db.schema.list",
@@ -129,7 +131,10 @@ async function runSummaryText(params: {
   if (tables.length > 8) {
     lines.push(`...and ${tables.length - 8} more tables.`);
   }
-  lines.push("", "Try: `schema`, `search 订单`, `context 订单`, `describe public.orders`, `sql select ...`");
+  lines.push(
+    "",
+    "Try: `schema`, `search 订单`, `context 订单`, `describe public.orders`, `sql select ...`",
+  );
   return lines.join("\n");
 }
 
@@ -266,7 +271,10 @@ export function createAskDbTool(): AnyAgentTool {
           if (ranked.length > 20) {
             lines.push(`(${ranked.length} tables total; refine search if needed.)`);
           }
-          lines.push("", "Next: `context <same query>` for top-5 column detail, or `describe schema.table`.");
+          lines.push(
+            "",
+            "Next: `context <same query>` for top-5 column detail, or `describe schema.table`.",
+          );
           return textResult(lines.join("\n"), { ok: true });
         }
 
@@ -376,7 +384,9 @@ export function createAskDbTool(): AnyAgentTool {
               whereParts.push(buildAskDbTimeFilterSql(quoteIdentifier(timeColumn), plan.window));
             }
             if (plan.orgConstraint && orgColumn) {
-              whereParts.push(`${quoteIdentifier(orgColumn)} like '%${plan.orgConstraint.replaceAll("'", "''")}%'`);
+              whereParts.push(
+                `${quoteIdentifier(orgColumn)} like '%${plan.orgConstraint.replaceAll("'", "''")}%'`,
+              );
             }
             if (plan.domainConstraint && techDomainColumn) {
               whereParts.push(

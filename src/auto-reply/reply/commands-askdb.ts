@@ -230,11 +230,12 @@ export const handleAskDbCommand: CommandHandler = async (params, allowTextComman
         args: { schema: qualified.schema, table: qualified.table },
       });
       if (!desc.ok) {
-        return { shouldContinue: false, reply: { text: `AskDB failed: ${desc.error ?? "describe"}` } };
+        return {
+          shouldContinue: false,
+          reply: { text: `AskDB failed: ${desc.error ?? "describe"}` },
+        };
       }
-      const rows = Array.isArray(desc.data)
-        ? (desc.data as Array<Record<string, unknown>>)
-        : [];
+      const rows = Array.isArray(desc.data) ? (desc.data as Array<Record<string, unknown>>) : [];
       const lines = [`Columns for ${qualified.schema}.${qualified.table}:`];
       lines.push(...formatColumnDescribeLines(rows));
       return { shouldContinue: false, reply: { text: lines.join("\n") } };
@@ -282,9 +283,7 @@ export const handleAskDbCommand: CommandHandler = async (params, allowTextComman
           lines.push(`(describe failed: ${desc.error ?? "unknown"})`);
           continue;
         }
-        const rows = Array.isArray(desc.data)
-          ? (desc.data as Array<Record<string, unknown>>)
-          : [];
+        const rows = Array.isArray(desc.data) ? (desc.data as Array<Record<string, unknown>>) : [];
         lines.push(...formatColumnDescribeLines(rows, 60));
       }
       lines.push("", "Then: /askdb sql SELECT ... (read-only, single statement)");
@@ -364,7 +363,9 @@ export const handleAskDbCommand: CommandHandler = async (params, allowTextComman
           whereParts.push(buildAskDbTimeFilterSql(quoteIdentifier(timeColumn), plan.window));
         }
         if (plan.orgConstraint && orgColumn) {
-          whereParts.push(`${quoteIdentifier(orgColumn)} like '%${plan.orgConstraint.replaceAll("'", "''")}%'`);
+          whereParts.push(
+            `${quoteIdentifier(orgColumn)} like '%${plan.orgConstraint.replaceAll("'", "''")}%'`,
+          );
         }
         if (plan.domainConstraint && techDomainColumn) {
           whereParts.push(
