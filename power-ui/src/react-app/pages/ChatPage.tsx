@@ -8,8 +8,10 @@ import {
 } from "../../../../ui/src/ui/chat/attachment-support";
 import { parseAgentSessionKey } from "../../../../ui/src/ui/session-key";
 import type { ChatAttachment } from "../../../../ui/src/ui/ui-types";
+import type { WorkbenchUploadedFile } from "../../adapters/workbench-adapter";
 import type { WorkbenchAdapterEvent } from "../../adapters/workbench-adapter";
 import { extractText } from "../../compat/chat";
+import { isPowerQuickSessionKey } from "../../integrations/openclaw/session-keys";
 import { ChatMarkdownBody } from "../components/chat/ChatMarkdownBody";
 import { ChatModelPicker } from "../components/chat/ChatModelPicker";
 import { ChatToolStepsList, type ChatToolStepsPhase } from "../components/chat/ChatToolStepsList";
@@ -29,6 +31,12 @@ const BRAND = {
   primaryText: "text-white",
 } as const;
 
+const DEFAULT_ATTACHMENT_PROMPT = "请阅读以下附件并回答。";
+const CHAT_ATTACHMENT_CONTEXT_PATTERNS = [
+  /\s*本轮对话附件：[\s\S]*?(?:请把这些文件作为本轮对话上下文；需要内容时请直接读取对应路径。|$)/g,
+  /\s*已上传到当前工作区的附件：[\s\S]*?(?:请把这些文件作为本轮对话上下文；需要内容时请直接读取对应路径。|$)/g,
+];
+
 function cn(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
@@ -41,7 +49,7 @@ function messageHasVisibleText(msg: unknown): boolean {
   if (!isRenderableChatMessage(msg) || shouldHideChatMessage(msg, { showToolCalls: false })) {
     return false;
   }
-  const raw = extractText(msg);
+  const raw = extractDisplayText(msg);
   return typeof raw === "string" && raw.trim().length > 0;
 }
 
@@ -59,6 +67,34 @@ function findLastUserMessageIndex(messages: unknown[]): number {
     }
   }
   return -1;
+}
+
+function sanitizeUserChatDisplayText(text: string): string {
+  const attachmentNames = text
+    .split("\n")
+    .map(
+      (line) =>
+        line
+          .trim()
+          .match(/^-\s*([^:]+):\s*\S+/)?.[1]
+          ?.trim() ?? "",
+    )
+    .filter(Boolean);
+  const cleaned = CHAT_ATTACHMENT_CONTEXT_PATTERNS.reduce(
+    (current, pattern) => current.replace(pattern, ""),
+    text,
+  ).trim();
+  const attachmentSummary = formatAttachmentFileSummary(attachmentNames);
+  if (cleaned === DEFAULT_ATTACHMENT_PROMPT || !cleaned) {
+    return attachmentNames.length > 0 ? attachmentSummary : cleaned;
+  }
+  return attachmentNames.length > 0 ? `${cleaned}\n\n附件：${attachmentNames.join("、")}` : cleaned;
+}
+
+function extractDisplayText(msg: unknown): string {
+  const rawText = extractText(msg);
+  const text = typeof rawText === "string" ? rawText.trim() : "";
+  return messageRole(msg) === "user" ? sanitizeUserChatDisplayText(text) : text;
 }
 
 /** 有工具步骤时，把本轮助手总结挪到步骤条之后展示。 */
@@ -82,36 +118,19 @@ function splitMessagesForTurnLayout(messages: unknown[], pinToolStepsBeforeAssis
   };
 }
 
-function shouldHideAsLowSignalStepLabel(label: string): boolean {
-  const normalized = label.trim();
-  if (!normalized) {
-    return true;
-  }
-  return (
-    normalized === "运行命令" ||
-    normalized === "安装依赖" ||
-    normalized === "检查本地环境" ||
-    normalized === "切换工作目录" ||
-    normalized.startsWith("查找 ")
-  );
-}
-
-function shouldShowToolStepsList(steps: Array<{ label: string; detail: string }>): boolean {
+function shouldShowToolStepsList(
+  steps: Array<{ label: string; detail: string }>,
+  options?: { active?: boolean },
+): boolean {
   if (steps.length === 0) {
     return false;
   }
-  const informative = steps.filter((step) => {
-    const detail = step.detail.trim();
-    if (detail.startsWith("结果：")) {
-      return true;
-    }
-    if (shouldHideAsLowSignalStepLabel(step.label)) {
-      return false;
-    }
-    return detail.length > 0;
-  });
-  // Default to loading; only show steps when there is enough signal.
-  return informative.length >= 2;
+  if (options?.active) {
+    return true;
+  }
+  // Completed tool logs are useful while waiting, but noisy once the answer is visible.
+  // Keep the transcript focused on user intent and assistant output.
+  return false;
 }
 
 function renderChatMessageBubble(msg: unknown, key: string) {
@@ -119,8 +138,7 @@ function renderChatMessageBubble(msg: unknown, key: string) {
     return null;
   }
   const role = messageRole(msg);
-  const rawText = extractText(msg);
-  const text = (typeof rawText === "string" ? rawText : "").trim();
+  const text = extractDisplayText(msg);
   const isUser = role === "user";
   const isAssistant = role === "assistant";
   const displayText = isAssistant ? sanitizeChatDisplayText(text) : text;
@@ -147,8 +165,154 @@ function renderChatMessageBubble(msg: unknown, key: string) {
 
 const MAX_CHAT_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MAX_CHAT_ATTACHMENT_COUNT = 6;
+const MAX_CHAT_WORKSPACE_FILE_BYTES = 100 * 1024 * 1024;
+const MAX_CHAT_WORKSPACE_FILE_COUNT = 8;
+const CHAT_UPLOADS_ROOT = ".chat-uploads";
+const CHAT_WORKSPACE_FILE_ACCEPT = [
+  ".pdf",
+  ".doc",
+  ".docx",
+  ".xls",
+  ".xlsx",
+  ".csv",
+  ".ppt",
+  ".pptx",
+  ".txt",
+  ".md",
+  ".json",
+  ".jsonl",
+  ".html",
+  ".htm",
+  ".xml",
+  ".yaml",
+  ".yml",
+  ".mp3",
+  ".m4a",
+  ".wav",
+  ".mp4",
+  ".mov",
+  ".avi",
+  ".mkv",
+  ".webm",
+].join(",");
+const CHAT_FILE_ACCEPT = `${CHAT_ATTACHMENT_ACCEPT},${CHAT_WORKSPACE_FILE_ACCEPT}`;
 /** 距底部小于此值视为「在底部」，新消息/流式输出会自动跟随 */
 const SCROLL_BOTTOM_THRESHOLD_PX = 80;
+
+type PendingWorkspaceChatFile = {
+  id: string;
+  file: File;
+  name: string;
+  size: number;
+};
+
+function buildChatUploadFolder(sessionKey: string) {
+  const normalized = sessionKey.trim() || `draft-${crypto.randomUUID()}`;
+  const safe = normalized.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+  return `${CHAT_UPLOADS_ROOT}/${safe || `draft-${crypto.randomUUID()}`}`;
+}
+
+const SUPPORTED_WORKSPACE_FILE_EXTENSIONS = new Set(
+  CHAT_WORKSPACE_FILE_ACCEPT.split(",").map((ext) => ext.slice(1)),
+);
+
+const SUPPORTED_WORKSPACE_FILE_MIME_PREFIXES = [
+  "audio/",
+  "video/",
+  "text/",
+  "application/pdf",
+  "application/json",
+  "application/xml",
+  "application/msword",
+  "application/vnd.ms-",
+  "application/vnd.openxmlformats-officedocument",
+  "application/x-yaml",
+  "application/yaml",
+];
+
+function fileExtension(name: string): string {
+  const normalized = name.trim().toLowerCase();
+  const index = normalized.lastIndexOf(".");
+  return index >= 0 ? normalized.slice(index + 1) : "";
+}
+
+function isSupportedWorkspaceChatFile(file: File): boolean {
+  const mimeType = file.type.trim().toLowerCase();
+  if (
+    mimeType &&
+    SUPPORTED_WORKSPACE_FILE_MIME_PREFIXES.some((prefix) => mimeType.startsWith(prefix))
+  ) {
+    return true;
+  }
+  return SUPPORTED_WORKSPACE_FILE_EXTENSIONS.has(fileExtension(file.name));
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function appendUploadedFilesToMessage(
+  text: string,
+  entries: Array<{ name: string; path: string }>,
+) {
+  if (entries.length === 0) {
+    return text;
+  }
+  const body = text.trim();
+  const fileList = entries.map((entry) => `- ${entry.name}: ${entry.path}`).join("\n");
+  const prefix = body || "请阅读以下附件并回答。";
+  return `${prefix}\n\n本轮对话附件：\n${fileList}\n\n请把这些文件作为本轮对话上下文；需要内容时请直接读取对应路径。`;
+}
+
+function formatAttachmentFileSummary(fileNames: string[]) {
+  const names = fileNames.map((name) => name.trim()).filter(Boolean);
+  if (names.length === 0) {
+    return "已上传文件";
+  }
+  if (names.length === 1) {
+    return `已上传文件：${names[0]}`;
+  }
+  const visibleNames = names.slice(0, 3).join("、");
+  return `已上传 ${names.length} 个文件：${visibleNames}${names.length > 3 ? " 等" : ""}`;
+}
+
+function buildVisibleUserMessage(text: string, input: { imageCount: number; fileNames: string[] }) {
+  const body = text.trim();
+  const fileCount = input.fileNames.length;
+  if (body) {
+    return fileCount > 0 ? `${body}\n\n附件：${input.fileNames.join("、")}` : body;
+  }
+  if (input.imageCount > 0 && fileCount > 0) {
+    return `已上传图片和文件：${input.fileNames.join("、")}`;
+  }
+  if (input.imageCount > 0) {
+    return "已上传图片";
+  }
+  if (fileCount > 0) {
+    return formatAttachmentFileSummary(input.fileNames);
+  }
+  return "";
+}
+
+function formatElapsedDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
+}
 
 function mediaPathBasename(rawPath: string): string {
   const normalized = rawPath.replaceAll("\\", "/").trim();
@@ -208,6 +372,35 @@ function fileToChatAttachment(file: File): Promise<ChatAttachment | null> {
     reader.addEventListener("error", () => resolve(null));
     reader.readAsDataURL(file);
   });
+}
+
+type AgentWorkbenchEventPayload = Extract<WorkbenchAdapterEvent, { type: "agent" }>["payload"];
+
+function toolEventMayChangeWorkspaceFiles(payload: AgentWorkbenchEventPayload): boolean {
+  if (payload.stream !== "tool") {
+    return false;
+  }
+  const data = payload.data ?? {};
+  const phase = typeof data.phase === "string" ? data.phase : "";
+  if (phase && phase !== "start" && phase !== "result") {
+    return false;
+  }
+  const name = typeof data.name === "string" ? data.name.toLowerCase() : "";
+  if (/(write|edit|patch|create|delete|upload|apply_patch|fs)/i.test(name)) {
+    return true;
+  }
+  const args = data.args;
+  if (!args || typeof args !== "object") {
+    return false;
+  }
+  const record = args as Record<string, unknown>;
+  const command = typeof record.command === "string" ? record.command : "";
+  if (/[>]|tee\s+|touch\s+|mkdir\s+|rm\s+|mv\s+|cp\s+|apply_patch/.test(command)) {
+    return true;
+  }
+  return ["path", "filePath", "filename", "target"].some(
+    (key) => typeof record[key] === "string" && record[key].trim().length > 0,
+  );
 }
 
 function TypingDots({ className }: { className?: string }) {
@@ -281,9 +474,16 @@ export function ChatPage() {
     let changed = false;
 
     if (rawSession) {
-      const agentId = parseAgentSessionKey(rawSession)?.agentId ?? pid ?? null;
-      void selectSession(rawSession, agentId);
+      const hasProjectParam = Boolean(pid);
+      const skipSessionProject = isPowerQuickSessionKey(rawSession);
+      const agentId = isPowerQuickSessionKey(rawSession)
+        ? null
+        : (parseAgentSessionKey(rawSession)?.agentId ?? pid ?? null);
+      void selectSession(rawSession, hasProjectParam ? agentId : null, {
+        skipSessionProject,
+      });
       next.delete("sessionKey");
+      next.delete("projectId");
       changed = true;
     } else if (pid) {
       setActiveAgent(pid);
@@ -336,6 +536,9 @@ export function ChatPage() {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
+  const [pendingWorkspaceFiles, setPendingWorkspaceFiles] = useState<PendingWorkspaceChatFile[]>(
+    [],
+  );
   const [optimisticUserBubble, setOptimisticUserBubble] = useState<{
     text: string;
     attachmentCount: number;
@@ -358,24 +561,18 @@ export function ChatPage() {
   } = useWorkspaceRail();
 
   const workspaceAgentId = useMemo(() => {
-    const list = snapshot?.agentsList?.agents ?? [];
-    const def = snapshot?.agentsList?.defaultId ?? list[0]?.id ?? null;
-    const cur = snapshot?.currentProjectId?.trim() ?? "";
-    const sessionAgentId = selectedSessionKey.trim()
-      ? (parseAgentSessionKey(selectedSessionKey)?.agentId ?? null)
-      : null;
-    return cur || sessionAgentId || def || "";
-  }, [
-    selectedSessionKey,
-    snapshot?.agentsList?.agents,
-    snapshot?.agentsList?.defaultId,
-    snapshot?.currentProjectId,
-  ]);
+    return selectedProjectId?.trim() || snapshot?.currentProjectId?.trim() || "";
+  }, [selectedProjectId, snapshot?.currentProjectId]);
 
-  const workspaceRailEligible = Boolean(workspaceAgentId);
+  const [workspaceRailRevealedByFileChange, setWorkspaceRailRevealedByFileChange] = useState(false);
+  const workspaceRailEligible = Boolean(
+    workspaceAgentId && (workspacePreviewActive || workspaceRailRevealedByFileChange),
+  );
+  const activeFileAccept = CHAT_FILE_ACCEPT;
 
   useEffect(() => {
     setWorkspacePreviewActive(false);
+    setWorkspaceRailRevealedByFileChange(false);
   }, [setWorkspacePreviewActive, workspaceAgentId]);
 
   useEffect(() => {
@@ -383,6 +580,7 @@ export function ChatPage() {
       return undefined;
     }
     let timer: number | null = null;
+    let sawWorkspaceFileMutation = false;
     const scheduleReload = () => {
       if (timer != null) {
         window.clearTimeout(timer);
@@ -395,8 +593,13 @@ export function ChatPage() {
     const unsubscribe = adapter.subscribe((event: WorkbenchAdapterEvent) => {
       if (event.type === "chat") {
         const agentId = parseAgentSessionKey(event.sessionKey)?.agentId ?? "";
-        if (agentId === workspaceAgentId && (event.state === "final" || event.state === "error")) {
+        if (agentId === workspaceAgentId && event.state === "final" && sawWorkspaceFileMutation) {
+          setWorkspaceRailRevealedByFileChange(true);
           scheduleReload();
+          sawWorkspaceFileMutation = false;
+        }
+        if (event.state === "error" || event.state === "aborted") {
+          sawWorkspaceFileMutation = false;
         }
         return;
       }
@@ -405,7 +608,8 @@ export function ChatPage() {
           typeof event.payload.sessionKey === "string" ? event.payload.sessionKey : "";
         const agentId = parseAgentSessionKey(sessionKey)?.agentId ?? "";
         if (agentId === workspaceAgentId) {
-          scheduleReload();
+          sawWorkspaceFileMutation =
+            sawWorkspaceFileMutation || toolEventMayChangeWorkspaceFiles(event.payload);
         }
       }
     });
@@ -434,9 +638,12 @@ export function ChatPage() {
   }, [effectiveModelRef, snapshot?.modelCatalog]);
 
   const chatToolSteps = activeRuntime?.displayToolSteps ?? [];
+  const runActive = Boolean(activeRuntime?.chatRunId);
+  const [activityNowMs, setActivityNowMs] = useState(() => Date.now());
   const visibleToolSteps = useMemo(
-    () => (shouldShowToolStepsList(chatToolSteps) ? chatToolSteps : []),
-    [chatToolSteps],
+    () =>
+      shouldShowToolStepsList(chatToolSteps, { active: runActive || sending }) ? chatToolSteps : [],
+    [chatToolSteps, runActive, sending],
   );
   const pinToolStepsBeforeAssistant = visibleToolSteps.length > 0;
   const { leadMessages, tailAssistantMessages } = useMemo(
@@ -472,8 +679,11 @@ export function ChatPage() {
   const showLiveStream =
     Boolean(liveStreamText.trim()) && liveStreamText.trim() !== tailAssistantText;
   const showStream = showLiveStream;
-  const runActive = Boolean(activeRuntime?.chatRunId);
   const busy = sending || runActive || Boolean(activeRuntime?.chatSending) || showStream;
+  const activityStartedAt =
+    activeRuntime?.chatStreamStartedAt ?? optimisticUserBubble?.ts ?? (busy ? activityNowMs : null);
+  const elapsedLabel =
+    busy && activityStartedAt ? formatElapsedDuration(activityNowMs - activityStartedAt) : null;
   /** 已发起请求但尚未收到可见文本（首 token 等待） */
   const awaitingFirstToken = runActive && !showLiveStream && !activeRuntime?.lastError;
   const showAssistantOutput = awaitingFirstToken || showStream;
@@ -491,15 +701,31 @@ export function ChatPage() {
     if (!runActive && !sending) {
       return null;
     }
+    const suffix = elapsedLabel ? ` · 已用 ${elapsedLabel}` : "";
     if (visibleToolSteps.some((step) => !step.complete)) {
-      return "正在执行任务…";
+      return `正在执行任务…${suffix}`;
     }
-    if (runActive || sending) {
-      return null;
+    if (awaitingFirstToken) {
+      return `正在等待回复…${suffix}`;
     }
-    return "发送中…";
-  }, [visibleToolSteps, runActive, sending, showStream, awaitingFirstToken]);
+    if (showStream) {
+      return `正在生成回复…${suffix}`;
+    }
+    if (runActive) {
+      return `正在整理结果…${suffix}`;
+    }
+    return `发送中…${suffix}`;
+  }, [visibleToolSteps, runActive, sending, showStream, awaitingFirstToken, elapsedLabel]);
   const errorText = snapshotError ?? activeRuntime?.lastError ?? null;
+  useEffect(() => {
+    if (!busy) {
+      setActivityNowMs(Date.now());
+      return undefined;
+    }
+    setActivityNowMs(Date.now());
+    const timer = window.setInterval(() => setActivityNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [busy, selectedSessionKey, activeRuntime?.chatRunId, activeRuntime?.chatStreamStartedAt]);
   useEffect(() => {
     if (!optimisticUserBubble) {
       return;
@@ -512,7 +738,7 @@ export function ChatPage() {
       if (role !== "user") {
         return false;
       }
-      const txt = (extractText(m) ?? "").trim();
+      const txt = extractDisplayText(m);
       return txt === optimisticUserBubble.text.trim();
     });
     if (hasCommittedUser || (!sending && !busy)) {
@@ -525,7 +751,8 @@ export function ChatPage() {
       return "";
     }
     const row = snapshot?.sessionsResult?.sessions?.find((s) => s.key === selectedSessionKey);
-    return (row?.label ?? "").trim() || selectedSessionKey;
+    const label = sanitizeUserChatDisplayText((row?.label ?? "").trim());
+    return label || selectedSessionKey;
   }, [selectedSessionKey, snapshot?.sessionsResult?.sessions]);
 
   const followBottomRef = useRef(true);
@@ -658,15 +885,30 @@ export function ChatPage() {
       }
       const list = Array.from(files);
       const picked: ChatAttachment[] = [];
+      const workspacePicked: PendingWorkspaceChatFile[] = [];
       let unsupported = 0;
-      let oversized = 0;
+      let oversizedImages = 0;
+      let oversizedFiles = 0;
       for (const file of list) {
         if (!isSupportedChatAttachmentMimeType(file.type)) {
-          unsupported += 1;
+          if (!isSupportedWorkspaceChatFile(file)) {
+            unsupported += 1;
+            continue;
+          }
+          if (file.size > MAX_CHAT_WORKSPACE_FILE_BYTES) {
+            oversizedFiles += 1;
+            continue;
+          }
+          workspacePicked.push({
+            id: crypto.randomUUID(),
+            file,
+            name: file.name || "attachment",
+            size: file.size,
+          });
           continue;
         }
         if (file.size > MAX_CHAT_ATTACHMENT_BYTES) {
-          oversized += 1;
+          oversizedImages += 1;
           continue;
         }
         const att = await fileToChatAttachment(file);
@@ -674,30 +916,53 @@ export function ChatPage() {
           picked.push(att);
         }
       }
-      if (!picked.length) {
-        if (unsupported > 0 || oversized > 0) {
+      if (!picked.length && workspacePicked.length === 0) {
+        if (unsupported > 0 || oversizedImages > 0 || oversizedFiles > 0) {
           message.warning(
-            unsupported > 0 ? "对话附件目前仅支持图片文件。" : "图片附件不能超过 8 MB。",
+            unsupported > 0
+              ? "当前支持图片、文档、表格、演示、文本、音频和视频文件。"
+              : oversizedImages > 0
+                ? "图片附件不能超过 8 MB。"
+                : "工作区文件不能超过 100 MB。",
           );
         }
         return;
       }
-      setPendingAttachments((prev) => {
-        const room = MAX_CHAT_ATTACHMENT_COUNT - prev.length;
-        if (room <= 0) {
-          message.warning(`最多只能附带 ${MAX_CHAT_ATTACHMENT_COUNT} 张图片。`);
-          return prev;
-        }
-        if (picked.length > room) {
-          message.warning(`最多只能附带 ${MAX_CHAT_ATTACHMENT_COUNT} 张图片，已自动截取。`);
-        }
-        return [...prev, ...picked.slice(0, room)];
-      });
-      if (unsupported > 0 || oversized > 0) {
+      if (picked.length > 0) {
+        setPendingAttachments((prev) => {
+          const room = MAX_CHAT_ATTACHMENT_COUNT - prev.length;
+          if (room <= 0) {
+            message.warning(`最多只能附带 ${MAX_CHAT_ATTACHMENT_COUNT} 张图片。`);
+            return prev;
+          }
+          if (picked.length > room) {
+            message.warning(`最多只能附带 ${MAX_CHAT_ATTACHMENT_COUNT} 张图片，已自动截取。`);
+          }
+          return [...prev, ...picked.slice(0, room)];
+        });
+      }
+      if (workspacePicked.length > 0) {
+        setPendingWorkspaceFiles((prev) => {
+          const room = MAX_CHAT_WORKSPACE_FILE_COUNT - prev.length;
+          if (room <= 0) {
+            message.warning(`最多只能附带 ${MAX_CHAT_WORKSPACE_FILE_COUNT} 个工作区文件。`);
+            return prev;
+          }
+          if (workspacePicked.length > room) {
+            message.warning(
+              `最多只能附带 ${MAX_CHAT_WORKSPACE_FILE_COUNT} 个工作区文件，已自动截取。`,
+            );
+          }
+          return [...prev, ...workspacePicked.slice(0, room)];
+        });
+      }
+      if (unsupported > 0 || oversizedImages > 0 || oversizedFiles > 0) {
         message.warning(
           unsupported > 0
-            ? "已跳过非图片文件；对话附件目前仅支持图片。"
-            : "已跳过超过 8 MB 的图片。",
+            ? "已跳过暂不支持的文件格式。"
+            : oversizedImages > 0
+              ? "已跳过超过 8 MB 的图片。"
+              : "已跳过超过 100 MB 的工作区文件。",
         );
       }
     },
@@ -709,23 +974,54 @@ export function ChatPage() {
     e.target.value = "";
   };
 
-  const canSend = Boolean(draft.trim()) || pendingAttachments.length > 0;
+  const onComposerPaste = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const files = Array.from(e.clipboardData?.files ?? []);
+      const itemFiles = Array.from(e.clipboardData?.items ?? [])
+        .filter((item) => item.kind === "file")
+        .map((item) => item.getAsFile())
+        .filter((file): file is File => Boolean(file));
+      const uniqueFiles = [...files, ...itemFiles].filter(
+        (file, index, all) =>
+          all.findIndex(
+            (candidate) =>
+              candidate.name === file.name &&
+              candidate.size === file.size &&
+              candidate.type === file.type,
+          ) === index,
+      );
+      if (uniqueFiles.length === 0) {
+        return;
+      }
+      e.preventDefault();
+      void addFilesFromList(uniqueFiles);
+    },
+    [addFilesFromList],
+  );
+
+  const canSend =
+    Boolean(draft.trim()) || pendingAttachments.length > 0 || pendingWorkspaceFiles.length > 0;
 
   const handleSend = async () => {
     if (!canSend || sending) {
       return;
     }
     const outgoingDraft = draft;
-    const outgoingText = draft.trim();
     const outgoingAttachments = pendingAttachments;
+    const outgoingWorkspaceFiles = pendingWorkspaceFiles;
+    const displayText = buildVisibleUserMessage(outgoingDraft, {
+      imageCount: outgoingAttachments.length,
+      fileNames: outgoingWorkspaceFiles.map((file) => file.name),
+    });
     setSending(true);
     setOptimisticUserBubble({
-      text: outgoingText,
-      attachmentCount: outgoingAttachments.length,
+      text: displayText,
+      attachmentCount: outgoingAttachments.length + outgoingWorkspaceFiles.length,
       ts: Date.now(),
     });
     setDraft("");
     setPendingAttachments([]);
+    setPendingWorkspaceFiles([]);
     requestAnimationFrame(() => {
       resetComposerHeight();
       textareaRef.current?.focus();
@@ -733,14 +1029,48 @@ export function ChatPage() {
       scrollViewportToBottom("smooth");
     });
     try {
+      const uploadAgentId =
+        workspaceAgentId ||
+        (selectedSessionKey.trim()
+          ? (parseAgentSessionKey(selectedSessionKey)?.agentId ?? "")
+          : "") ||
+        defaultAgentId ||
+        agents[0]?.id ||
+        "";
+      let messageText = outgoingDraft;
+      if (outgoingWorkspaceFiles.length > 0) {
+        if (!adapter || !uploadAgentId) {
+          throw new Error("请先选择或配置项目后再上传文件。");
+        }
+        const chatUploadPath = buildChatUploadFolder(selectedSessionKey);
+        const chatUploadFolderName = chatUploadPath.slice(`${CHAT_UPLOADS_ROOT}/`.length);
+        await adapter.createProjectFolder(uploadAgentId, null, CHAT_UPLOADS_ROOT).catch(() => {});
+        await adapter
+          .createProjectFolder(uploadAgentId, CHAT_UPLOADS_ROOT, chatUploadFolderName)
+          .catch(() => {});
+        const uploaded = await adapter.uploadProjectFiles(
+          uploadAgentId,
+          chatUploadPath,
+          outgoingWorkspaceFiles.map(
+            (entry): WorkbenchUploadedFile => ({
+              name: entry.name,
+              file: entry.file,
+            }),
+          ),
+        );
+        messageText = appendUploadedFilesToMessage(messageText, uploaded);
+        setWorkspaceFilesReloadToken((n) => n + 1);
+      }
       const sent = await sendUserMessage(
-        outgoingDraft,
+        messageText,
         outgoingAttachments.length > 0 ? outgoingAttachments : undefined,
+        { displayText },
       );
       if (!sent) {
         message.warning("网关或项目还没准备好，请稍后再试。");
         setDraft(outgoingDraft);
         setPendingAttachments(outgoingAttachments);
+        setPendingWorkspaceFiles(outgoingWorkspaceFiles);
         setOptimisticUserBubble(null);
         return;
       }
@@ -754,6 +1084,7 @@ export function ChatPage() {
       message.error(err instanceof Error ? err.message : "发送失败，请稍后再试。");
       setDraft(outgoingDraft);
       setPendingAttachments(outgoingAttachments);
+      setPendingWorkspaceFiles(outgoingWorkspaceFiles);
       setOptimisticUserBubble(null);
     } finally {
       setSending(false);
@@ -868,10 +1199,11 @@ export function ChatPage() {
                       >
                         {awaitingFirstToken && visibleToolSteps.length === 0 ? (
                           <div
-                            className="flex items-center py-1"
+                            className="flex items-center gap-2 py-1"
                             aria-live="polite"
                             aria-busy="true"
                           >
+                            <span className="text-sm text-slate-600">正在等待回复</span>
                             <TypingDots />
                           </div>
                         ) : null}
@@ -918,7 +1250,7 @@ export function ChatPage() {
                 ref={fileInputRef}
                 type="file"
                 className="sr-only"
-                accept={CHAT_ATTACHMENT_ACCEPT}
+                accept={activeFileAccept}
                 multiple
                 aria-hidden
                 tabIndex={-1}
@@ -961,6 +1293,41 @@ export function ChatPage() {
                     ))}
                   </div>
                 ) : null}
+                {pendingWorkspaceFiles.length > 0 ? (
+                  <div className="mb-2 flex flex-wrap gap-2">
+                    {pendingWorkspaceFiles.map((file) => (
+                      <div
+                        key={file.id}
+                        className="group flex max-w-[220px] items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs text-slate-700 shadow-sm"
+                        title={`${file.name} · ${formatBytes(file.size)}`}
+                      >
+                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-white text-[11px] font-semibold uppercase text-slate-500 ring-1 ring-slate-200">
+                          {fileExtension(file.name).slice(0, 4) || "file"}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-medium text-slate-800">
+                            {file.name}
+                          </span>
+                          <span className="block truncate text-[11px] text-slate-500">
+                            {formatBytes(file.size)} · 发送前作为对话附件上传
+                          </span>
+                        </span>
+                        <button
+                          type="button"
+                          aria-label={`移除 ${file.name}`}
+                          className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-slate-400 transition hover:bg-slate-200/70 hover:text-slate-800"
+                          onClick={() =>
+                            setPendingWorkspaceFiles((prev) =>
+                              prev.filter((entry) => entry.id !== file.id),
+                            )
+                          }
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
                 <div
                   className={cn(
                     "power-surface flex items-end gap-2 rounded-[26px] border px-2.5 py-2 transition-[box-shadow,border-color,transform] sm:gap-2.5 sm:px-3 sm:py-2.5",
@@ -978,9 +1345,12 @@ export function ChatPage() {
                 >
                   <button
                     type="button"
-                    title={`仅随本条消息发送（${CHAT_ATTACHMENT_ACCEPT}，最多 ${MAX_CHAT_ATTACHMENT_COUNT} 张）；不会写入工作区文件`}
+                    title={`支持图片直发；文档、表格、演示、文本、音频、视频会作为本次对话附件上传到隐藏目录，不显示在右侧最近修改。图片最多 ${MAX_CHAT_ATTACHMENT_COUNT} 张，其他文件最多 ${MAX_CHAT_WORKSPACE_FILE_COUNT} 个。`}
                     disabled={
-                      pendingAttachments.length >= MAX_CHAT_ATTACHMENT_COUNT || sending || busy
+                      (pendingAttachments.length >= MAX_CHAT_ATTACHMENT_COUNT &&
+                        pendingWorkspaceFiles.length >= MAX_CHAT_WORKSPACE_FILE_COUNT) ||
+                      sending ||
+                      busy
                     }
                     onClick={() => fileInputRef.current?.click()}
                     className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300/60 focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-35"
@@ -1004,6 +1374,7 @@ export function ChatPage() {
                       t.style.height = "auto";
                       t.style.height = `${Math.min(t.scrollHeight, 200)}px`;
                     }}
+                    onPaste={onComposerPaste}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();

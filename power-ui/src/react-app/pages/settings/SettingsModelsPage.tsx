@@ -1,11 +1,13 @@
 import { Alert } from "antd";
 import { PageHeader } from "../../components/ui/PageHeader";
+import { useWorkbenchChat } from "../../context/WorkbenchChatContext";
 import { useGatewayWorkbenchAdapter } from "../../hooks/useGatewayWorkbenchAdapter";
 import { usePowerUiSettings } from "../../hooks/usePowerUiSettings";
 import { SettingsModelsPanel } from "./SettingsModelsPanel";
 
 export function SettingsModelsPage() {
   const { settings } = usePowerUiSettings();
+  const { refreshSnapshot } = useWorkbenchChat();
   const adapter = useGatewayWorkbenchAdapter(settings);
   const canUseGateway = Boolean(settings.gatewayUrl.trim());
 
@@ -19,7 +21,11 @@ export function SettingsModelsPage() {
       {!canUseGateway ? (
         <Alert type="warning" showIcon message="请先填写并保存 Gateway 地址" />
       ) : (
-        <SettingsModelsPanel adapter={adapter} canUseGateway={canUseGateway} />
+        <SettingsModelsPanel
+          adapter={adapter}
+          canUseGateway={canUseGateway}
+          onSaved={() => void refreshSnapshot(undefined, { reloadChatHistory: false })}
+        />
       )}
     </div>
   );

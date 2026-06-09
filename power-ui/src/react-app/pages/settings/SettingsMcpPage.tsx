@@ -5,7 +5,20 @@ import {
   PlusOutlined,
   SaveOutlined,
 } from "@ant-design/icons";
-import { Alert, App, Button, Card, Form, Input, Select, Space, Spin, Table } from "antd";
+import {
+  Alert,
+  App,
+  Button,
+  Card,
+  Form,
+  Input,
+  Select,
+  Space,
+  Spin,
+  Switch,
+  Table,
+  Tag,
+} from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
@@ -24,6 +37,7 @@ type McpServerRow = {
 type McpDraft = {
   originalKey: string | null;
   key: string;
+  enabled: boolean;
   type: "stdio" | "http";
   url: string;
   command: string;
@@ -32,6 +46,20 @@ type McpDraft = {
   headersJson: string;
   extraJson: string;
 };
+
+function rowsFromServers(servers: Record<string, unknown>): McpServerRow[] {
+  return Object.entries(servers).map(([key, value]) => ({
+    key,
+    summary:
+      value && typeof value === "object" && !Array.isArray(value)
+        ? mcpServerSummary(value as Record<string, unknown>)
+        : "—",
+    config:
+      value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {},
+  }));
+}
 
 function mcpServerSummary(cfg: Record<string, unknown>): string {
   const t = typeof cfg.type === "string" ? cfg.type : "";
@@ -44,6 +72,10 @@ function mcpServerSummary(cfg: Record<string, unknown>): string {
   return t || "—";
 }
 
+function isMcpServerEnabled(cfg: Record<string, unknown>): boolean {
+  return cfg.enabled !== false && cfg.disabled !== true;
+}
+
 function prettyJson(value: unknown, fallback: unknown): string {
   return JSON.stringify(value ?? fallback, null, 2);
 }
@@ -52,6 +84,7 @@ function emptyDraft(): McpDraft {
   return {
     originalKey: null,
     key: "",
+    enabled: true,
     type: "stdio",
     url: "",
     command: "",
@@ -65,11 +98,14 @@ function emptyDraft(): McpDraft {
 function draftFromRow(row: McpServerRow): McpDraft {
   const cfg = row.config;
   const type = cfg.type === "http" || typeof cfg.url === "string" ? "http" : "stdio";
-  const { type: _type, url, command, args, env, headers, ...extra } = cfg;
+  const { type: _type, enabled, disabled, url, command, args, env, headers, ...extra } = cfg;
   void _type;
+  void enabled;
+  void disabled;
   return {
     originalKey: row.key,
     key: row.key,
+    enabled: isMcpServerEnabled(cfg),
     type,
     url: typeof url === "string" ? url : "",
     command: typeof command === "string" ? command : "",
@@ -95,6 +131,72 @@ function parseJsonField(text: string, fallback: unknown, label: string): unknown
   }
 }
 
+function extractMcpProbeText(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.startsWith("event:") || trimmed.includes("\ndata:")) {
+    return (
+      trimmed
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice("data:".length).trim())
+        .find(Boolean) ?? trimmed
+    );
+  }
+  return trimmed;
+}
+
+async function probeHttpMcpServer(config: Record<string, unknown>): Promise<void> {
+  const url = typeof config.url === "string" ? config.url.trim() : "";
+  if (!url) {
+    throw new Error("HTTP MCP 缺少 URL");
+  }
+  const headers =
+    config.headers && typeof config.headers === "object" && !Array.isArray(config.headers)
+      ? (config.headers as Record<string, unknown>)
+      : {};
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Accept: "application/json, text/event-stream",
+      "Content-Type": "application/json",
+      ...Object.fromEntries(
+        Object.entries(headers).filter((entry): entry is [string, string] => {
+          const [key, value] = entry;
+          return key.trim().length > 0 && typeof value === "string";
+        }),
+      ),
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-03-26",
+        capabilities: {},
+        clientInfo: { name: "OpenClaw Power UI", version: "dev" },
+      },
+    }),
+  });
+  const text = extractMcpProbeText(await response.text().catch(() => ""));
+  if (!response.ok) {
+    throw new Error(text || `HTTP ${response.status}`);
+  }
+  if (!text || (!text.includes("jsonrpc") && !text.includes("protocolVersion"))) {
+    throw new Error("接口可访问，但响应不像 MCP initialize 结果");
+  }
+}
+
+function isGatewayRestartCloseError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("service restart") ||
+    normalized.includes("gateway closed (1012)") ||
+    normalized.includes("gateway not connected")
+  );
+}
+
 function buildServerConfig(draft: McpDraft): Record<string, unknown> {
   const extra = parseJsonField(draft.extraJson, {}, "高级字段");
   if (!extra || typeof extra !== "object" || Array.isArray(extra)) {
@@ -102,6 +204,13 @@ function buildServerConfig(draft: McpDraft): Record<string, unknown> {
   }
 
   const next: Record<string, unknown> = { ...(extra as Record<string, unknown>), type: draft.type };
+  if (draft.enabled) {
+    delete next.enabled;
+    delete next.disabled;
+  } else {
+    next.enabled = false;
+    delete next.disabled;
+  }
   if (draft.type === "http") {
     if (!draft.url.trim()) {
       throw new Error("请填写 URL");
@@ -157,14 +266,15 @@ export function SettingsMcpPage() {
   const [mcpRows, setMcpRows] = useState<McpServerRow[]>([]);
   const [mcpLoading, setMcpLoading] = useState(false);
   const [mcpSaving, setMcpSaving] = useState(false);
+  const [mcpTesting, setMcpTesting] = useState(false);
   const [mcpError, setMcpError] = useState<string | null>(null);
   const [editorVisible, setEditorVisible] = useState(false);
   const [draft, setDraft] = useState<McpDraft>(() => emptyDraft());
 
-  const loadMcp = useCallback(async () => {
+  const loadMcp = useCallback(async (): Promise<boolean> => {
     if (!adapter || !canUseGateway) {
       setMcpRows([]);
-      return;
+      return false;
     }
     setMcpLoading(true);
     setMcpError(null);
@@ -183,18 +293,15 @@ export function SettingsMcpPage() {
         !Array.isArray(mcp.servers)
           ? (mcp.servers as Record<string, Record<string, unknown>>)
           : null;
-      setMcpRows(
-        servers
-          ? Object.entries(servers).map(([key, value]) => ({
-              key,
-              summary: value && typeof value === "object" ? mcpServerSummary(value) : "—",
-              config: value && typeof value === "object" ? value : {},
-            }))
-          : [],
-      );
+      setMcpRows(servers ? rowsFromServers(servers) : []);
+      return true;
     } catch (e) {
+      if (isGatewayRestartCloseError(e)) {
+        setMcpError(null);
+        return false;
+      }
       setMcpError(e instanceof Error ? e.message : String(e));
-      setMcpRows([]);
+      return false;
     } finally {
       setMcpLoading(false);
     }
@@ -207,6 +314,7 @@ export function SettingsMcpPage() {
       }
       setMcpSaving(true);
       setMcpError(null);
+      let optimisticServers: Record<string, unknown> | null = null;
       try {
         const snap = await adapter.request<{
           hash?: string | null;
@@ -226,15 +334,32 @@ export function SettingsMcpPage() {
             ? { ...(mcp.servers as Record<string, unknown>) }
             : {};
         mutate(servers);
+        optimisticServers = servers;
         mcp.servers = servers;
         next.mcp = mcp;
         await adapter.request("config.set", {
           raw: serializeConfigForm(next),
           baseHash,
         });
-        await loadMcp();
+        const refreshed = await loadMcp();
+        if (!refreshed) {
+          setMcpRows(rowsFromServers(servers));
+          window.setTimeout(() => {
+            void loadMcp();
+          }, 1200);
+        }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
+        if (isGatewayRestartCloseError(e)) {
+          setMcpError(null);
+          if (optimisticServers) {
+            setMcpRows(rowsFromServers(optimisticServers));
+          }
+          window.setTimeout(() => {
+            void loadMcp();
+          }, 1200);
+          return;
+        }
         setMcpError(msg);
         throw e;
       } finally {
@@ -280,7 +405,34 @@ export function SettingsMcpPage() {
       setDraft(emptyDraft());
       message.success("MCP 配置已保存");
     } catch (e) {
-      message.error(e instanceof Error ? e.message : "保存失败");
+      if (isGatewayRestartCloseError(e)) {
+        message.success("MCP 配置已保存，等待网关重连后刷新");
+        window.setTimeout(() => {
+          void loadMcp();
+        }, 1200);
+      } else {
+        message.error(e instanceof Error ? e.message : "保存失败");
+      }
+    }
+  };
+
+  const testDraft = async () => {
+    setMcpTesting(true);
+    setMcpError(null);
+    try {
+      const server = buildServerConfig(draft);
+      if (server.type !== "http") {
+        message.info("stdio MCP 需要保存后由运行时启动验证。");
+        return;
+      }
+      await probeHttpMcpServer(server);
+      message.success("MCP 接口可用");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setMcpError(msg);
+      message.error(`MCP 测试失败：${msg}`);
+    } finally {
+      setMcpTesting(false);
     }
   };
 
@@ -293,14 +445,117 @@ export function SettingsMcpPage() {
         delete servers[row.key];
       });
       message.success("MCP 服务器已删除");
-    } catch {
-      message.error("删除失败");
+    } catch (e) {
+      if (isGatewayRestartCloseError(e)) {
+        message.success("MCP 服务器已删除，等待网关重连后刷新");
+        window.setTimeout(() => {
+          void loadMcp();
+        }, 1200);
+      } else {
+        message.error("删除失败");
+      }
     }
   };
+
+  const setRowEnabled = useCallback(
+    async (row: McpServerRow, enabled: boolean) => {
+      try {
+        await persistMcp((servers) => {
+          const current =
+            row.config && typeof row.config === "object" && !Array.isArray(row.config)
+              ? { ...row.config }
+              : {};
+          if (enabled) {
+            delete current.enabled;
+            delete current.disabled;
+          } else {
+            current.enabled = false;
+            delete current.disabled;
+          }
+          servers[row.key] = current;
+        });
+        message.success(enabled ? "MCP 服务器已启用" : "MCP 服务器已停用");
+      } catch (e) {
+        if (isGatewayRestartCloseError(e)) {
+          message.success(
+            enabled
+              ? "MCP 服务器已启用，等待网关重连后刷新"
+              : "MCP 服务器已停用，等待网关重连后刷新",
+          );
+          window.setTimeout(() => {
+            void loadMcp();
+          }, 1200);
+        } else {
+          message.error("更新 MCP 服务器状态失败");
+        }
+      }
+    },
+    [message, persistMcp],
+  );
+
+  const allMcpEnabled =
+    mcpRows.length > 0 && mcpRows.every((row) => isMcpServerEnabled(row.config));
+
+  const setAllEnabled = useCallback(
+    async (enabled: boolean) => {
+      try {
+        await persistMcp((servers) => {
+          for (const [key, value] of Object.entries(servers)) {
+            const current =
+              value && typeof value === "object" && !Array.isArray(value)
+                ? { ...(value as Record<string, unknown>) }
+                : {};
+            if (enabled) {
+              delete current.enabled;
+              delete current.disabled;
+            } else {
+              current.enabled = false;
+              delete current.disabled;
+            }
+            servers[key] = current;
+          }
+        });
+        message.success(enabled ? "全部 MCP 服务器已启用" : "全部 MCP 服务器已停用");
+      } catch (e) {
+        if (isGatewayRestartCloseError(e)) {
+          message.success(
+            enabled
+              ? "全部 MCP 服务器已启用，等待网关重连后刷新"
+              : "全部 MCP 服务器已停用，等待网关重连后刷新",
+          );
+          window.setTimeout(() => {
+            void loadMcp();
+          }, 1200);
+        } else {
+          message.error("更新 MCP 总开关失败");
+        }
+      }
+    },
+    [message, persistMcp],
+  );
 
   const mcpColumns: ColumnsType<McpServerRow> = useMemo(
     () => [
       { title: "服务器名", dataIndex: "key", key: "key", ellipsis: true },
+      {
+        title: "状态",
+        key: "enabled",
+        width: 120,
+        render: (_, row) => {
+          const enabled = isMcpServerEnabled(row.config);
+          return (
+            <Space size={6}>
+              <Switch
+                size="small"
+                checked={enabled}
+                disabled={mcpSaving}
+                onChange={(checked) => void setRowEnabled(row, checked)}
+              />
+              <Tag color={enabled ? "green" : "default"}>{enabled ? "启用" : "停用"}</Tag>
+            </Space>
+          );
+        },
+      },
       { title: "概要", dataIndex: "summary", key: "summary", ellipsis: true },
       {
         title: "操作",
@@ -324,12 +579,12 @@ export function SettingsMcpPage() {
         ),
       },
     ],
-    [],
+    [mcpSaving, setRowEnabled],
   );
 
   return (
     <div className="space-y-4">
-      <PageHeader compact title="MCP" description="维护全局 mcp.servers；保存后写回网关配置。" />
+      <PageHeader compact title="MCP" description="管理可被对话使用的 MCP 服务器。" />
       {!canUseGateway ? (
         <Alert
           type="warning"
@@ -343,10 +598,19 @@ export function SettingsMcpPage() {
           <div className="min-w-0">
             <span className="block text-sm font-semibold text-slate-900">MCP 服务器</span>
             <span className="block text-xs text-slate-500">
-              列表与编辑都在当前设置页完成，避免多层弹窗。
+              启用表示允许 agent 在对话中使用；实际调用由模型根据对话内容自动完成。
             </span>
           </div>
           <Space size="small" wrap className="shrink-0">
+            <span className="inline-flex h-7 items-center gap-2 rounded-lg border border-slate-200/80 bg-white px-2.5 text-xs font-medium text-slate-600">
+              <span>全部可用于对话</span>
+              <Switch
+                size="small"
+                checked={allMcpEnabled}
+                disabled={!canUseGateway || mcpRows.length === 0 || mcpSaving}
+                onChange={(checked) => void setAllEnabled(checked)}
+              />
+            </span>
             <Button
               size="small"
               icon={<CloudServerOutlined />}
@@ -402,6 +666,15 @@ export function SettingsMcpPage() {
                   </Button>
                   <Button
                     size="small"
+                    icon={<CloudServerOutlined />}
+                    loading={mcpTesting}
+                    disabled={mcpSaving}
+                    onClick={() => void testDraft()}
+                  >
+                    测试连接
+                  </Button>
+                  <Button
+                    size="small"
                     type="primary"
                     icon={<SaveOutlined />}
                     loading={mcpSaving}
@@ -427,6 +700,14 @@ export function SettingsMcpPage() {
                         { value: "stdio", label: "stdio / command" },
                         { value: "http", label: "http / url" },
                       ]}
+                    />
+                  </Form.Item>
+                  <Form.Item label="启用" className="!mb-2">
+                    <Switch
+                      checked={draft.enabled}
+                      checkedChildren="启用"
+                      unCheckedChildren="停用"
+                      onChange={(checked) => setDraft((d) => ({ ...d, enabled: checked }))}
                     />
                   </Form.Item>
                 </div>

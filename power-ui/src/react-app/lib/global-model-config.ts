@@ -8,7 +8,7 @@ import type { WorkbenchModelConfig } from "../../views/workbench";
 export type { WorkbenchModelConfig };
 
 const DEFAULT_PROVIDER_PREFIX = "provider";
-const REDACTED_SENTINEL = "__OPENCLAW_REDACTED__";
+export const REDACTED_SENTINEL = "__OPENCLAW_REDACTED__";
 
 function createLocalId(): string {
   if (
@@ -24,7 +24,7 @@ export function createEmptyModelConfig(): WorkbenchModelConfig {
   return {
     id: createLocalId(),
     provider: "",
-    enabled: true,
+    enabled: false,
     name: "",
     baseUrl: "",
     apiKey: "",
@@ -176,7 +176,7 @@ export function readGlobalModelConfigs(
         name:
           typeof modelConfig?.name === "string" && modelConfig.name.trim()
             ? modelConfig.name.trim()
-            : providerId,
+            : modelId,
         baseUrl,
         apiKey,
         model: modelId,

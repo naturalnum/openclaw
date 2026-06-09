@@ -22,6 +22,7 @@ import {
   listConfiguredModelRefs,
   persistGlobalModelConfig,
   readGlobalModelConfigs,
+  REDACTED_SENTINEL,
   resolvePrimaryModelFromConfig,
   type WorkbenchModelConfig,
 } from "../../lib/global-model-config";
@@ -31,6 +32,7 @@ const { Text } = Typography;
 type Props = {
   adapter: GatewayWorkbenchAdapter | null;
   canUseGateway: boolean;
+  onSaved?: () => void;
 };
 
 function modelSelectLabel(
@@ -50,15 +52,80 @@ function modelSelectLabel(
   );
 }
 
-export function SettingsModelsPanel({ adapter, canUseGateway }: Props) {
+function resolveChatCompletionsUrl(baseUrl: string): string {
+  const normalized = baseUrl.trim().replace(/\/+$/, "");
+  if (!normalized) {
+    throw new Error("请填写 API Base URL");
+  }
+  return normalized.endsWith("/chat/completions") ? normalized : `${normalized}/chat/completions`;
+}
+
+function extractModelTestErrorText(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+  const error = (payload as { error?: unknown }).error;
+  if (typeof error === "string") {
+    return error;
+  }
+  if (error && typeof error === "object") {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) {
+      return message.trim();
+    }
+  }
+  const message = (payload as { message?: unknown }).message;
+  return typeof message === "string" && message.trim() ? message.trim() : null;
+}
+
+async function testTextModelConfig(config: WorkbenchModelConfig): Promise<string> {
+  const model = config.model.trim();
+  if (!model) {
+    throw new Error("请填写模型 ID");
+  }
+  if (config.apiKey.trim() === REDACTED_SENTINEL) {
+    throw new Error("出于安全原因，已保存的 Key 不会显示。请重新输入一次 API Key 后再测试。");
+  }
+  const response = await fetch(resolveChatCompletionsUrl(config.baseUrl), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(config.apiKey.trim() ? { Authorization: `Bearer ${config.apiKey.trim()}` } : {}),
+    },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: "user", content: "Reply with ok." }],
+      max_tokens: 8,
+      temperature: 0,
+      stream: false,
+    }),
+  });
+  const text = await response.text().catch(() => "");
+  let payload: unknown = null;
+  try {
+    payload = text ? (JSON.parse(text) as unknown) : null;
+  } catch {
+    payload = null;
+  }
+  if (!response.ok) {
+    throw new Error(
+      (extractModelTestErrorText(payload) ?? text.trim()) || `HTTP ${response.status}`,
+    );
+  }
+  const content = (payload as { choices?: Array<{ message?: { content?: unknown } }> } | null)
+    ?.choices?.[0]?.message?.content;
+  return typeof content === "string" && content.trim() ? content.trim() : "ok";
+}
+
+export function SettingsModelsPanel({ adapter, canUseGateway, onSaved }: Props) {
   const { message } = App.useApp();
   const [modelConfigs, setModelConfigs] = useState([createEmptyModelConfig()]);
   const [currentModelId, setCurrentModelId] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingModelId, setEditingModelId] = useState<string | null>(null);
-  const [defaultEditorOpen, setDefaultEditorOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!adapter || !canUseGateway) {
@@ -105,46 +172,131 @@ export function SettingsModelsPanel({ adapter, canUseGateway }: Props) {
 
   const addRow = () => {
     const row = createEmptyModelConfig();
-    setModelConfigs((rows) => [...rows, row]);
+    setModelConfigs((rows) =>
+      rows.length === 1 && !rows[0]?.provider.trim() && !rows[0]?.model.trim()
+        ? [row]
+        : [...rows, row],
+    );
     setEditingModelId(row.id);
   };
 
   const removeRow = (id: string) => {
-    setModelConfigs((rows) => {
-      const next = rows.filter((r) => r.id !== id);
-      if (next.length === 0) {
-        return [createEmptyModelConfig()];
-      }
-      const removed = rows.find((r) => r.id === id);
-      if (removed && currentModelId === formatModelRef(removed.provider, removed.model)) {
-        const fb = next.find((r) => r.enabled && r.provider.trim() && r.model.trim());
-        setCurrentModelId(fb ? formatModelRef(fb.provider, fb.model) : "");
-      }
-      return next;
-    });
+    const removed = modelConfigs.find((r) => r.id === id);
+    const filtered = modelConfigs.filter((r) => r.id !== id);
+    const next = filtered.length > 0 ? filtered : [createEmptyModelConfig()];
+    const removedWasDefault =
+      removed && currentModelId === formatModelRef(removed.provider, removed.model);
+    const nextCurrentModelId = removedWasDefault
+      ? (() => {
+          const fb = next.find((r) => r.enabled && r.provider.trim() && r.model.trim());
+          return fb ? formatModelRef(fb.provider, fb.model) : "";
+        })()
+      : currentModelId;
+    setModelConfigs(next);
+    if (removedWasDefault) {
+      setCurrentModelId(nextCurrentModelId);
+    }
     setEditingModelId((cur) => (cur === id ? null : cur));
+    void save({
+      modelConfigs: next,
+      currentModelId: nextCurrentModelId,
+      successMessage: "模型配置已删除",
+    });
   };
 
-  const save = async () => {
+  const save = async (overrides?: {
+    modelConfigs?: WorkbenchModelConfig[];
+    currentModelId?: string;
+    closeEditor?: boolean;
+    successMessage?: string;
+  }) => {
     if (!adapter) {
       return;
     }
+    const nextModelConfigs = overrides?.modelConfigs ?? modelConfigs;
+    const nextCurrentModelId = overrides?.currentModelId ?? currentModelId;
     setSaving(true);
     setError(null);
     try {
       await persistGlobalModelConfig({
         adapter,
-        modelConfigs,
-        currentModelId,
+        modelConfigs: nextModelConfigs,
+        currentModelId: nextCurrentModelId,
       });
-      message.success("模型配置已保存到网关");
+      message.success(overrides?.successMessage ?? "模型配置已保存到网关");
+      if (overrides?.modelConfigs) {
+        setModelConfigs(overrides.modelConfigs);
+      }
+      if (overrides?.currentModelId !== undefined) {
+        setCurrentModelId(overrides.currentModelId);
+      }
+      if (overrides?.closeEditor) {
+        setEditingModelId(null);
+      }
       await load();
+      onSaved?.();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setError(msg);
       message.error("保存失败");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const saveDefaultModel = (ref: string) => {
+    setCurrentModelId(ref);
+    void save({ currentModelId: ref, successMessage: "默认模型已保存" });
+  };
+
+  const toggleModelEnabled = (id: string, enabled: boolean) => {
+    const next = modelConfigs.map((row) => (row.id === id ? { ...row, enabled } : row));
+    const currentStillEnabled = next.some(
+      (row) => row.enabled && formatModelRef(row.provider, row.model) === currentModelId,
+    );
+    const fallback = next.find((row) => row.enabled && row.provider.trim() && row.model.trim());
+    const nextCurrentModelId = currentStillEnabled
+      ? currentModelId
+      : fallback
+        ? formatModelRef(fallback.provider, fallback.model)
+        : "";
+    setModelConfigs(next);
+    setCurrentModelId(nextCurrentModelId);
+    void save({
+      modelConfigs: next,
+      currentModelId: nextCurrentModelId,
+      successMessage: enabled ? "模型配置已启用" : "模型配置已停用",
+    });
+  };
+
+  const saveEditingModel = () => {
+    if (!editingModel) {
+      return;
+    }
+    const ref = formatModelRef(editingModel.provider, editingModel.model);
+    const nextCurrentModelId = currentModelId.trim() || ref;
+    void save({
+      currentModelId: nextCurrentModelId,
+      closeEditor: true,
+      successMessage: "模型配置已保存",
+    });
+  };
+
+  const testEditingModel = async () => {
+    if (!editingModel) {
+      return;
+    }
+    setTesting(true);
+    setError(null);
+    try {
+      const content = await testTextModelConfig(editingModel);
+      message.success(`文本测试通过：${content}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
+      message.error(`文本测试失败：${msg}`);
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -163,100 +315,90 @@ export function SettingsModelsPanel({ adapter, canUseGateway }: Props) {
         className={`${cardSurface} overflow-hidden rounded-xl`}
         styles={{ body: { padding: "16px 20px" } }}
       >
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(16rem,24rem)] md:items-center">
           <div className="min-w-0 space-y-1">
             <Text className="text-sm font-semibold text-slate-900">默认主模型</Text>
             <Text type="secondary" className="block truncate text-xs">
-              {currentModelId
-                ? modelSelectLabel(currentModelId, modelConfigs, labelPool)
-                : "未选择默认模型"}
+              选择后立即保存，并同步到聊天窗口模型列表。
             </Text>
           </div>
-          <div className="flex shrink-0 flex-wrap gap-2">
-            <Button onClick={() => setDefaultEditorOpen((v) => !v)}>
-              {defaultEditorOpen ? "收起" : "设置默认模型"}
-            </Button>
-            <Button
-              type="primary"
-              icon={<SaveOutlined />}
-              loading={saving}
-              onClick={() => void save()}
-            >
-              保存
-            </Button>
-          </div>
+          <Select
+            className="[&_.ant-select-selector]:!rounded-xl"
+            classNames={{ popup: { root: "power-model-select-dropdown" } }}
+            placeholder="选择默认模型"
+            value={currentModelId || undefined}
+            onChange={(v) => saveDefaultModel(v ?? "")}
+            options={configuredRefs.map((ref) => ({
+              label: modelSelectLabel(ref, modelConfigs, labelPool),
+              value: ref,
+            }))}
+            loading={saving}
+            allowClear
+          />
         </div>
-        {defaultEditorOpen ? (
-          <div className="mt-4 border-t border-slate-100 pt-4">
-            <Form layout="vertical" size="small">
-              <Form.Item label="默认主模型" className="!mb-0">
-                <Select
-                  className="[&_.ant-select-selector]:!rounded-xl"
-                  size="large"
-                  popupClassName="power-model-select-dropdown"
-                  placeholder="选择默认模型"
-                  value={currentModelId || undefined}
-                  onChange={(v) => setCurrentModelId(v)}
-                  options={configuredRefs.map((ref) => ({
-                    label: modelSelectLabel(ref, modelConfigs, labelPool),
-                    value: ref,
-                  }))}
-                  allowClear
-                />
-              </Form.Item>
-            </Form>
-          </div>
-        ) : null}
       </Card>
 
       <Spin spinning={loading}>
         <Space direction="vertical" size="small" className="w-full">
-          {modelConfigs.map((row, index) => (
-            <Card
-              key={row.id}
-              size="small"
-              className={`${cardSurface} overflow-hidden rounded-xl`}
-              styles={{ body: { padding: "12px 14px" } }}
-            >
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-slate-900">条目 {index + 1}</span>
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                        row.enabled ? "bg-slate-100 text-slate-700" : "bg-slate-100 text-slate-500"
-                      }`}
-                    >
-                      {row.enabled ? "启用" : "停用"}
-                    </span>
+          {modelConfigs.map((row) => {
+            const providerLabel = row.provider.trim() || "未配置模型服务商";
+            const modelLabel = row.model.trim() || "未配置模型";
+            return (
+              <Card
+                key={row.id}
+                size="small"
+                className={`${cardSurface} overflow-hidden rounded-xl`}
+                styles={{ body: { padding: "12px 14px" } }}
+              >
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-slate-900">{providerLabel}</span>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                          row.enabled
+                            ? "bg-slate-100 text-slate-700"
+                            : "bg-slate-100 text-slate-500"
+                        }`}
+                      >
+                        {row.enabled ? "启用" : "停用"}
+                      </span>
+                    </div>
+                    <Text type="secondary" className="mt-0.5 block truncate text-xs">
+                      {row.provider && row.model
+                        ? formatModelRef(row.provider, row.model)
+                        : modelLabel}
+                    </Text>
                   </div>
-                  <Text type="secondary" className="mt-0.5 block truncate text-xs">
-                    {row.provider && row.model
-                      ? formatModelRef(row.provider, row.model)
-                      : "未配置 provider/model"}
-                  </Text>
+                  <Space size={8}>
+                    <Switch
+                      size="small"
+                      checked={row.enabled}
+                      loading={saving}
+                      onChange={(checked) => toggleModelEnabled(row.id, checked)}
+                      className="mr-1"
+                    />
+                    <Button
+                      size="small"
+                      icon={<EditOutlined />}
+                      onClick={() => setEditingModelId(row.id)}
+                    >
+                      编辑
+                    </Button>
+                    <Button
+                      danger
+                      size="small"
+                      type="text"
+                      icon={<DeleteOutlined />}
+                      onClick={() => removeRow(row.id)}
+                    >
+                      删除
+                    </Button>
+                  </Space>
                 </div>
-                <Space size={4}>
-                  <Button
-                    size="small"
-                    icon={<EditOutlined />}
-                    onClick={() => setEditingModelId(row.id)}
-                  >
-                    编辑
-                  </Button>
-                  <Button
-                    danger
-                    size="small"
-                    type="text"
-                    icon={<DeleteOutlined />}
-                    onClick={() => removeRow(row.id)}
-                  >
-                    删除
-                  </Button>
-                </Space>
-              </div>
-            </Card>
-          ))}
+              </Card>
+            );
+          })}
         </Space>
       </Spin>
 
@@ -270,26 +412,40 @@ export function SettingsModelsPanel({ adapter, canUseGateway }: Props) {
           className={`${cardSurface} overflow-hidden rounded-xl`}
           title={<span className="text-sm">编辑模型配置</span>}
           extra={
-            <Button type="link" size="small" onClick={() => setEditingModelId(null)}>
-              关闭
-            </Button>
+            <Space size={6}>
+              <Button size="small" loading={testing} disabled={saving} onClick={testEditingModel}>
+                测试文本对话
+              </Button>
+              <Button type="link" size="small" onClick={() => setEditingModelId(null)}>
+                关闭
+              </Button>
+              <Button
+                type="primary"
+                size="small"
+                icon={<SaveOutlined />}
+                loading={saving}
+                onClick={saveEditingModel}
+              >
+                保存
+              </Button>
+            </Space>
           }
           styles={{ body: { padding: "14px 16px" } }}
         >
           <Form layout="vertical" size="small">
             <div className="grid gap-x-3 gap-y-1 md:grid-cols-2">
-              <Form.Item label="提供商 ID" className="!mb-3">
+              <Form.Item label="模型服务商" className="!mb-3">
                 <Input
                   value={editingModel.provider}
                   onChange={(e) => updateRow(editingModel.id, { provider: e.target.value })}
-                  placeholder="openai"
+                  placeholder="deepseek、openai、minimax"
                 />
               </Form.Item>
-              <Form.Item label="显示名称" className="!mb-3">
+              <Form.Item label="模型 ID" className="!mb-3">
                 <Input
-                  value={editingModel.name}
-                  onChange={(e) => updateRow(editingModel.id, { name: e.target.value })}
-                  placeholder="可选"
+                  value={editingModel.model}
+                  onChange={(e) => updateRow(editingModel.id, { model: e.target.value })}
+                  placeholder="gpt-4o、claude-sonnet-4-5 等"
                 />
               </Form.Item>
               <Form.Item label="API Base URL" className="!mb-3 md:col-span-2">
@@ -299,24 +455,25 @@ export function SettingsModelsPanel({ adapter, canUseGateway }: Props) {
                   placeholder="https://api.openai.com/v1"
                 />
               </Form.Item>
-              <Form.Item label="API Key（留空保留原值）" className="!mb-3 md:col-span-2">
+              <Form.Item
+                label="API Key（留空保留原值）"
+                extra={
+                  editingModel.apiKey.trim() === REDACTED_SENTINEL
+                    ? "出于安全原因，已保存的 Key 不会显示。留空保存会继续使用原 Key；需要测试时请重新输入一次。"
+                    : null
+                }
+                className="!mb-3 md:col-span-2"
+              >
                 <Input.Password
-                  value={editingModel.apiKey}
+                  value={
+                    editingModel.apiKey.trim() === REDACTED_SENTINEL ? "" : editingModel.apiKey
+                  }
                   onChange={(e) => updateRow(editingModel.id, { apiKey: e.target.value })}
-                  placeholder="留空表示不修改已保存的密钥"
-                />
-              </Form.Item>
-              <Form.Item label="模型 ID" className="!mb-3 md:col-span-2">
-                <Input
-                  value={editingModel.model}
-                  onChange={(e) => updateRow(editingModel.id, { model: e.target.value })}
-                  placeholder="gpt-4o、claude-sonnet-4-5 等"
-                />
-              </Form.Item>
-              <Form.Item label="启用" className="!mb-0">
-                <Switch
-                  checked={editingModel.enabled}
-                  onChange={(v) => updateRow(editingModel.id, { enabled: v })}
+                  placeholder={
+                    editingModel.apiKey.trim() === REDACTED_SENTINEL
+                      ? "已保存 Key 不会显示，留空保留原值"
+                      : "留空表示不修改已保存的密钥"
+                  }
                 />
               </Form.Item>
             </div>

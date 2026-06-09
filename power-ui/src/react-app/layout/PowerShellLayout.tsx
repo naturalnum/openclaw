@@ -1,7 +1,6 @@
 import {
   CaretRightOutlined,
   EditOutlined,
-  FolderAddOutlined,
   FolderOpenOutlined,
   FolderOutlined,
   MenuFoldOutlined,
@@ -9,6 +8,7 @@ import {
   MenuUnfoldOutlined,
   MessageOutlined,
   MoreOutlined,
+  PlusOutlined,
   SettingOutlined,
   ThunderboltOutlined,
 } from "@ant-design/icons";
@@ -19,7 +19,10 @@ import { parseAgentSessionKey } from "../../../../ui/src/ui/session-key";
 import type { GatewayWorkbenchAdapter } from "../../adapters/gateway-workbench-adapter";
 import type { AgentsListResult } from "../../compat/types";
 import type { UiSettings } from "../../compat/ui-core";
-import { isProtectedMainSessionKey } from "../../integrations/openclaw/session-keys";
+import {
+  isPowerQuickSessionKey,
+  isProtectedMainSessionKey,
+} from "../../integrations/openclaw/session-keys";
 import { PowerBrandMark } from "../components/ui/PowerBrandMark";
 import { useWorkbenchChat, WorkbenchChatProvider } from "../context/WorkbenchChatContext";
 import { WorkspaceRailProvider } from "../context/WorkspaceRailContext";
@@ -48,6 +51,31 @@ const NAV = [
 
 function cn(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
+}
+
+function ProjectCreateIcon() {
+  return (
+    <span className="relative inline-flex h-4 w-4 items-center justify-center" aria-hidden>
+      <FolderOutlined className="text-[15px] leading-none [&_svg]:block" />
+      <span className="absolute -right-1 -top-1 grid h-2.5 w-2.5 place-items-center rounded-full bg-white text-[7px] leading-none text-current">
+        <PlusOutlined className="[&_svg]:block" />
+      </span>
+    </span>
+  );
+}
+
+const DEFAULT_ATTACHMENT_PROMPT = "请阅读以下附件并回答。";
+const CHAT_ATTACHMENT_LABEL_PATTERNS = [
+  /\s*本轮对话附件：[\s\S]*?(?:请把这些文件作为本轮对话上下文；需要内容时请直接读取对应路径。|$)/g,
+  /\s*已上传到当前工作区的附件：[\s\S]*?(?:请把这些文件作为本轮对话上下文；需要内容时请直接读取对应路径。|$)/g,
+];
+
+function sessionDisplayLabel(label: string): string {
+  const cleaned = CHAT_ATTACHMENT_LABEL_PATTERNS.reduce(
+    (current, pattern) => current.replace(pattern, ""),
+    label,
+  ).trim();
+  return cleaned === DEFAULT_ATTACHMENT_PROMPT ? "已上传文件" : cleaned || label;
 }
 
 function pathTitle(pathname: string): string {
@@ -85,7 +113,12 @@ type SidebarNavProps = {
   /** 桌面侧栏折叠/展开；移动端抽屉不传，避免无意义的收起按钮 */
   onToggleCollapsed?: () => void;
   onPick?: () => void;
-  onSelectSession?: (sessionKey: string, projectId: string | null) => void;
+  onSelectSession?: (
+    sessionKey: string,
+    projectId: string | null,
+    options?: { skipSessionProject?: boolean },
+  ) => void;
+  onSelectProject?: (projectId: string) => void;
   adapter: GatewayWorkbenchAdapter | null;
   settings: UiSettings;
   patchSettings: (patch: Partial<UiSettings>) => void;
@@ -102,6 +135,7 @@ function SidebarNav({
   onToggleCollapsed,
   onPick,
   onSelectSession,
+  onSelectProject,
   adapter,
   settings,
   patchSettings,
@@ -113,7 +147,7 @@ function SidebarNav({
   onProjectsReload,
 }: SidebarNavProps) {
   const navigate = useNavigate();
-  const { modal } = App.useApp();
+  const { message, modal } = App.useApp();
   const { selectedSessionKey, selectedProjectId } = useWorkbenchChat();
 
   const [projectsOpen, setProjectsOpen] = useState(true);
@@ -136,6 +170,9 @@ function SidebarNav({
   const [newProjectName, setNewProjectName] = useState("");
   const [createProjectBusy, setCreateProjectBusy] = useState(false);
   const [createProjectError, setCreateProjectError] = useState<string | null>(null);
+  const [createProjectDialogOpen, setCreateProjectDialogOpen] = useState(false);
+  const [optimisticSessionKey, setOptimisticSessionKey] = useState("");
+  const [projectContextOnlyId, setProjectContextOnlyId] = useState("");
   const location = useLocation();
   const [settingsFlyoutOpen, setSettingsFlyoutOpen] = useState(false);
   const settingsFlyoutRef = useRef<HTMLDivElement | null>(null);
@@ -143,13 +180,21 @@ function SidebarNav({
   const isSettingsSection = location.pathname.startsWith(ROUTES.settings);
   const activeSearchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const urlSessionKey = activeSearchParams.get("sessionKey")?.trim() ?? "";
-  const activeSessionKey = selectedSessionKey.trim() || urlSessionKey || settings.sessionKey.trim();
   const activeProjectFromSearch = activeSearchParams.get("projectId")?.trim() ?? "";
+  const selectedProjectKey = selectedProjectId?.trim() ?? "";
+  const activeSessionKey =
+    selectedSessionKey.trim() ||
+    urlSessionKey ||
+    optimisticSessionKey ||
+    (selectedProjectKey && projectContextOnlyId === selectedProjectKey
+      ? ""
+      : settings.sessionKey.trim());
   const activeProjectFromSession = activeSessionKey
-    ? (parseAgentSessionKey(activeSessionKey)?.agentId ?? "")
+    ? isPowerQuickSessionKey(activeSessionKey)
+      ? ""
+      : (parseAgentSessionKey(activeSessionKey)?.agentId ?? "")
     : "";
-  const activeProjectId =
-    selectedProjectId?.trim() || activeProjectFromSearch || activeProjectFromSession;
+  const activeProjectId = selectedProjectKey || activeProjectFromSearch || activeProjectFromSession;
 
   const shellTreeRow = "power-shell-tree-row";
   const shellNavSelected = "power-shell-tree-row--selected font-semibold text-neutral-900";
@@ -187,7 +232,7 @@ function SidebarNav({
   }, [openMenuKey, openProjectMenuKey]);
 
   useEffect(() => {
-    if (!settingsFlyoutOpen || !collapsed) {
+    if (!settingsFlyoutOpen) {
       return undefined;
     }
     const onDoc = (ev: MouseEvent) => {
@@ -198,13 +243,19 @@ function SidebarNav({
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
-  }, [settingsFlyoutOpen, collapsed]);
+  }, [settingsFlyoutOpen]);
 
   useEffect(() => {
     if (!collapsed) {
       setSettingsFlyoutOpen(false);
     }
   }, [collapsed]);
+
+  useEffect(() => {
+    if (selectedSessionKey.trim()) {
+      setOptimisticSessionKey("");
+    }
+  }, [selectedSessionKey]);
 
   const closeMenu = useCallback(() => setOpenMenuKey(null), []);
   const closeProjectMenu = useCallback(() => setOpenProjectMenuKey(null), []);
@@ -213,6 +264,9 @@ function SidebarNav({
     const grouped = new Map<string, RecentSessionNavItem[]>();
     for (const session of recentSessions) {
       if (isProtectedMainSessionKey(session.key)) {
+        continue;
+      }
+      if (isPowerQuickSessionKey(session.key)) {
         continue;
       }
       const agentId = parseAgentSessionKey(session.key)?.agentId ?? "";
@@ -233,6 +287,9 @@ function SidebarNav({
         if (isProtectedMainSessionKey(session.key)) {
           return true;
         }
+        if (isPowerQuickSessionKey(session.key)) {
+          return true;
+        }
         const agentId = parseAgentSessionKey(session.key)?.agentId ?? "";
         return !agentId || !projectIds.has(agentId);
       }),
@@ -242,10 +299,6 @@ function SidebarNav({
   const handleDeleteSession = useCallback(
     async (sessionKey: string) => {
       if (!adapter) {
-        return;
-      }
-      if (isProtectedMainSessionKey(sessionKey)) {
-        window.alert("主会话受保护，无法删除。");
         return;
       }
       if (!window.confirm("确定删除此会话？不可恢复。")) {
@@ -259,11 +312,11 @@ function SidebarNav({
         }
         closeMenu();
         onRecentSessionsChange();
-      } catch {
-        // ignore
+      } catch (err) {
+        message.error(err instanceof Error ? err.message : "删除会话失败");
       }
     },
-    [adapter, closeMenu, onRecentSessionsChange, patchSettings, settings.sessionKey],
+    [adapter, closeMenu, message, onRecentSessionsChange, patchSettings, settings.sessionKey],
   );
 
   const openRename = useCallback(
@@ -290,6 +343,7 @@ function SidebarNav({
   const openCreateProject = useCallback(() => {
     setNewProjectName("");
     setCreateProjectError(null);
+    setCreateProjectDialogOpen(true);
     createProjectDialogRef.current?.showModal();
   }, []);
 
@@ -394,9 +448,13 @@ function SidebarNav({
 
   const navItemShell =
     "flex items-center rounded-2xl text-[13px] transition-[background-color,color,box-shadow,transform] duration-150 outline-none focus-visible:ring-2 focus-visible:ring-[#d7d7d2] focus-visible:ring-offset-2 focus-visible:ring-offset-[#f8f8f7] active:scale-[0.99]";
-  const navItemExpanded = "gap-2.5 px-3 py-2";
+  const navItemExpanded = "w-full gap-2.5 px-3 py-2 text-left";
   /** 收起时仅包住图标，避免 2px 边框把点击区撑得过大 */
   const navItemCollapsed = "mx-auto h-9 w-9 shrink-0 justify-center gap-0 p-0";
+  const sectionHeaderButtonClass =
+    "flex items-center gap-1.5 text-left text-[12px] font-semibold text-slate-500 transition hover:text-slate-800 focus-visible:outline-none";
+  const sectionHeaderRowClass =
+    "flex h-9 w-full items-center rounded-xl px-2 transition hover:bg-[rgba(28,25,23,0.05)] focus-within:bg-[rgba(28,25,23,0.05)]";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -477,13 +535,13 @@ function SidebarNav({
 
       {!collapsed ? (
         <>
-          <div className="mt-3 shrink-0 border-t border-slate-200/70 px-2 pt-3">
-            <div className="flex w-full items-center gap-0.5">
+          <div className="mt-3 flex min-h-0 max-h-[58%] shrink flex-col overflow-hidden border-t border-slate-200/70 px-2 pb-2 pt-3">
+            <div className={cn(sectionHeaderRowClass, "group/project-header")}>
               <button
                 type="button"
                 aria-expanded={projectsOpen}
                 onClick={() => setProjectsOpen((o) => !o)}
-                className="flex min-w-0 flex-1 items-center gap-1.5 rounded-xl px-2 py-1.5 text-left text-[12px] font-semibold text-slate-500 transition hover:bg-slate-100/55 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300/60"
+                className={cn(sectionHeaderButtonClass, "min-w-0 flex-1")}
               >
                 <CaretRightOutlined
                   className={cn(
@@ -506,17 +564,22 @@ function SidebarNav({
                   openCreateProject();
                 }}
                 disabled={!adapter || createProjectBusy}
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-slate-500 transition hover:bg-transparent hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300/60"
+                className={cn(
+                  "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-slate-500 opacity-0 transition hover:bg-slate-100/70 hover:text-slate-800 focus:opacity-100 focus-visible:outline-none group-hover/project-header:opacity-100 group-focus-within/project-header:opacity-100",
+                  (projectsOpen || createProjectDialogOpen) && "opacity-70",
+                  (!adapter || createProjectBusy) && "cursor-not-allowed opacity-30",
+                )}
               >
-                <FolderAddOutlined className="text-[18px] leading-none [&_svg]:block" aria-hidden />
+                <ProjectCreateIcon />
               </button>
             </div>
             {projectsOpen ? (
-              <div className="mt-1 flex flex-col gap-1 pb-1.5 pl-1">
+              <div className="power-sidebar-scroll mt-1.5 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overscroll-contain pb-2 pl-1">
                 {projects.map((p) => {
                   const projectCollapsed = collapsedProjectIds.has(p.id);
                   const projectSessions = sessionsByProject.get(p.id) ?? [];
                   const projectSessionsExpanded = expandedProjectSessionIds.has(p.id);
+                  const projectSelected = activeProjectId === p.id && !activeSessionKey;
                   const visibleProjectSessions = projectSessionsExpanded
                     ? projectSessions
                     : projectSessions.slice(0, 6);
@@ -527,9 +590,7 @@ function SidebarNav({
                           shellTreeRow,
                           shellNavHover,
                           "group relative flex items-center gap-0.5 rounded-2xl",
-                          activeProjectId === p.id && !activeSessionKey
-                            ? shellNavSelected
-                            : shellNavIdle,
+                          projectSelected ? shellNavSelected : shellNavIdle,
                         )}
                       >
                         <button
@@ -587,10 +648,15 @@ function SidebarNav({
                             search: `?projectId=${encodeURIComponent(p.id)}`,
                           }}
                           aria-label={p.name}
-                          onClick={() => onPick?.()}
+                          onClick={() => {
+                            setOptimisticSessionKey("");
+                            setProjectContextOnlyId(p.id);
+                            onSelectProject?.(p.id);
+                            onPick?.();
+                          }}
                           className={cn(
                             "min-w-0 flex-1 truncate rounded-xl py-1.5 pr-2 text-left text-[13px] font-semibold transition",
-                            activeProjectId === p.id ? "text-slate-900" : "text-slate-800",
+                            projectSelected ? "text-slate-900" : "text-slate-800",
                           )}
                         >
                           {p.name}
@@ -607,7 +673,7 @@ function SidebarNav({
                             setOpenMenuKey(null);
                           }}
                           className={cn(
-                            "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100/65 hover:text-slate-700 focus:opacity-100",
+                            "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-[rgba(28,25,23,0.05)] hover:text-slate-700 focus:opacity-100",
                             openProjectMenuKey === p.id
                               ? "opacity-100"
                               : "opacity-0 group-hover:opacity-100",
@@ -645,6 +711,7 @@ function SidebarNav({
                         <div className="ml-8 flex flex-col gap-1">
                           {visibleProjectSessions.map((s) => {
                             const sessionSelected = activeSessionKey === s.key;
+                            const label = sessionDisplayLabel(s.label);
                             return (
                               <div key={s.key} className={sessionNavItemClass(sessionSelected)}>
                                 <Link
@@ -652,14 +719,20 @@ function SidebarNav({
                                     pathname: ROUTES.root,
                                     search: `?sessionKey=${encodeURIComponent(s.key)}&projectId=${encodeURIComponent(p.id)}`,
                                   }}
-                                  aria-label={s.label}
+                                  aria-label={label}
                                   onClick={() => {
+                                    setOptimisticSessionKey(s.key);
+                                    setProjectContextOnlyId("");
+                                    patchSettings({
+                                      sessionKey: s.key,
+                                      lastActiveSessionKey: s.key,
+                                    });
                                     void onSelectSession?.(s.key, p.id);
                                     onPick?.();
                                   }}
                                   className={cn(sessionLinkClass(sessionSelected), "pl-2 pr-2.5")}
                                 >
-                                  {s.label}
+                                  {label}
                                 </Link>
                                 <button
                                   type="button"
@@ -698,7 +771,8 @@ function SidebarNav({
                                     <button
                                       type="button"
                                       role="menuitem"
-                                      className="block w-full px-3 py-1.5 text-left text-[12px] text-red-600 hover:bg-red-50"
+                                      title="删除会话"
+                                      className="block w-full px-3 py-1.5 text-left text-[12px] text-red-600 transition hover:bg-red-50"
                                       onClick={() => void handleDeleteSession(s.key)}
                                     >
                                       删除
@@ -743,12 +817,12 @@ function SidebarNav({
             ) : null}
           </div>
 
-          <div className="flex min-h-0 flex-1 flex-col border-t border-slate-300/35 px-2 pt-3">
+          <div className="flex min-h-[170px] flex-1 flex-col border-t border-slate-300/35 px-2 pt-2.5">
             <button
               type="button"
               aria-expanded={recentOpen}
               onClick={() => setRecentOpen((o) => !o)}
-              className="flex w-full shrink-0 items-center gap-1.5 rounded-xl px-2 py-1.5 text-left text-[12px] font-semibold text-slate-500 transition hover:bg-white/52 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300/60"
+              className={cn(sectionHeaderRowClass, sectionHeaderButtonClass, "shrink-0")}
             >
               <CaretRightOutlined
                 className={cn(
@@ -760,14 +834,10 @@ function SidebarNav({
               <span className="min-w-0 flex-1 truncate">最近</span>
               {recentLoading ? (
                 <span className="shrink-0 text-[10px] font-normal text-slate-400">…</span>
-              ) : (
-                <span className="shrink-0 tabular-nums text-[10px] font-normal text-slate-400">
-                  {recentOnlySessions.length}
-                </span>
-              )}
+              ) : null}
             </button>
             {recentOpen ? (
-              <div className="power-sidebar-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-0.5 pb-2 pt-0.5">
+              <div className="power-sidebar-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-0.5 pb-2 pt-1.5">
                 {!recentLoading && recentOnlySessions.length === 0 ? (
                   <p className="px-1.5 py-2 text-center text-[11px] leading-snug text-slate-500">
                     暂无会话
@@ -776,6 +846,7 @@ function SidebarNav({
                 <div className="flex flex-col gap-1">
                   {recentOnlySessions.map((s) => {
                     const sessionSelected = activeSessionKey === s.key;
+                    const label = sessionDisplayLabel(s.label);
                     return (
                       <div key={s.key} className={cn(sessionNavItemClass(sessionSelected), "ml-1")}>
                         <Link
@@ -783,15 +854,19 @@ function SidebarNav({
                             pathname: ROUTES.root,
                             search: `?sessionKey=${encodeURIComponent(s.key)}`,
                           }}
-                          aria-label={s.label}
+                          aria-label={label}
                           onClick={() => {
-                            const agentId = parseAgentSessionKey(s.key)?.agentId ?? null;
-                            void onSelectSession?.(s.key, agentId);
+                            setOptimisticSessionKey(s.key);
+                            setProjectContextOnlyId("");
+                            patchSettings({ sessionKey: s.key, lastActiveSessionKey: s.key });
+                            void onSelectSession?.(s.key, null, {
+                              skipSessionProject: isPowerQuickSessionKey(s.key),
+                            });
                             onPick?.();
                           }}
-                          className={cn(sessionLinkClass(sessionSelected), "px-2.5 py-1.5")}
+                          className={cn(sessionLinkClass(sessionSelected), "pl-2 pr-2.5")}
                         >
-                          {s.label}
+                          {label}
                         </Link>
                         <div className="relative flex shrink-0 items-center pr-0.5">
                           <button
@@ -804,7 +879,7 @@ function SidebarNav({
                               setOpenMenuKey((k) => (k === s.key ? null : s.key));
                             }}
                             className={cn(
-                              "rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-50 hover:text-slate-800 focus:opacity-100",
+                              "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-[rgba(28,25,23,0.05)] hover:text-slate-800 focus:opacity-100",
                               openMenuKey === s.key
                                 ? "opacity-100"
                                 : "opacity-0 group-hover/session:opacity-100",
@@ -830,7 +905,8 @@ function SidebarNav({
                               <button
                                 type="button"
                                 role="menuitem"
-                                className="block w-full px-3 py-1.5 text-left text-[12px] text-red-600 hover:bg-red-50"
+                                title="删除会话"
+                                className="block w-full px-3 py-1.5 text-left text-[12px] text-red-600 transition hover:bg-red-50"
                                 onClick={() => void handleDeleteSession(s.key)}
                               >
                                 删除
@@ -880,10 +956,12 @@ function SidebarNav({
               </span>
             </button>
           ) : (
-            <NavLink
-              to={ROUTES.settingsConnection}
+            <button
+              type="button"
               title="设置"
-              onClick={() => onPick?.()}
+              aria-expanded={settingsFlyoutOpen}
+              aria-haspopup="menu"
+              onClick={() => setSettingsFlyoutOpen((v) => !v)}
               className={cn(
                 shellTreeRow,
                 navItemShell,
@@ -896,20 +974,20 @@ function SidebarNav({
                 <SettingOutlined />
               </span>
               <span className="truncate">设置</span>
-            </NavLink>
+            </button>
           )}
 
           <div
-            className={cn(
-              "absolute bottom-0 left-[calc(100%-1px)] z-[60] min-w-[14rem] rounded-2xl border border-slate-200/80 bg-white/95 py-2 shadow-xl shadow-slate-900/6 backdrop-blur transition-[opacity,visibility,transform] duration-150",
-              collapsed
-                ? settingsFlyoutOpen
-                  ? "visible opacity-100"
-                  : "invisible pointer-events-none opacity-0"
-                : "invisible pointer-events-none opacity-0 group-hover/settings:visible group-hover/settings:pointer-events-auto group-hover/settings:opacity-100",
-            )}
             role="menu"
             aria-label="设置分区"
+            className={cn(
+              "absolute bottom-0 left-[calc(100%-1px)] z-[60] min-w-[14rem] rounded-2xl border border-slate-200/80 bg-white/95 px-2 py-2 shadow-xl shadow-slate-900/6 backdrop-blur transition-[opacity,visibility,transform] duration-150",
+              settingsFlyoutOpen
+                ? "visible pointer-events-auto opacity-100"
+                : collapsed
+                  ? "invisible pointer-events-none opacity-0"
+                  : "invisible pointer-events-none opacity-0 group-hover/settings:visible group-hover/settings:pointer-events-auto group-hover/settings:opacity-100",
+            )}
           >
             {SETTINGS_NAV_ITEMS.map((item) => (
               <NavLink
@@ -923,10 +1001,8 @@ function SidebarNav({
                 }}
                 className={({ isActive }) =>
                   cn(
-                    "flex items-center gap-2 px-3 py-2 text-left text-[13px] transition",
-                    isActive
-                      ? "bg-slate-100 font-medium text-slate-900"
-                      : "text-slate-700 hover:bg-slate-50",
+                    "power-settings-menu-item flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-[13px] transition-colors",
+                    isActive && "power-settings-menu-item--active font-semibold",
                   )
                 }
               >
@@ -946,6 +1022,7 @@ function SidebarNav({
         onClose={() => {
           setNewProjectName("");
           setCreateProjectError(null);
+          setCreateProjectDialogOpen(false);
         }}
       >
         <form
@@ -1100,7 +1177,7 @@ function PowerShellLayoutContent() {
   const location = useLocation();
   const { settings, patchSettings } = usePowerUiSettings();
   const adapter = useGatewayWorkbenchAdapter(settings);
-  const { selectSession } = useWorkbenchChat();
+  const { selectSession, setActiveAgent } = useWorkbenchChat();
   const {
     sessions: recentSessions,
     loading: recentLoading,
@@ -1158,8 +1235,15 @@ function PowerShellLayoutContent() {
     adapter,
     settings,
     patchSettings,
-    onSelectSession: (sessionKey: string, projectId: string | null) => {
-      void selectSession(sessionKey, projectId);
+    onSelectSession: (
+      sessionKey: string,
+      projectId: string | null,
+      options?: { skipSessionProject?: boolean },
+    ) => {
+      void selectSession(sessionKey, projectId, options);
+    },
+    onSelectProject: (projectId: string) => {
+      setActiveAgent(projectId);
     },
     recentSessions,
     recentLoading,
