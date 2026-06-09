@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { parseAgentSessionKey } from "../../../../ui/src/ui/session-key";
+import type { ChatAttachment } from "../../../../ui/src/ui/ui-types";
 import type { GatewayWorkbenchAdapter } from "../../adapters/gateway-workbench-adapter";
 import type { WorkbenchSnapshot } from "../../adapters/mock-workbench-adapter";
 import type { WorkbenchAdapterEvent } from "../../adapters/workbench-adapter";
@@ -19,8 +21,11 @@ import {
   type ToolStreamEntry,
 } from "../../compat/ui-core";
 import {
+  buildPowerQuickSessionKey,
+  buildPowerSessionKey,
   buildSessionLabelFromPrompt,
   buildUniqueSessionLabel,
+  isPowerQuickSessionKey,
 } from "../../integrations/openclaw/session-keys";
 import { shouldHideChatMessage } from "../lib/chat-message-visibility";
 import {
@@ -35,16 +40,80 @@ import {
 } from "../lib/chat-tool-status";
 import { resolveChatModelPool, resolveEffectiveChatModelRef } from "../lib/configured-chat-models";
 
-function filterVisibleChatMessages(messages: unknown[]): unknown[] {
-  return messages.filter(
-    (message) =>
-      message != null &&
-      typeof message === "object" &&
-      !shouldHideChatMessage(message, { showToolCalls: false }),
-  );
+const DEFAULT_ATTACHMENT_PROMPT = "请阅读以下附件并回答。";
+
+const CHAT_ATTACHMENT_CONTEXT_PATTERNS = [
+  /\s*本轮对话附件：[\s\S]*?(?:请把这些文件作为本轮对话上下文；需要内容时请直接读取对应路径。|$)/g,
+  /\s*已上传到当前工作区的附件：[\s\S]*?(?:请把这些文件作为本轮对话上下文；需要内容时请直接读取对应路径。|$)/g,
+];
+
+function formatAttachmentFileSummary(fileNames: string[]) {
+  const names = fileNames.map((name) => name.trim()).filter(Boolean);
+  if (names.length === 0) {
+    return "已上传文件";
+  }
+  if (names.length === 1) {
+    return `已上传文件：${names[0]}`;
+  }
+  const visibleNames = names.slice(0, 3).join("、");
+  return `已上传 ${names.length} 个文件：${visibleNames}${names.length > 3 ? " 等" : ""}`;
 }
-import { parseAgentSessionKey } from "../../../../ui/src/ui/session-key";
-import type { ChatAttachment } from "../../../../ui/src/ui/ui-types";
+
+function stripInternalAttachmentContext(text: string) {
+  const attachmentNames = text
+    .split("\n")
+    .map(
+      (line) =>
+        line
+          .trim()
+          .match(/^-\s*([^:]+):\s*\S+/)?.[1]
+          ?.trim() ?? "",
+    )
+    .filter(Boolean);
+  const cleaned = CHAT_ATTACHMENT_CONTEXT_PATTERNS.reduce(
+    (current, pattern) => current.replace(pattern, ""),
+    text,
+  ).trim();
+  const attachmentSummary = formatAttachmentFileSummary(attachmentNames);
+  if (cleaned === DEFAULT_ATTACHMENT_PROMPT || !cleaned) {
+    return attachmentNames.length > 0 ? attachmentSummary : cleaned;
+  }
+  return attachmentNames.length > 0 ? `${cleaned}\n\n附件：${attachmentNames.join("、")}` : cleaned;
+}
+
+function cleanChatMessageForDisplay(message: unknown): unknown {
+  if (!message || typeof message !== "object") {
+    return message;
+  }
+  const role =
+    typeof (message as { role?: unknown }).role === "string"
+      ? (message as { role: string }).role.toLowerCase()
+      : "";
+  if (role !== "user") {
+    return message;
+  }
+  const record = message as Record<string, unknown>;
+  if (typeof record.content === "string") {
+    const cleaned = stripInternalAttachmentContext(record.content);
+    return cleaned === record.content ? message : { ...record, content: cleaned };
+  }
+  if (typeof record.text === "string") {
+    const cleaned = stripInternalAttachmentContext(record.text);
+    return cleaned === record.text ? message : { ...record, text: cleaned };
+  }
+  return message;
+}
+
+function filterVisibleChatMessages(messages: unknown[]): unknown[] {
+  return messages
+    .filter(
+      (message) =>
+        message != null &&
+        typeof message === "object" &&
+        !shouldHideChatMessage(message, { showToolCalls: false }),
+    )
+    .map(cleanChatMessageForDisplay);
+}
 
 type SessionRuntimeState = ChatState & {
   toolStreamSyncTimer: number | null;
@@ -111,7 +180,8 @@ function pickModelId(snapshot: WorkbenchSnapshot | null, fallback: string): stri
   return first?.id.trim() || fallback;
 }
 
-const CHAT_RUN_STALE_MS = 90_000;
+// Keep long-running MCP/tool calls visible; backend timeouts still own actual cancellation.
+const CHAT_RUN_STALE_MS = 20 * 60 * 1000;
 
 function finalizeChatRun(rt: SessionRuntimeState) {
   rt.chatRunId = null;
@@ -151,7 +221,10 @@ export function usePowerWorkbenchChat(
   const snapshotErrorRef = useRef<string | null>(null);
   const selectedProjectIdRef = useRef<string | null>(null);
   const selectedSessionKeyRef = useRef("");
+  const quickChatDraftRef = useRef(false);
   const refreshSnapshotSeqRef = useRef(0);
+  const selectSessionSeqRef = useRef(0);
+  const emptyHistoryReloadAttemptsRef = useRef(new Map<string, number>());
 
   const [snapshot, setSnapshot] = useState<WorkbenchSnapshot | null>(null);
   const [snapshotLoading, setSnapshotLoading] = useState(false);
@@ -196,6 +269,7 @@ export function usePowerWorkbenchChat(
         projectId: string | null;
         sessionKey: string | null;
         skipProjectDefault?: boolean;
+        skipSessionProject?: boolean;
       },
       options?: { reloadChatHistory?: boolean; forceReplaceChatHistory?: boolean },
     ) => {
@@ -209,6 +283,7 @@ export function usePowerWorkbenchChat(
           ? selection.sessionKey
           : selectedSessionKeyRef.current;
       const skipProjectDefault = selection?.skipProjectDefault === true;
+      const skipSessionProject = selection?.skipSessionProject === true;
 
       const reloadChatHistory = options?.reloadChatHistory !== false;
       const forceReplaceChatHistory = options?.forceReplaceChatHistory === true;
@@ -224,6 +299,7 @@ export function usePowerWorkbenchChat(
           projectId,
           sessionKey,
           skipProjectDefault,
+          skipSessionProject,
         });
         if (requestSeq !== refreshSnapshotSeqRef.current) {
           return;
@@ -316,7 +392,12 @@ export function usePowerWorkbenchChat(
     }
     const scoped = loadSettings();
     const preferred = scoped.lastActiveSessionKey.trim() || scoped.sessionKey.trim() || null;
-    void refreshSnapshotRef.current({ projectId: null, sessionKey: preferred });
+    void refreshSnapshotRef.current({
+      projectId: null,
+      sessionKey: preferred,
+      skipProjectDefault: preferred ? isPowerQuickSessionKey(preferred) : false,
+      skipSessionProject: preferred ? isPowerQuickSessionKey(preferred) : false,
+    });
   }, [adapter]);
 
   useEffect(() => {
@@ -460,6 +541,46 @@ export function usePowerWorkbenchChat(
 
   useEffect(() => {
     const key = selectedSessionKey.trim();
+    if (!key || !connected) {
+      return;
+    }
+    const rt = runtimesRef.current.get(key);
+    if (!rt) {
+      return;
+    }
+    const hasLocalActivity =
+      rt.chatLoading ||
+      rt.chatSending ||
+      Boolean(rt.chatRunId) ||
+      Boolean(rt.chatStream?.trim()) ||
+      rt.chatMessages.length > 0;
+    if (rt.chatMessages.length > 0) {
+      emptyHistoryReloadAttemptsRef.current.delete(key);
+    }
+    if (hasLocalActivity) {
+      return;
+    }
+    const attempts = emptyHistoryReloadAttemptsRef.current.get(key) ?? 0;
+    if (attempts >= 1) {
+      return;
+    }
+    emptyHistoryReloadAttemptsRef.current.set(key, attempts + 1);
+    void loadChatHistory(rt).finally(() => {
+      bumpRuntime();
+    });
+  }, [
+    selectedSessionKey,
+    connected,
+    activeRuntime?.chatLoading,
+    activeRuntime?.chatSending,
+    activeRuntime?.chatRunId,
+    activeRuntime?.chatStream,
+    activeRuntime?.chatMessages.length,
+    bumpRuntime,
+  ]);
+
+  useEffect(() => {
+    const key = selectedSessionKey.trim();
     if (!key) {
       return undefined;
     }
@@ -486,7 +607,11 @@ export function usePowerWorkbenchChat(
   }, [selectedSessionKey, activeRuntime?.chatRunId, bumpRuntime]);
 
   const selectSession = useCallback(
-    async (sessionKey: string, projectId: string | null) => {
+    async (
+      sessionKey: string,
+      projectId: string | null,
+      options?: { skipSessionProject?: boolean },
+    ) => {
       if (!adapter) {
         return;
       }
@@ -494,11 +619,16 @@ export function usePowerWorkbenchChat(
       if (!key) {
         return;
       }
+      const selectSeq = ++selectSessionSeqRef.current;
+      quickChatDraftRef.current = false;
+      const skipSessionProject = options?.skipSessionProject === true;
+      const projectIdForSelection =
+        isPowerQuickSessionKey(key) || skipSessionProject ? null : projectId;
       patchSettings({ sessionKey: key, lastActiveSessionKey: key });
       setSelectedSessionKey(key);
-      setSelectedProjectId(projectId);
+      setSelectedProjectId(projectIdForSelection);
       selectedSessionKeyRef.current = key;
-      selectedProjectIdRef.current = projectId;
+      selectedProjectIdRef.current = projectIdForSelection;
       const rt = getOrCreateRuntime(key);
       rt.sessionKey = key;
       rt.client = clientRef.current;
@@ -514,18 +644,31 @@ export function usePowerWorkbenchChat(
           // full snapshot refresh may still recover history
         }
       }
+      if (selectSeq !== selectSessionSeqRef.current || selectedSessionKeyRef.current !== key) {
+        rt.chatLoading = false;
+        bumpRuntime();
+        return;
+      }
       rt.chatLoading = false;
       bumpRuntime();
       await refreshSnapshot(
-        { projectId, sessionKey: key },
+        {
+          projectId: projectIdForSelection,
+          sessionKey: key,
+          skipProjectDefault: isPowerQuickSessionKey(key) || skipSessionProject,
+          skipSessionProject,
+        },
         {
           reloadChatHistory: rt.chatMessages.length === 0,
           forceReplaceChatHistory: true,
         },
       );
+      if (selectSeq !== selectSessionSeqRef.current || selectedSessionKeyRef.current !== key) {
+        return;
+      }
       const snap = snapshotRef.current;
       if (snap) {
-        const pool = resolveChatModelPool(snap, projectId, key);
+        const pool = resolveChatModelPool(snap, projectIdForSelection, key);
         const effective = resolveEffectiveChatModelRef({
           snapshot: snap,
           sessionKey: key,
@@ -541,21 +684,31 @@ export function usePowerWorkbenchChat(
   );
 
   const sendUserMessage = useCallback(
-    async (text: string, attachments?: ChatAttachment[]): Promise<boolean> => {
+    async (
+      text: string,
+      attachments?: ChatAttachment[],
+      options?: { displayText?: string },
+    ): Promise<boolean> => {
       if (!adapter || !clientRef.current) {
         return false;
       }
       const trimmed = text.trim();
+      const displayText = options?.displayText?.trim() ?? trimmed;
       const hasAttachments = Boolean(attachments && attachments.length > 0);
       if (!trimmed && !hasAttachments) {
         return false;
       }
-      const projectId =
-        selectedProjectIdRef.current ??
-        snapshotRef.current?.currentProjectId ??
+      const quickChatDraft = quickChatDraftRef.current && !selectedSessionKeyRef.current.trim();
+      const fallbackProjectId =
         snapshotRef.current?.agentsList?.defaultId ??
         snapshotRef.current?.agentsList?.agents?.[0]?.id ??
         null;
+      const projectId = quickChatDraft
+        ? fallbackProjectId
+        : (selectedProjectIdRef.current ??
+          snapshotRef.current?.currentProjectId ??
+          fallbackProjectId ??
+          null);
       if (!projectId) {
         return false;
       }
@@ -563,22 +716,36 @@ export function usePowerWorkbenchChat(
         snapshotRef.current,
         adapter.getDefaultModelId(),
         selectedSessionKeyRef.current,
-        selectedProjectIdRef.current,
+        quickChatDraft ? null : selectedProjectIdRef.current,
       );
       let sessionKey = selectedSessionKeyRef.current.trim();
 
       if (!sessionKey) {
         const labels = snapshotRef.current?.sessionsResult?.sessions?.map((s) => s.label) ?? [];
-        const label = buildUniqueSessionLabel(buildSessionLabelFromPrompt(trimmed), labels);
+        const labelSeed =
+          displayText || (hasAttachments ? "图片附件" : trimmed ? trimmed : "文件附件");
+        const label = buildUniqueSessionLabel(buildSessionLabelFromPrompt(labelSeed), labels);
+        sessionKey = quickChatDraft
+          ? buildPowerQuickSessionKey(projectId)
+          : buildPowerSessionKey(projectId);
+        setSelectedSessionKey(sessionKey);
+        setSelectedProjectId(quickChatDraft ? null : projectId);
+        selectedSessionKeyRef.current = sessionKey;
+        selectedProjectIdRef.current = quickChatDraft ? null : projectId;
+        quickChatDraftRef.current = false;
+        patchSettings({ sessionKey, lastActiveSessionKey: sessionKey });
+        const draftRuntime = getOrCreateRuntime(sessionKey);
+        draftRuntime.sessionKey = sessionKey;
+        draftRuntime.client = clientRef.current;
+        draftRuntime.connected = connected;
+        draftRuntime.chatLoading = false;
+        bumpRuntime();
         const { sessionKey: newKey } = await adapter.startTask(projectId, trimmed, modelId, {
           label,
+          quickChat: quickChatDraft,
+          sessionKey,
         });
         sessionKey = newKey.trim();
-        setSelectedSessionKey(sessionKey);
-        setSelectedProjectId(projectId);
-        selectedSessionKeyRef.current = sessionKey;
-        selectedProjectIdRef.current = projectId;
-        patchSettings({ sessionKey, lastActiveSessionKey: sessionKey });
       }
 
       const rt = getOrCreateRuntime(sessionKey);
@@ -590,12 +757,36 @@ export function usePowerWorkbenchChat(
         await adapter.request("sessions.patch", { key: sessionKey, model: modelId.trim() });
       }
       const sendPromise = sendChatMessage(rt, trimmed, hasAttachments ? attachments : undefined);
+      if (displayText !== trimmed) {
+        for (let index = rt.chatMessages.length - 1; index >= 0; index -= 1) {
+          const message = rt.chatMessages[index];
+          if (
+            message &&
+            typeof message === "object" &&
+            typeof (message as { role?: unknown }).role === "string" &&
+            (message as { role: string }).role.toLowerCase() === "user"
+          ) {
+            rt.chatMessages[index] = {
+              ...(message as Record<string, unknown>),
+              content: displayText,
+            };
+            break;
+          }
+        }
+      }
       // sendChatMessage mutates the runtime before the request resolves; render that local
       // user bubble and first-token loading immediately instead of waiting on the network.
       bumpRuntime();
       await sendPromise;
       bumpRuntime();
-      void refreshSnapshot({ projectId, sessionKey }, { reloadChatHistory: false });
+      void refreshSnapshot(
+        {
+          projectId: isPowerQuickSessionKey(sessionKey) ? null : projectId,
+          sessionKey,
+          skipProjectDefault: isPowerQuickSessionKey(sessionKey),
+        },
+        { reloadChatHistory: false },
+      );
       return true;
     },
     [adapter, bumpRuntime, connected, getOrCreateRuntime, patchSettings, refreshSnapshot],
@@ -617,18 +808,23 @@ export function usePowerWorkbenchChat(
 
   const setActiveAgent = useCallback(
     (projectId: string | null) => {
+      quickChatDraftRef.current = false;
       setSelectedProjectId(projectId);
       setSelectedSessionKey("");
       selectedProjectIdRef.current = projectId;
       selectedSessionKeyRef.current = "";
+      patchSettings({ sessionKey: "", lastActiveSessionKey: "" });
       void refreshSnapshot({ projectId, sessionKey: null });
     },
-    [refreshSnapshot],
+    [patchSettings, refreshSnapshot],
   );
 
   const startNewConversation = useCallback(
     (nextProjectId?: string | null, options?: { preferQuickChat?: boolean }) => {
       if (options?.preferQuickChat) {
+        quickChatDraftRef.current = true;
+        selectedProjectIdRef.current = null;
+        setSelectedProjectId(null);
         selectedSessionKeyRef.current = "";
         setSelectedSessionKey("");
         patchSettings({ sessionKey: "", lastActiveSessionKey: "" });
@@ -646,6 +842,7 @@ export function usePowerWorkbenchChat(
             snapshotRef.current?.currentProjectId ??
             snapshotRef.current?.agentsList?.defaultId ??
             null);
+      quickChatDraftRef.current = false;
       if (nextProjectId !== undefined && nextProjectId !== null) {
         setSelectedProjectId(nextProjectId);
         selectedProjectIdRef.current = nextProjectId;

@@ -197,43 +197,10 @@ function mergeCatalogResults(
   remote: SkillsRegistryListResult | null,
   local: SkillsRegistryListResult,
 ): SkillsRegistryListResult {
-  const page = Math.max(1, state.skillsPagination.page);
-  const limit = Math.max(1, state.skillsPagination.limit);
-
-  const mergedBySlug = new Map<string, SkillsRegistryCatalogItem>();
-  for (const item of remote?.items ?? []) {
-    mergedBySlug.set(item.slug, item);
+  if (remote && (remote.items.length > 0 || remote.categories.length > 0 || remote.baseUrl)) {
+    return remote;
   }
-  for (const item of local.items) {
-    if (!mergedBySlug.has(item.slug)) {
-      mergedBySlug.set(item.slug, item);
-    }
-  }
-
-  const mergedItems = [...mergedBySlug.values()];
-  const total = mergedItems.length;
-  const totalPages = Math.max(1, Math.ceil(total / limit));
-  const safePage = Math.min(page, totalPages);
-  const start = (safePage - 1) * limit;
-
-  const mergedCategories = [
-    ...(remote?.categories ?? []),
-    ...local.categories.filter(
-      (category) => !(remote?.categories ?? []).some((entry) => entry.id === category.id),
-    ),
-  ];
-
-  return {
-    baseUrl: remote?.baseUrl ?? "",
-    categories: mergedCategories,
-    items: mergedItems.slice(start, start + limit),
-    pagination: {
-      page: safePage,
-      limit,
-      total,
-      totalPages,
-    },
-  };
+  return local;
 }
 
 async function loadSkillsStatus(state: SkillsMarketState): Promise<void> {

@@ -297,13 +297,21 @@ export function ChatWorkspaceFilesPanel({
     originX: number;
     originY: number;
   } | null>(null);
+  const entriesCountRef = useRef(0);
+
+  useEffect(() => {
+    entriesCountRef.current = entries.length;
+  }, [entries.length]);
 
   const load = useCallback(async () => {
     const id = agentId.trim();
     if (!id) {
       return;
     }
-    setLoading(true);
+    const showInitialLoading = entriesCountRef.current === 0;
+    if (showInitialLoading) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const listing = await adapter.listProjectFiles(id, path);
@@ -315,9 +323,13 @@ export function ChatWorkspaceFilesPanel({
       setShowAllFiles(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-      setEntries([]);
+      if (showInitialLoading) {
+        setEntries([]);
+      }
     } finally {
-      setLoading(false);
+      if (showInitialLoading) {
+        setLoading(false);
+      }
     }
   }, [adapter, agentId, path]);
 
@@ -943,6 +955,7 @@ function FileCard({
 }) {
   return (
     <div
+      title={entry.name}
       className={cn(
         "group flex items-center gap-2 rounded-xl border px-2 py-2 transition-[background-color,border-color,box-shadow,transform]",
         active
@@ -971,7 +984,10 @@ function FileCard({
           )}
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[13px] font-semibold text-slate-900">
+          <span
+            className="block truncate text-[13px] font-semibold text-slate-900"
+            title={entry.name}
+          >
             {entry.name}
           </span>
           <span className="mt-0.5 block truncate text-[11px] text-slate-500">

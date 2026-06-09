@@ -16,14 +16,23 @@ export const OPENCLAW_WORKSPACE_HIDDEN_FILE_NAMES = new Set(
   ].map((name) => name.toLowerCase()),
 );
 
-export const OPENCLAW_WORKSPACE_HIDDEN_DIR_NAMES = new Set([".openclaw"]);
+export const OPENCLAW_WORKSPACE_HIDDEN_DIR_NAMES = new Set([".chat-uploads", ".openclaw"]);
 
 export function isOpenClawDefaultWorkspaceEntry(entry: {
   name: string;
   kind: "file" | "directory";
+  path?: string;
 }): boolean {
   const name = entry.name.trim();
   if (!name) {
+    return true;
+  }
+  const pathSegments = (entry.path ?? "")
+    .replaceAll("\\", "/")
+    .split("/")
+    .map((segment) => segment.trim().toLowerCase())
+    .filter(Boolean);
+  if (pathSegments.some((segment) => OPENCLAW_WORKSPACE_HIDDEN_DIR_NAMES.has(segment))) {
     return true;
   }
   if (entry.kind === "directory") {

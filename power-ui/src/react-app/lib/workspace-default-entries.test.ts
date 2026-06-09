@@ -21,11 +21,29 @@ describe("workspace-default-entries", () => {
     expect(isOpenClawDefaultWorkspaceEntry({ name: ".openclaw", kind: "directory" })).toBe(true);
   });
 
+  it("hides chat upload attachment directory", () => {
+    expect(isOpenClawDefaultWorkspaceEntry({ name: ".chat-uploads", kind: "directory" })).toBe(
+      true,
+    );
+  });
+
+  it("hides files nested under chat upload attachment directory", () => {
+    expect(
+      isOpenClawDefaultWorkspaceEntry({
+        name: "interface.txt",
+        path: ".chat-uploads/agent-main-quick-1/interface.txt",
+        kind: "file",
+      }),
+    ).toBe(true);
+  });
+
   it("filters a mixed listing", () => {
     const visible = filterUserVisibleWorkspaceEntries([
       { name: "IDENTITY.md", kind: "file" },
       { name: "report.pdf", kind: "file" },
       { name: ".openclaw", kind: "directory" },
+      { name: ".chat-uploads", kind: "directory" },
+      { name: "interface.txt", path: ".chat-uploads/session/interface.txt", kind: "file" },
     ]);
     expect(visible).toEqual([{ name: "report.pdf", kind: "file" }]);
   });

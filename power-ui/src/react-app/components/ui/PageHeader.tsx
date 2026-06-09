@@ -14,7 +14,13 @@ type PageHeaderProps = {
  */
 export function PageHeader({ title, description, meta, actions, compact }: PageHeaderProps) {
   return (
-    <div className={compact ? "flex flex-wrap items-start justify-between gap-2" : "flex flex-wrap items-start justify-between gap-4"}>
+    <div
+      className={
+        compact
+          ? "flex flex-wrap items-start justify-between gap-2"
+          : "flex flex-wrap items-start justify-between gap-4"
+      }
+    >
       <div className={compact ? "min-w-0 space-y-0.5" : "min-w-0 space-y-1"}>
         <h1
           className={
@@ -26,11 +32,21 @@ export function PageHeader({ title, description, meta, actions, compact }: PageH
           {title}
         </h1>
         {description ? (
-          <p className={compact ? "max-w-3xl text-xs leading-snug text-slate-600" : "max-w-2xl text-sm leading-relaxed text-slate-600"}>
+          <p
+            className={
+              compact
+                ? "max-w-3xl text-xs leading-snug text-slate-600"
+                : "max-w-2xl text-sm leading-relaxed text-slate-600"
+            }
+          >
             {description}
           </p>
         ) : null}
-        {meta ? <div className={compact ? "text-[11px] text-slate-500" : "text-xs text-slate-500"}>{meta}</div> : null}
+        {meta ? (
+          <div className={compact ? "text-[11px] text-slate-500" : "text-xs text-slate-500"}>
+            {meta}
+          </div>
+        ) : null}
       </div>
       {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
     </div>

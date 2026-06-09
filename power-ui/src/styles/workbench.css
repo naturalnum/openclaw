@@ -5,7 +5,11 @@
   min-height: 100vh;
   padding: 24px;
   background:
-    radial-gradient(circle at top, color-mix(in srgb, var(--accent) 12%, transparent), transparent 42%),
+    radial-gradient(
+      circle at top,
+      color-mix(in srgb, var(--accent) 12%, transparent),
+      transparent 42%
+    ),
     var(--bg);
 }
 
@@ -327,7 +331,11 @@ power-code-terminal-pane {
   border-radius: 20px;
   border: 1px solid color-mix(in srgb, #ffffff 10%, transparent);
   background:
-    radial-gradient(circle at top right, color-mix(in srgb, var(--accent) 16%, transparent), transparent 30%),
+    radial-gradient(
+      circle at top right,
+      color-mix(in srgb, var(--accent) 16%, transparent),
+      transparent 30%
+    ),
     linear-gradient(180deg, #161616 0%, #111111 100%);
   box-shadow: none;
   overflow: hidden;
@@ -382,8 +390,7 @@ power-code-terminal-pane {
   z-index: 3;
   margin: 0;
   overflow: hidden;
-  font-family:
-    "SFMono-Regular", "JetBrains Mono", "IBM Plex Mono", "Fira Code", Menlo, monospace;
+  font-family: "SFMono-Regular", "JetBrains Mono", "IBM Plex Mono", "Fira Code", Menlo, monospace;
   font-size: 12px;
   line-height: 1.4;
   white-space: pre-wrap;
@@ -955,7 +962,9 @@ power-code-terminal-pane {
   padding: 12px 14px;
   border-radius: 16px;
   color: var(--wb-text-soft);
-  transition: background var(--duration-normal) var(--ease-out), color var(--duration-fast) ease;
+  transition:
+    background var(--duration-normal) var(--ease-out),
+    color var(--duration-fast) ease;
 }
 
 .workbench-icon-button {
@@ -1949,7 +1958,7 @@ power-code-terminal-pane {
   background: var(--wb-surface);
   border: 1px solid var(--wb-border);
   border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.10);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
   max-height: 260px;
   overflow-y: auto;
 }
@@ -3330,8 +3339,11 @@ power-code-terminal-pane {
 }
 
 .workbench-card--metric {
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent) 6%, white 94%), var(--wb-surface));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 6%, white 94%),
+    var(--wb-surface)
+  );
 }
 
 .workbench-stats-grid {
@@ -3674,8 +3686,7 @@ power-code-terminal-pane {
   border-radius: 18px;
   border: 1px solid var(--wb-border);
   background:
-    linear-gradient(135deg, rgba(148, 163, 184, 0.08), rgba(148, 163, 184, 0.02)),
-    #f8fafc;
+    linear-gradient(135deg, rgba(148, 163, 184, 0.08), rgba(148, 163, 184, 0.02)), #f8fafc;
 }
 
 .workbench-preview-dialog__image {

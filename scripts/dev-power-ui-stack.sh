@@ -61,14 +61,32 @@ kill_listeners_on_port 19001
 kill_listeners_on_port 19003
 kill_listeners_on_port 5174
 
-echo "[dev-stack] starting gateway (default ~/.openclaw config, not --dev) ..."
-pnpm gateway:local &
-GATEWAY_PID=$!
+start_gateway_supervisor() {
+  while true; do
+    echo "[dev-stack] starting gateway (default ~/.openclaw config, not --dev) ..."
+    if pnpm gateway:local; then
+      status=0
+    else
+      status=$?
+    fi
+    echo "[dev-stack] gateway exited (status=$status); restarting in 1s ..."
+    sleep 1
+  done
+}
+
+start_gateway_supervisor &
+GATEWAY_SUPERVISOR_PID=$!
 
 cleanup() {
-  if kill -0 "$GATEWAY_PID" >/dev/null 2>&1; then
-    echo "[dev-stack] stopping gateway (pid=$GATEWAY_PID) ..."
-    kill "$GATEWAY_PID" >/dev/null 2>&1 || true
+  if kill -0 "$GATEWAY_SUPERVISOR_PID" >/dev/null 2>&1; then
+    echo "[dev-stack] stopping gateway supervisor (pid=$GATEWAY_SUPERVISOR_PID) ..."
+    kill "$GATEWAY_SUPERVISOR_PID" >/dev/null 2>&1 || true
+    local children
+    children="$(pgrep -P "$GATEWAY_SUPERVISOR_PID" 2>/dev/null || true)"
+    if [[ -n "$children" ]]; then
+      # shellcheck disable=SC2086
+      kill $children >/dev/null 2>&1 || true
+    fi
   fi
 }
 

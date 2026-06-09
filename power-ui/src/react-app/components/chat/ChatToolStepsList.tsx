@@ -53,7 +53,7 @@ function phaseTitle(phase: ChatToolStepsPhase, stepCount: number): string | null
     return "正在处理";
   }
   if (phase === "waiting_reply") {
-    return null;
+    return stepCount > 0 ? "正在整理回复" : null;
   }
   return stepCount > 0 ? "处理完成" : "处理中";
 }

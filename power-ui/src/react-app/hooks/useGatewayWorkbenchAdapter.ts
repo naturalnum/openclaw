@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-
 import { GatewayWorkbenchAdapter } from "../../adapters/gateway-workbench-adapter";
 import type { UiSettings } from "../../compat/ui-core";
 

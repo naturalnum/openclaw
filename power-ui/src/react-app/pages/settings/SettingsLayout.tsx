@@ -35,18 +35,18 @@ export function SettingsLayout() {
       }}
       destroyOnHidden
     >
-      <div className="flex max-h-[min(80vh,720px)] min-h-[min(72vh,560px)]">
-        <aside className="flex w-[220px] shrink-0 flex-col border-r border-slate-200/80 bg-slate-50/80">
-          <div className="flex items-center justify-between border-b border-slate-200/80 px-3 py-3">
+      <div className="relative flex max-h-[min(80vh,720px)] min-h-[min(72vh,560px)]">
+        <button
+          type="button"
+          aria-label="关闭设置"
+          onClick={closeSettings}
+          className="absolute right-3 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
+        >
+          <CloseOutlined className="text-sm" />
+        </button>
+        <aside className="flex w-[220px] shrink-0 flex-col border-r border-[#ecebea] bg-[#fbfbfa]">
+          <div className="flex items-center border-b border-[#e7e5e4] px-3 py-3">
             <span className="text-sm font-semibold text-slate-900">设置</span>
-            <button
-              type="button"
-              aria-label="关闭设置"
-              onClick={closeSettings}
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white hover:text-slate-800"
-            >
-              <CloseOutlined className="text-sm" />
-            </button>
           </div>
           <nav className="flex-1 overflow-y-auto p-2" aria-label="设置分区">
             {SETTINGS_NAV_ITEMS.map((item) => (
@@ -58,12 +58,12 @@ export function SettingsLayout() {
                   cn(
                     "mb-0.5 flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium transition",
                     isActive
-                      ? "bg-white text-slate-900 shadow-sm ring-1 ring-slate-200/90"
-                      : "text-slate-600 hover:bg-white/80 hover:text-slate-900",
+                      ? "bg-white text-slate-900 shadow-sm ring-1 ring-[#e7e5e4]"
+                      : "text-slate-600 hover:bg-white/85 hover:text-slate-900",
                   )
                 }
               >
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-white text-[14px] text-current ring-1 ring-slate-200/70">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-white text-[14px] text-current ring-1 ring-[#e7e5e4]">
                   {item.icon}
                 </span>
                 <span className="min-w-0 truncate">{item.title}</span>
@@ -71,7 +71,7 @@ export function SettingsLayout() {
             ))}
           </nav>
         </aside>
-        <div className="power-chat-scroll min-w-0 flex-1 overflow-y-auto bg-white p-5 sm:p-6">
+        <div className="power-chat-scroll min-w-0 flex-1 overflow-y-auto bg-white p-5 pr-14 sm:p-6 sm:pr-14">
           <Outlet />
         </div>
       </div>

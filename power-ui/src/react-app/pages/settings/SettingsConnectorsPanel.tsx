@@ -336,20 +336,19 @@ export function SettingsConnectorsPanel({ adapter, canUseGateway }: Props) {
 
   const columns: ColumnsType<ConnectorInstance> = useMemo(
     () => [
-      { title: "显示名", dataIndex: "displayName", key: "displayName", ellipsis: true },
-      { title: "提供商", dataIndex: "providerId", key: "providerId", width: 140 },
+      { title: "提供商", dataIndex: "providerId", key: "providerId", width: 118, ellipsis: true },
       {
         title: "启用",
         dataIndex: "enabled",
         key: "enabled",
-        width: 72,
+        width: 58,
         render: (v: boolean) => (v ? "是" : "否"),
       },
-      { title: "状态", dataIndex: "status", key: "status", width: 96 },
+      { title: "状态", dataIndex: "status", key: "status", width: 72, ellipsis: true },
       {
         title: "操作",
         key: "action",
-        width: 88,
+        width: 72,
         render: (_, record) => (
           <Button size="small" icon={<EditOutlined />} onClick={() => selectInstance(record.id)}>
             编辑
@@ -396,10 +395,10 @@ export function SettingsConnectorsPanel({ adapter, canUseGateway }: Props) {
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
+      <div className="grid min-w-0 gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
         <Card
           size="small"
-          className="border-slate-200/90 shadow-sm"
+          className="min-w-0 border-slate-200/90 shadow-sm"
           styles={{ body: { padding: "12px 14px" } }}
           title={<span className="text-sm">提供商类型</span>}
         >
@@ -417,8 +416,8 @@ export function SettingsConnectorsPanel({ adapter, canUseGateway }: Props) {
                     onClick={() => selectProvider(p.id)}
                     className={`flex w-full flex-col rounded-lg border px-2.5 py-2 text-left text-sm transition ${
                       selectedProviderId === p.id
-                        ? "border-slate-300 bg-slate-100/80 ring-1 ring-slate-200"
-                        : "border-slate-200/90 hover:border-slate-300 hover:bg-slate-50"
+                        ? "border-[#d8d6d2] bg-[#fff] shadow-sm ring-1 ring-[#e7e5e4]"
+                        : "border-[#e7e5e4] bg-[#fff]/70 hover:border-[#d8d6d2] hover:bg-[#fff]"
                     }`}
                   >
                     <span className="font-medium leading-tight text-slate-900">
@@ -435,10 +434,10 @@ export function SettingsConnectorsPanel({ adapter, canUseGateway }: Props) {
           </Spin>
         </Card>
 
-        <div className="space-y-3">
+        <div className="min-w-0 space-y-3">
           <Card
             size="small"
-            className="border-slate-200/90 shadow-sm"
+            className="min-w-0 overflow-hidden border-slate-200/90 shadow-sm"
             styles={{ body: { padding: "12px 14px" } }}
             title={<span className="text-sm">已有实例</span>}
             extra={
@@ -457,6 +456,7 @@ export function SettingsConnectorsPanel({ adapter, canUseGateway }: Props) {
               rowKey={(r) => r.id}
               columns={columns}
               dataSource={instances}
+              tableLayout="fixed"
               pagination={{ pageSize: 8, size: "small" }}
               onRow={(record) => ({
                 onClick: () => selectInstance(record.id),

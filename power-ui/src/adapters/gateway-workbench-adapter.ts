@@ -10,8 +10,10 @@ import type {
 } from "../compat/types.ts";
 import { PowerGatewayClient } from "../integrations/openclaw/gateway-client.ts";
 import {
+  buildPowerQuickSessionKey,
   buildPowerSessionKey,
   buildSessionLabelFromPrompt,
+  isPowerQuickSessionKey,
 } from "../integrations/openclaw/session-keys.ts";
 import type { WorkbenchSnapshot } from "./mock-workbench-adapter.ts";
 import type {
@@ -90,7 +92,10 @@ function resolveSelection(
   const rawSessionKey = args.sessionKey?.trim() ?? "";
   // Honor explicit session selection even if sessions.list is stale or truncated.
   const sessionKey = rawSessionKey;
-  const sessionProjectId = sessionKey ? (parseAgentSessionKey(sessionKey)?.agentId ?? null) : null;
+  const sessionProjectId =
+    sessionKey && !args.skipSessionProject && !isPowerQuickSessionKey(sessionKey)
+      ? (parseAgentSessionKey(sessionKey)?.agentId ?? null)
+      : null;
   const mergedProjectId = args.projectId ?? sessionProjectId ?? null;
   if (args.skipProjectDefault) {
     return {
@@ -692,9 +697,11 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
     projectId: string,
     text: string,
     modelId: string,
-    options?: { label?: string | null },
+    options?: { label?: string | null; quickChat?: boolean; sessionKey?: string | null },
   ): Promise<WorkbenchSendResult> {
-    const sessionKey = buildPowerSessionKey(projectId);
+    const sessionKey =
+      options?.sessionKey?.trim() ||
+      (options?.quickChat ? buildPowerQuickSessionKey(projectId) : buildPowerSessionKey(projectId));
     const label = options?.label?.trim() || buildSessionLabelFromPrompt(text);
     const model = modelId.trim();
     await this.gateway.request("sessions.patch", {

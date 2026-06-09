@@ -1,11 +1,5 @@
-import {
-  ApiOutlined,
-  CloudServerOutlined,
-  LinkOutlined,
-  RobotOutlined,
-} from "@ant-design/icons";
+import { ApiOutlined, CloudServerOutlined, LinkOutlined, RobotOutlined } from "@ant-design/icons";
 import type { ReactNode } from "react";
-
 import { ROUTES } from "./paths";
 
 export type SettingsNavItem = {

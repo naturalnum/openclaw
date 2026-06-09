@@ -952,11 +952,13 @@ export class MockWorkbenchAdapter implements WorkbenchAdapter {
     projectId: string,
     text: string,
     _modelId: string,
-    options?: { label?: string | null },
+    options?: { label?: string | null; quickChat?: boolean },
   ): Promise<WorkbenchSendResult> {
     const project = this.requireProject(projectId);
     const timestamp = Date.now();
-    const sessionKey = `agent:${projectId}:task-${this.nextSessionNumber}`;
+    const sessionKey = options?.quickChat
+      ? `agent:${projectId}:quick:task-${this.nextSessionNumber}`
+      : `agent:${projectId}:task-${this.nextSessionNumber}`;
     this.nextSessionNumber += 1;
     const subject = text.trim() || "New project task";
     const session: MockSession = {

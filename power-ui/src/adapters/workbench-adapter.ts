@@ -9,6 +9,11 @@ export type WorkbenchSelection = {
    * Used for「新增对话」等需要明确停留在无项目（全局）上下文的场景。
    */
   skipProjectDefault?: boolean;
+  /**
+   * When true, do not infer a project from `sessionKey`.
+   * Used for recent/temporary chats that should not expose project workspace files.
+   */
+  skipSessionProject?: boolean;
 };
 
 export type WorkbenchChatState = "delta" | "final" | "aborted" | "error";
@@ -182,7 +187,7 @@ export interface WorkbenchAdapter {
     projectId: string,
     text: string,
     modelId: string,
-    options?: { label?: string | null },
+    options?: { label?: string | null; quickChat?: boolean; sessionKey?: string | null },
   ): Promise<WorkbenchSendResult>;
   renameSession(sessionKey: string, label: string): Promise<void>;
   deleteSession(sessionKey: string): Promise<void>;

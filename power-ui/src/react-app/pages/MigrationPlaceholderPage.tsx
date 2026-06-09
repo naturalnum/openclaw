@@ -1,7 +1,6 @@
 import { ArrowLeftOutlined } from "@ant-design/icons";
 import { Button, Card, Typography } from "antd";
 import { Link } from "react-router-dom";
-
 import { ROUTES } from "../router/paths";
 
 const { Paragraph, Title } = Typography;

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from "react";
-
 import type { GatewayWorkbenchAdapter } from "../../adapters/gateway-workbench-adapter";
 import type { SkillStatusReport } from "../../compat/types";
 

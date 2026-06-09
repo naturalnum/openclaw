@@ -10,6 +10,16 @@ export function buildPowerSessionKey(projectId: string) {
   return `agent:${normalizedProjectId}:power:${generateUUID()}`;
 }
 
+export function buildPowerQuickSessionKey(agentId: string) {
+  const normalizedAgentId = normalizeAgentId(agentId);
+  return `agent:${normalizedAgentId}:quick:${generateUUID()}`;
+}
+
+export function isPowerQuickSessionKey(sessionKey: string | null | undefined) {
+  const parsed = parseAgentSessionKey(sessionKey);
+  return parsed?.rest.startsWith("quick:") === true;
+}
+
 const SESSION_LABEL_MAX_LENGTH = 64;
 
 export function buildSessionLabelFromPrompt(prompt: string) {

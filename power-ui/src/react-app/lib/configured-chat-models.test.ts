@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
-
-import {
-  resolveChatModelPool,
-  resolveEffectiveChatModelRef,
-} from "./configured-chat-models";
 import type { WorkbenchSnapshot } from "../../adapters/mock-workbench-adapter";
+import { resolveChatModelPool, resolveEffectiveChatModelRef } from "./configured-chat-models";
 
 function minimalSnapshot(overrides: Partial<WorkbenchSnapshot> = {}): WorkbenchSnapshot {
   return {

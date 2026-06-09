@@ -1,4 +1,10 @@
-import { InboxOutlined, ReloadOutlined } from "@ant-design/icons";
+import {
+  DownloadOutlined,
+  InboxOutlined,
+  ReloadOutlined,
+  StarOutlined,
+  UploadOutlined,
+} from "@ant-design/icons";
 import {
   Alert,
   App,
@@ -11,124 +17,178 @@ import {
   Switch,
   Typography,
 } from "antd";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import type { SkillStatusEntry } from "../../compat/types";
+import {
+  DEFAULT_SKILLS_INSTALL_FILTER,
+  DEFAULT_SKILLS_REGISTRY_PAGINATION,
+  DEFAULT_SKILLS_SORT_BY,
+  importRegistrySkillArchive,
+  loadSkillsMarket,
+  setSkillsCategory,
+  setSkillsFilter,
+  setSkillsInstallFilter,
+  setSkillsPage,
+  setSkillsSortBy,
+  toggleRegistrySkillInstall,
+  type SkillMessage,
+  type SkillsMarketState,
+} from "../../compat/skills-market-controller";
+import type {
+  SkillsRegistryCatalogItem,
+  SkillsRegistryCategory,
+  SkillsRegistrySortBy,
+} from "../../compat/types";
 import { PageScaffold } from "../components/ui/PageScaffold";
 import { StatusPill } from "../components/ui/StatusPill";
 import { useGatewayWorkbenchAdapter } from "../hooks/useGatewayWorkbenchAdapter";
 import { usePowerUiSettings } from "../hooks/usePowerUiSettings";
-import { useSkillsStatus } from "../hooks/useSkillsStatus";
 import { ROUTES } from "../router/paths";
 
 const { Text, Paragraph } = Typography;
-
-type InstallFilter = "all" | "installed" | "not_installed";
-type SortKey = "comprehensive" | "downloads" | "updated";
-
-const PAGE_SIZE = 12;
 
 function cn(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
 
-function hasSetupIssues(skill: SkillStatusEntry): boolean {
-  return (
-    skill.blockedByAllowlist ||
-    !skill.eligible ||
-    skill.missing.bins.length > 0 ||
-    skill.missing.env.length > 0 ||
-    skill.missing.config.length > 0 ||
-    skill.missing.os.length > 0
-  );
+function formatCompactNumber(value: number): string {
+  return new Intl.NumberFormat(undefined, {
+    notation: "compact",
+    maximumFractionDigits: value < 1000 ? 0 : 1,
+  }).format(value);
 }
 
-function matchesInstallFilter(skill: SkillStatusEntry, filter: InstallFilter): boolean {
-  if (filter === "all") {
-    return true;
+function formatRelativeTime(ts: number | null): string {
+  if (!ts) {
+    return "最近更新";
   }
-  if (filter === "installed") {
-    return !skill.disabled;
+  const diffMs = Date.now() - ts;
+  const diffDays = Math.max(0, Math.floor(diffMs / 86_400_000));
+  if (diffDays <= 0) {
+    return "今天更新";
   }
-  return skill.disabled;
+  if (diffDays < 30) {
+    return `${diffDays} 天前更新`;
+  }
+  const diffMonths = Math.floor(diffDays / 30);
+  if (diffMonths < 12) {
+    return `${diffMonths} 个月前更新`;
+  }
+  return `${Math.floor(diffMonths / 12)} 年前更新`;
+}
+
+function isLocalDirectoryInstall(item: SkillsRegistryCatalogItem): boolean {
+  return item.installState.installed && item.installState.source === "directory";
+}
+
+function isLocalSkillEnabled(item: SkillsRegistryCatalogItem): boolean {
+  if (!isLocalDirectoryInstall(item)) {
+    return item.installState.installed;
+  }
+  return !item.tags.some((tag) => tag.trim().toLowerCase() === "disabled");
+}
+
+function isLocalSkillsCategory(category: SkillsRegistryCategory): boolean {
+  const id = category.id.trim().toLowerCase();
+  const name = category.name.trim();
+  return id === "local" || id === "local-skills" || name === "本地技能";
+}
+
+function createInitialSkillsState(
+  adapter: ReturnType<typeof useGatewayWorkbenchAdapter>,
+): SkillsMarketState {
+  return {
+    client: adapter
+      ? {
+          request: async <T,>(method: string, params?: unknown) =>
+            adapter.request<T>(method, params),
+        }
+      : null,
+    connected: Boolean(adapter),
+    skillsLoading: false,
+    skillsReport: null,
+    skillsError: null,
+    skillsBusyKey: null,
+    skillsArchiveBusy: false,
+    skillMessages: {},
+    skillsNotice: null,
+    skillsFilter: "",
+    skillsCatalog: [],
+    skillsCategories: [],
+    skillsRegistryBaseUrl: null,
+    skillsPagination: { ...DEFAULT_SKILLS_REGISTRY_PAGINATION },
+    skillsCategory: null,
+    skillsSortBy: DEFAULT_SKILLS_SORT_BY,
+    skillsInstallFilter: DEFAULT_SKILLS_INSTALL_FILTER,
+  };
+}
+
+function useSkillsMarket(adapter: ReturnType<typeof useGatewayWorkbenchAdapter>) {
+  const [, bump] = useState(0);
+  const stateRef = useRef(createInitialSkillsState(adapter));
+
+  useEffect(() => {
+    const previous = stateRef.current;
+    stateRef.current = {
+      ...createInitialSkillsState(adapter),
+      skillsFilter: previous.skillsFilter,
+      skillsCategory: previous.skillsCategory,
+      skillsSortBy: previous.skillsSortBy,
+      skillsInstallFilter: previous.skillsInstallFilter,
+      skillsPagination: {
+        ...previous.skillsPagination,
+        page: 1,
+      },
+    };
+    bump((n) => n + 1);
+  }, [adapter]);
+
+  const run = useCallback(async (action: Promise<unknown>) => {
+    bump((n) => n + 1);
+    try {
+      await action;
+    } finally {
+      bump((n) => n + 1);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!adapter) {
+      return;
+    }
+    void run(loadSkillsMarket(stateRef.current, { clearMessages: true, refreshStatus: true }));
+  }, [adapter, run]);
+
+  return { state: stateRef.current, run };
 }
 
 export function SkillsPage() {
   const { message } = App.useApp();
   const { settings } = usePowerUiSettings();
   const adapter = useGatewayWorkbenchAdapter(settings);
-  const { report, loading, error, refetch, setSkillEnabled, busyKey } = useSkillsStatus(adapter);
-
-  const [query, setQuery] = useState("");
-  const [installFilter, setInstallFilter] = useState<InstallFilter>("all");
-  const [sortBy, setSortBy] = useState<SortKey>("comprehensive");
-  const [page, setPage] = useState(1);
-  const [archiveBusy, setArchiveBusy] = useState(false);
+  const { state, run } = useSkillsMarket(adapter);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const localSkillsCategory = state.skillsCategories.find(isLocalSkillsCategory) ?? null;
+  const visibleSkillCategories = state.skillsCategories.filter(
+    (category) => !isLocalSkillsCategory(category),
+  );
 
   const missingGateway = !settings.gatewayUrl.trim();
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const source = report?.skills ?? [];
-    const afterInstall = source.filter((row) => matchesInstallFilter(row, installFilter));
-    const searched = !q
-      ? afterInstall
-      : afterInstall.filter(
-          (row) =>
-            row.name.toLowerCase().includes(q) ||
-            row.skillKey.toLowerCase().includes(q) ||
-            row.source.toLowerCase().includes(q) ||
-            row.description.toLowerCase().includes(q),
-        );
-    const sorted = [...searched];
-    if (sortBy === "downloads") {
-      sorted.sort((a, b) => a.name.localeCompare(b.name));
-    } else if (sortBy === "updated") {
-      sorted.sort((a, b) => a.skillKey.localeCompare(b.skillKey));
-    } else {
-      sorted.sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
-    }
-    return sorted;
-  }, [installFilter, query, report?.skills, sortBy]);
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const safePage = Math.min(page, totalPages);
-  const pageSlice = useMemo(() => {
-    const start = (safePage - 1) * PAGE_SIZE;
-    return filtered.slice(start, start + PAGE_SIZE);
-  }, [filtered, safePage]);
-
-  useEffect(() => {
-    setPage((p) => Math.min(p, totalPages));
-  }, [totalPages]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [query, installFilter, sortBy]);
-
   const handleImportArchive = useCallback(
-    async (file: File) => {
-      if (!adapter) {
-        return;
-      }
-      const name = file.name.trim();
-      if (!name.toLowerCase().endsWith(".zip")) {
-        message.error("只支持导入 .zip 技能包");
-        return;
-      }
-      setArchiveBusy(true);
-      try {
-        await adapter.installSkillArchive(file);
-        message.success("技能包已导入");
-        await refetch();
-      } catch (e) {
-        message.error(e instanceof Error ? e.message : String(e));
-      } finally {
-        setArchiveBusy(false);
-      }
+    (file: File) => {
+      void run(importRegistrySkillArchive(state, file)).then(() => {
+        const notice = state.skillsNotice;
+        if (notice) {
+          if (notice.kind === "error") {
+            message.error(notice.message);
+          } else {
+            message.success(notice.message);
+          }
+        }
+      });
     },
-    [adapter, message, refetch],
+    [message, run, state],
   );
 
   if (missingGateway) {
@@ -160,7 +220,9 @@ export function SkillsPage() {
             <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-[26px] sm:leading-snug">
               探索技能
             </h1>
-            <p className="mt-0.5 text-sm text-slate-500">浏览、搜索并启用工作区内的技能</p>
+            <p className="mt-0.5 text-sm text-slate-500">
+              远端技能中心与本地技能目录合并展示，已安装项会自动对齐状态
+            </p>
           </div>
           <Space wrap className="shrink-0">
             <input
@@ -172,22 +234,35 @@ export function SkillsPage() {
                 const file = ev.target.files?.[0];
                 ev.target.value = "";
                 if (file) {
-                  void handleImportArchive(file);
+                  handleImportArchive(file);
                 }
               }}
             />
+            {state.skillsRegistryBaseUrl ? (
+              <Button href={state.skillsRegistryBaseUrl} target="_blank" rel="noreferrer">
+                打开技能中心
+              </Button>
+            ) : null}
             <Button
-              loading={archiveBusy}
-              disabled={archiveBusy || loading}
+              icon={<UploadOutlined />}
+              loading={state.skillsArchiveBusy}
+              disabled={state.skillsArchiveBusy || state.skillsLoading}
               onClick={() => importInputRef.current?.click()}
             >
-              {archiveBusy ? "导入中…" : "导入技能包"}
+              {state.skillsArchiveBusy ? "导入中…" : "导入技能包"}
             </Button>
             <Button
               type="primary"
               icon={<ReloadOutlined />}
-              loading={loading}
-              onClick={() => void refetch()}
+              loading={state.skillsLoading}
+              onClick={() =>
+                void run(
+                  loadSkillsMarket(state, {
+                    clearMessages: true,
+                    refreshStatus: true,
+                  }),
+                )
+              }
             >
               刷新
             </Button>
@@ -199,101 +274,153 @@ export function SkillsPage() {
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-4">
               <span className="inline-flex w-fit shrink-0 items-center gap-1.5 rounded-full border border-slate-200/80 bg-[#f7f7f5] px-3 py-1 text-xs font-medium text-slate-700">
                 <InboxOutlined />
-                本地技能
+                技能仓库
               </span>
               <Input
                 allowClear
                 size="large"
-                placeholder="搜索技能名称或标识…"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                placeholder="搜索技能名称、标识、作者或标签…"
+                value={state.skillsFilter}
+                onChange={(e) => void run(setSkillsFilter(state, e.target.value))}
                 className="min-w-0 flex-1"
               />
               <div className="flex shrink-0 flex-wrap items-center gap-2">
                 <Text type="secondary" className="text-sm whitespace-nowrap">
                   排序
                 </Text>
-                <Select<SortKey>
-                  value={sortBy}
-                  onChange={(v) => setSortBy(v)}
+                <Select<SkillsRegistrySortBy>
+                  value={state.skillsSortBy}
+                  onChange={(v) => void run(setSkillsSortBy(state, v))}
                   className="min-w-[9.5rem]"
                   options={[
                     { value: "comprehensive", label: "综合" },
                     { value: "downloads", label: "下载量" },
-                    { value: "updated", label: "更新时间" },
+                    { value: "updated", label: "最近更新" },
                   ]}
                 />
               </div>
             </div>
 
+            {visibleSkillCategories.length > 0 ? (
+              <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+                {visibleSkillCategories.map((category) => (
+                  <CategoryButton
+                    key={category.id}
+                    category={category}
+                    selected={state.skillsCategory === category.id}
+                    onClick={() =>
+                      void run(
+                        setSkillsCategory(
+                          state,
+                          state.skillsCategory === category.id ? null : category.id,
+                        ),
+                      )
+                    }
+                  />
+                ))}
+              </div>
+            ) : null}
+
             <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+              <InstallFilterButton
+                selected={
+                  state.skillsInstallFilter === "all" &&
+                  (!localSkillsCategory || state.skillsCategory !== localSkillsCategory.id)
+                }
+                onClick={() => void run(setSkillsInstallFilter(state, "all"))}
+              >
+                全部
+              </InstallFilterButton>
+              {localSkillsCategory ? (
+                <CategoryButton
+                  category={localSkillsCategory}
+                  selected={state.skillsCategory === localSkillsCategory.id}
+                  onClick={() =>
+                    void run(
+                      setSkillsCategory(
+                        state,
+                        state.skillsCategory === localSkillsCategory.id
+                          ? null
+                          : localSkillsCategory.id,
+                      ),
+                    )
+                  }
+                />
+              ) : null}
               {(
                 [
-                  { key: "all" as const, label: "全部" },
                   { key: "installed" as const, label: "已安装" },
                   { key: "not_installed" as const, label: "未安装" },
                 ] as const
               ).map((tab) => (
-                <button
+                <InstallFilterButton
                   key={tab.key}
-                  type="button"
-                  onClick={() => setInstallFilter(tab.key)}
-                  className={cn(
-                    "rounded-full border px-3.5 py-1.5 text-sm font-medium transition",
-                    installFilter === tab.key
-                      ? "border-[#30343a] bg-[#30343a] text-white shadow-sm shadow-slate-300/30"
-                      : "border-slate-200/90 bg-white/78 text-slate-600 hover:border-slate-300 hover:bg-[#f7f7f5] hover:text-slate-900",
-                  )}
+                  onClick={() => void run(setSkillsInstallFilter(state, tab.key))}
+                  selected={state.skillsInstallFilter === tab.key}
                 >
                   {tab.label}
-                </button>
+                </InstallFilterButton>
               ))}
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3 text-xs text-slate-500 sm:text-sm">
-              <span>共 {filtered.length} 个技能</span>
+              <span>共 {state.skillsPagination.total} 个技能</span>
               <span className="tabular-nums">
-                第 {safePage} / {totalPages} 页
+                第 {state.skillsPagination.page} / {state.skillsPagination.totalPages || 1} 页
               </span>
             </div>
           </div>
         </div>
 
-        {error ? <Alert type="error" showIcon message={error} closable /> : null}
+        {state.skillsNotice ? (
+          <DismissibleNotice
+            notice={state.skillsNotice}
+            onClose={() => {
+              state.skillsNotice = null;
+              void run(Promise.resolve());
+            }}
+          />
+        ) : null}
+        {state.skillsError ? (
+          <Alert
+            type="error"
+            showIcon
+            closable
+            message={state.skillsError}
+            onClose={() => {
+              state.skillsError = null;
+              void run(Promise.resolve());
+            }}
+          />
+        ) : null}
 
-        <Spin spinning={loading}>
-          {pageSlice.length === 0 ? (
+        <Spin spinning={state.skillsLoading}>
+          {state.skillsCatalog.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-slate-200 bg-white/65 py-14 text-center text-sm text-slate-500">
-              {loading ? "加载中…" : "暂无匹配技能"}
+              {state.skillsLoading ? "加载中…" : "暂无匹配技能"}
             </div>
           ) : (
             <ul className="m-0 grid list-none grid-cols-1 gap-4 p-0 sm:grid-cols-2 xl:grid-cols-3">
-              {pageSlice.map((skill) => (
+              {state.skillsCatalog.map((skill) => (
                 <SkillMarketCard
-                  key={skill.skillKey}
+                  key={skill.slug}
                   skill={skill}
-                  busy={busyKey === skill.skillKey}
-                  onToggle={async (checked) => {
-                    try {
-                      await setSkillEnabled(skill.skillKey, checked);
-                      message.success(checked ? `已启用 ${skill.name}` : `已停用 ${skill.name}`);
-                    } catch {
-                      message.error(`更新失败：${skill.name}`);
-                    }
-                  }}
+                  message={state.skillMessages[skill.slug] ?? null}
+                  busy={state.skillsBusyKey === skill.slug}
+                  onToggle={() => void run(toggleRegistrySkillInstall(state, skill))}
                 />
               ))}
             </ul>
           )}
         </Spin>
 
-        {totalPages > 1 ? (
+        {state.skillsPagination.totalPages > 1 ? (
           <div className="flex justify-center pt-1">
             <Pagination
-              current={safePage}
-              pageSize={PAGE_SIZE}
-              total={filtered.length}
-              onChange={(p) => setPage(p)}
+              current={state.skillsPagination.page}
+              pageSize={state.skillsPagination.limit}
+              total={state.skillsPagination.total}
+              onChange={(p) => void run(setSkillsPage(state, p))}
               showSizeChanger={false}
             />
           </div>
@@ -303,70 +430,146 @@ export function SkillsPage() {
   );
 }
 
+function InstallFilterButton({
+  selected,
+  onClick,
+  children,
+}: {
+  selected: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded-full border px-3.5 py-1.5 text-sm font-medium transition",
+        selected
+          ? "border-[#30343a] bg-[#30343a] text-white shadow-sm shadow-slate-300/30"
+          : "border-slate-200/90 bg-white/78 text-slate-600 hover:border-slate-300 hover:bg-[#f7f7f5] hover:text-slate-900",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function CategoryButton({
+  category,
+  selected,
+  onClick,
+}: {
+  category: SkillsRegistryCategory;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded-full border px-3 py-1.5 text-sm font-medium transition",
+        selected
+          ? "border-slate-900 bg-slate-900 text-white"
+          : "border-slate-200/90 bg-white text-slate-600 hover:border-slate-300 hover:bg-[#f7f7f5] hover:text-slate-900",
+      )}
+    >
+      {category.icon ? <span className="mr-1">{category.icon}</span> : null}
+      {category.name}
+    </button>
+  );
+}
+
+function DismissibleNotice({ notice, onClose }: { notice: SkillMessage; onClose: () => void }) {
+  return (
+    <Alert
+      showIcon
+      closable
+      type={notice.kind === "error" ? "error" : "success"}
+      message={notice.message}
+      onClose={onClose}
+    />
+  );
+}
+
 function SkillMarketCard({
   skill,
+  message,
   busy,
   onToggle,
 }: {
-  skill: SkillStatusEntry;
+  skill: SkillsRegistryCatalogItem;
+  message: SkillMessage | null;
   busy: boolean;
-  onToggle: (checked: boolean) => Promise<void>;
+  onToggle: () => void;
 }) {
-  const blockedByPolicy = skill.blockedByAllowlist;
-  /** 不满足依赖时仍应允许切换启用（由网关落盘；不可用状态用标签提示） */
-  const switchDisabled = blockedByPolicy || busy;
-  const switchChecked = !skill.disabled;
-
-  const tags: string[] = ["local"];
-  if (skill.disabled) {
-    tags.push("disabled");
-  } else {
-    tags.push("enabled");
-  }
-  if (hasSetupIssues(skill) && !skill.disabled) {
-    tags.push("needs-setup");
-  } else if (!skill.disabled && skill.eligible) {
-    tags.push("ready");
-  }
-  if (skill.bundled) {
-    tags.push("bundled");
+  const localInstall = isLocalDirectoryInstall(skill);
+  const toggledOn = localInstall ? isLocalSkillEnabled(skill) : skill.installState.installed;
+  const disabled =
+    busy || (skill.installState.installed && !skill.installState.canUninstall && !localInstall);
+  const label = localInstall
+    ? toggledOn
+      ? "已启用"
+      : "已禁用"
+    : skill.installState.installed
+      ? "已安装"
+      : "安装";
+  const tags = [...skill.tags];
+  if (localInstall && !tags.some((tag) => tag.toLowerCase() === "local")) {
+    tags.unshift("local");
   }
 
   return (
     <li>
       <article
         className={cn(
-          "flex h-full min-h-[220px] flex-col gap-3 rounded-2xl border border-slate-200/75 bg-white/88 p-4 shadow-sm shadow-slate-300/14 sm:p-5",
+          "flex h-full min-h-[280px] flex-col gap-3 rounded-2xl border border-slate-200/75 bg-white/88 p-4 shadow-sm shadow-slate-300/14 sm:p-5",
           "transition hover:border-slate-300/85 hover:bg-white hover:shadow-md hover:shadow-slate-300/16",
         )}
       >
         <div className="flex items-start justify-between gap-3">
           <h2
             className="line-clamp-2 min-w-0 flex-1 text-base font-semibold leading-snug text-slate-900 sm:text-lg"
-            title={skill.name}
+            title={skill.displayName}
           >
-            {skill.emoji ? <span className="mr-1">{skill.emoji}</span> : null}
-            {skill.name}
+            {skill.displayName}
           </h2>
           <div className="flex shrink-0 flex-col items-end gap-1">
             <Text type="secondary" className="text-[11px] leading-none">
-              {busy ? "处理中" : switchChecked ? "开" : "关"}
+              {busy ? "处理中" : label}
             </Text>
             <Switch
               size="small"
-              checked={switchChecked}
-              disabled={switchDisabled}
+              checked={toggledOn}
+              disabled={disabled}
               loading={busy}
-              onChange={(v) => void onToggle(v)}
+              onChange={onToggle}
             />
           </div>
         </div>
 
+        <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+          <span className="inline-flex items-center gap-1" title={`${skill.downloads} downloads`}>
+            <DownloadOutlined />
+            {formatCompactNumber(skill.downloads)}
+          </span>
+          <span className="inline-flex items-center gap-1" title={`${skill.installs} installs`}>
+            <StarOutlined />
+            {formatCompactNumber(skill.installs)}
+          </span>
+          <span>{skill.version || "版本未知"}</span>
+          {skill.installState.installedVersion &&
+          skill.installState.installedVersion !== skill.version ? (
+            <StatusPill>已装 {skill.installState.installedVersion}</StatusPill>
+          ) : null}
+        </div>
+
         <Paragraph
           className="!mb-0 line-clamp-3 flex-1 text-sm leading-relaxed text-slate-600"
-          title={skill.description}
+          title={skill.summary}
         >
-          {skill.description || "暂无描述"}
+          {skill.summary || "暂无描述"}
         </Paragraph>
 
         <div className="flex flex-wrap gap-1.5">
@@ -375,10 +578,25 @@ function SkillMarketCard({
           ))}
         </div>
 
-        <div className="mt-auto border-t border-slate-100 pt-2.5 text-xs text-slate-500">
-          <span className="truncate" title={skill.source}>
-            {skill.source || "openclaw"}
+        {message ? (
+          <div
+            className={cn(
+              "line-clamp-2 rounded-lg px-2.5 py-2 text-xs",
+              message.kind === "error"
+                ? "bg-red-50 text-red-700"
+                : "bg-emerald-50 text-emerald-700",
+            )}
+            title={message.message}
+          >
+            {message.message}
+          </div>
+        ) : null}
+
+        <div className="mt-auto flex items-center justify-between gap-3 border-t border-slate-100 pt-2.5 text-xs text-slate-500">
+          <span className="min-w-0 flex-1 truncate" title={skill.author ?? "Registry skill"}>
+            {skill.author ? `by ${skill.author}` : localInstall ? "本地目录" : "远端仓库"}
           </span>
+          <span className="shrink-0">{formatRelativeTime(skill.updatedAt)}</span>
         </div>
       </article>
     </li>
