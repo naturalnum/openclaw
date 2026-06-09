@@ -1026,7 +1026,9 @@ describe("resolveGatewayModelSupportsImages", () => {
       resolveGatewayModelSupportsImages({
         model: "custom-local-model",
         provider: "openai",
-        loadGatewayModelCatalog: async () => [{ id: "gpt-5.4", name: "GPT-5.4", provider: "openai", input: ["text", "image"] }],
+        loadGatewayModelCatalog: async () => [
+          { id: "gpt-5.4", name: "GPT-5.4", provider: "openai", input: ["text", "image"] },
+        ],
       }),
     ).resolves.toBe(true);
   });
