@@ -1,4 +1,6 @@
 export type McpServerConfig = {
+  /** Set false to keep the server configured but skip runtime startup. */
+  enabled?: boolean;
   /** Stdio transport: command to spawn. */
   command?: string;
   /** Stdio transport: arguments for the command. */

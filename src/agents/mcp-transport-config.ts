@@ -62,6 +62,14 @@ function getRequestedTransport(rawServer: unknown): string {
   return normalizeLowercaseStringOrEmpty((rawServer as { transport?: string }).transport);
 }
 
+function isMcpServerDisabled(rawServer: unknown): boolean {
+  if (!rawServer || typeof rawServer !== "object") {
+    return false;
+  }
+  const record = rawServer as { enabled?: unknown; disabled?: unknown };
+  return record.enabled === false || record.disabled === true;
+}
+
 function resolveHttpTransportConfig(
   serverName: string,
   rawServer: unknown,
@@ -97,6 +105,11 @@ export function resolveMcpTransportConfig(
   serverName: string,
   rawServer: unknown,
 ): ResolvedMcpTransportConfig | null {
+  if (isMcpServerDisabled(rawServer)) {
+    logWarn(`bundle-mcp: skipped server "${serverName}" because it is disabled.`);
+    return null;
+  }
+
   const requestedTransport = getRequestedTransport(rawServer);
   const stdioLaunch = resolveStdioMcpServerLaunchConfig(rawServer);
   if (stdioLaunch.ok) {

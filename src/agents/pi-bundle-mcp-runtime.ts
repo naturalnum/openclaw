@@ -32,6 +32,76 @@ type LoadedMcpConfig = ReturnType<typeof loadEmbeddedPiMcpConfig>;
 type ListedTool = Awaited<ReturnType<Client["listTools"]>>["tools"][number];
 
 const SESSION_MCP_RUNTIME_MANAGER_KEY = Symbol.for("openclaw.sessionMcpRuntimeManager");
+const DEFAULT_FAILED_SERVER_COOLDOWN_MS = 60_000;
+const MAX_FAILED_SERVER_COOLDOWN_MS = 5 * 60_000;
+
+type FailedMcpServerCooldown = {
+  serverName: string;
+  failedAt: number;
+  retryAfter: number;
+  failureCount: number;
+  description: string;
+  error: string;
+};
+
+const failedServerCooldowns = new Map<string, FailedMcpServerCooldown>();
+
+function createServerCooldownKey(params: {
+  workspaceDir: string;
+  serverName: string;
+  rawServer: unknown;
+}): string {
+  return crypto
+    .createHash("sha1")
+    .update(params.workspaceDir)
+    .update("\0")
+    .update(params.serverName)
+    .update("\0")
+    .update(JSON.stringify(params.rawServer))
+    .digest("hex");
+}
+
+function getActiveServerCooldown(key: string, now = Date.now()): FailedMcpServerCooldown | null {
+  const cooldown = failedServerCooldowns.get(key);
+  if (!cooldown) {
+    return null;
+  }
+  if (cooldown.retryAfter <= now) {
+    failedServerCooldowns.delete(key);
+    return null;
+  }
+  return cooldown;
+}
+
+function clearServerCooldown(key: string) {
+  failedServerCooldowns.delete(key);
+}
+
+function recordServerFailure(params: {
+  key: string;
+  serverName: string;
+  description: string;
+  error: string;
+  now?: number;
+}): FailedMcpServerCooldown {
+  const now = params.now ?? Date.now();
+  const previous = failedServerCooldowns.get(params.key);
+  const failureCount = (previous?.failureCount ?? 0) + 1;
+  const cooldownMs = Math.min(
+    MAX_FAILED_SERVER_COOLDOWN_MS,
+    DEFAULT_FAILED_SERVER_COOLDOWN_MS * failureCount,
+  );
+  const cooldown = {
+    serverName: params.serverName,
+    failedAt: now,
+    retryAfter: now + cooldownMs,
+    failureCount,
+    description: params.description,
+    error: params.error,
+  };
+  failedServerCooldowns.set(params.key, cooldown);
+  return cooldown;
+}
 
 function connectWithTimeout(
   client: Client,
@@ -159,6 +229,18 @@ export function createSessionMcpRuntime(params: {
       try {
         for (const [serverName, rawServer] of Object.entries(loaded.mcpServers)) {
           failIfDisposed();
+          const cooldownKey = createServerCooldownKey({
+            workspaceDir: params.workspaceDir,
+            serverName,
+            rawServer,
+          });
+          const cooldown = getActiveServerCooldown(cooldownKey);
+          if (cooldown) {
+            logWarn(
+              `bundle-mcp: skipped server "${serverName}" after ${cooldown.failureCount} failed start attempt(s); retry after ${new Date(cooldown.retryAfter).toISOString()}.`,
+            );
+            continue;
+          }
           const resolved = resolveMcpTransport(serverName, rawServer);
           if (!resolved) {
             continue;
@@ -192,6 +274,7 @@ export function createSessionMcpRuntime(params: {
             failIfDisposed();
             const listedTools = await listAllTools(client);
             failIfDisposed();
+            clearServerCooldown(cooldownKey);
             servers[serverName] = {
               serverName,
               launchSummary: resolved.description,
@@ -214,8 +297,15 @@ export function createSessionMcpRuntime(params: {
             }
           } catch (error) {
             if (!disposed) {
+              const redactedError = redactErrorUrls(error);
+              const cooldown = recordServerFailure({
+                key: cooldownKey,
+                serverName,
+                description: resolved.description,
+                error: redactedError,
+              });
               logWarn(
-                `bundle-mcp: failed to start server "${serverName}" (${resolved.description}): ${redactErrorUrls(error)}`,
+                `bundle-mcp: failed to start server "${serverName}" (${resolved.description}): ${redactedError}; temporarily disabled until ${new Date(cooldown.retryAfter).toISOString()}.`,
               );
             }
             await disposeSession(session);
@@ -436,8 +526,12 @@ export async function disposeAllSessionMcpRuntimes(): Promise<void> {
 export const __testing = {
   async resetSessionMcpRuntimeManager() {
     await disposeAllSessionMcpRuntimes();
+    failedServerCooldowns.clear();
   },
   getCachedSessionIds() {
     return getSessionMcpRuntimeManager().listSessionIds();
+  },
+  getFailedServerCooldowns() {
+    return Array.from(failedServerCooldowns.values()).map((cooldown) => ({ ...cooldown }));
   },
 };

@@ -1246,6 +1246,8 @@ export const FIELD_HELP: Record<string, string> = {
   mcp: "Global MCP server definitions managed by OpenClaw. Embedded Pi and other runtime adapters can consume these servers without storing them inside Pi-owned project settings.",
   "mcp.servers":
     "Named MCP server definitions. OpenClaw stores them in its own config and runtime adapters decide which transports are supported at execution time.",
+  "mcp.servers.*.enabled":
+    "Set false to keep an MCP server configured while preventing runtime adapters from starting or probing it.",
   session:
     "Global session routing, reset, delivery policy, and maintenance controls for conversation history behavior. Keep defaults unless you need stricter isolation, retention, or delivery constraints.",
   "session.scope":

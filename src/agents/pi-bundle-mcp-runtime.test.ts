@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   cleanupBundleMcpHarness,
   makeTempDir,
+  startSseProbeServer,
   waitForFileText,
   writeBundleProbeMcpServer,
   writeClaudeBundle,
@@ -254,6 +255,48 @@ describe("session MCP runtime", () => {
     expect(resultA.content[0]).toMatchObject({ type: "text", text: "FROM-CONFIG-A" });
     expect(resultB.content[0]).toMatchObject({ type: "text", text: "FROM-CONFIG-B" });
     expect(await fs.readFile(startupCounterPath, "utf8")).toBe("2");
+  });
+
+  it("temporarily skips failed MCP servers across new session runtimes", async () => {
+    const workspaceDir = await makeTempDir("openclaw-bundle-mcp-tools-");
+    const closedServer = await startSseProbeServer();
+    const port = closedServer.port;
+    await closedServer.close();
+    const cfg = {
+      mcp: {
+        servers: {
+          offlineProbe: {
+            transport: "streamable-http",
+            url: `http://127.0.0.1:${port}/mcp`,
+            connectionTimeoutMs: 50,
+          } as const,
+        },
+      },
+    };
+
+    const runtimeA = await getOrCreateSessionMcpRuntime({
+      sessionId: "session-offline-a",
+      sessionKey: "agent:test:session-offline-a",
+      workspaceDir,
+      cfg,
+    });
+    await materializeBundleMcpToolsForRun({ runtime: runtimeA });
+
+    expect(__testing.getFailedServerCooldowns()).toMatchObject([
+      { serverName: "offlineProbe", failureCount: 1 },
+    ]);
+
+    const runtimeB = await getOrCreateSessionMcpRuntime({
+      sessionId: "session-offline-b",
+      sessionKey: "agent:test:session-offline-b",
+      workspaceDir,
+      cfg,
+    });
+    await materializeBundleMcpToolsForRun({ runtime: runtimeB });
+
+    expect(__testing.getFailedServerCooldowns()).toMatchObject([
+      { serverName: "offlineProbe", failureCount: 1 },
+    ]);
   });
 
   it("disposes startup-in-flight runtimes without leaking MCP processes", async () => {

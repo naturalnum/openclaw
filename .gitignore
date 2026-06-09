@@ -154,6 +154,7 @@ extensions/qa-lab/web/dist/
 # Deploy runtime state
 deploy/openclaw-power.tar
 deploy.zip
+deploy/openclaw-runtime/*
 deploy/openclaw-home/*
 !deploy/openclaw-home/.env
 !deploy/openclaw-home/.env.example
