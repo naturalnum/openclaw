@@ -211,8 +211,12 @@ export function usePowerWorkbenchChat(
   patchSettings: (patch: Partial<UiSettings>) => void,
 ) {
   const [, bump] = useState(0);
+  const [sessionsVersion, setSessionsVersion] = useState(0);
   const bumpRuntime = useCallback(() => {
     bump((n) => n + 1);
+  }, []);
+  const bumpSessionsVersion = useCallback(() => {
+    setSessionsVersion((n) => n + 1);
   }, []);
 
   const clientRef = useRef<GatewayBrowserClient | null>(null);
@@ -358,6 +362,7 @@ export function usePowerWorkbenchChat(
         } else {
           patchSettings({ sessionKey: "", lastActiveSessionKey: "" });
         }
+        bumpSessionsVersion();
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
         snapshotErrorRef.current = message;
@@ -380,7 +385,7 @@ export function usePowerWorkbenchChat(
         }
       }
     },
-    [adapter, bumpRuntime, getOrCreateRuntime, patchSettings],
+    [adapter, bumpRuntime, bumpSessionsVersion, getOrCreateRuntime, patchSettings],
   );
 
   const refreshSnapshotRef = useRef(refreshSnapshot);
@@ -746,6 +751,7 @@ export function usePowerWorkbenchChat(
           sessionKey,
         });
         sessionKey = newKey.trim();
+        bumpSessionsVersion();
       }
 
       const rt = getOrCreateRuntime(sessionKey);
@@ -789,7 +795,15 @@ export function usePowerWorkbenchChat(
       );
       return true;
     },
-    [adapter, bumpRuntime, connected, getOrCreateRuntime, patchSettings, refreshSnapshot],
+    [
+      adapter,
+      bumpRuntime,
+      bumpSessionsVersion,
+      connected,
+      getOrCreateRuntime,
+      patchSettings,
+      refreshSnapshot,
+    ],
   );
 
   const stopGeneration = useCallback(async () => {
@@ -909,6 +923,7 @@ export function usePowerWorkbenchChat(
     connected,
     selectedProjectId,
     selectedSessionKey,
+    sessionsVersion,
     activeRuntime,
     refreshSnapshot,
     selectSession,

@@ -1184,7 +1184,7 @@ function PowerShellLayoutContent() {
   const location = useLocation();
   const { settings, patchSettings } = usePowerUiSettings();
   const adapter = useGatewayWorkbenchAdapter(settings);
-  const { selectSession, setActiveAgent } = useWorkbenchChat();
+  const { selectSession, sessionsVersion, setActiveAgent } = useWorkbenchChat();
   const {
     sessions: recentSessions,
     loading: recentLoading,
@@ -1200,6 +1200,10 @@ function PowerShellLayoutContent() {
   const reloadProjects = useCallback(() => {
     setProjectsReloadToken((n) => n + 1);
   }, []);
+
+  useEffect(() => {
+    void refetchRecent();
+  }, [refetchRecent, sessionsVersion]);
 
   useEffect(() => {
     if (!adapter) {
