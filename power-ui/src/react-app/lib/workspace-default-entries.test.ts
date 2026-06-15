@@ -17,6 +17,16 @@ describe("workspace-default-entries", () => {
     expect(isOpenClawDefaultWorkspaceEntry({ name: "gen_pdf.py", kind: "file" })).toBe(false);
   });
 
+  it("keeps user artifacts when the absolute workspace path is under .openclaw", () => {
+    expect(
+      isOpenClawDefaultWorkspaceEntry({
+        name: "接口文档_整理.md",
+        path: "/Users/test/.openclaw/workspace/test/接口文档_整理.md",
+        kind: "file",
+      }),
+    ).toBe(false);
+  });
+
   it("hides .openclaw state directory", () => {
     expect(isOpenClawDefaultWorkspaceEntry({ name: ".openclaw", kind: "directory" })).toBe(true);
   });

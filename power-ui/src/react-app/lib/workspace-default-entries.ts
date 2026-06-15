@@ -18,6 +18,17 @@ export const OPENCLAW_WORKSPACE_HIDDEN_FILE_NAMES = new Set(
 
 export const OPENCLAW_WORKSPACE_HIDDEN_DIR_NAMES = new Set([".chat-uploads", ".openclaw"]);
 
+function isRelativeWorkspacePath(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return false;
+  }
+  if (trimmed.startsWith("/") || trimmed.startsWith("\\")) {
+    return false;
+  }
+  return !/^[a-z]:[\\/]/i.test(trimmed);
+}
+
 export function isOpenClawDefaultWorkspaceEntry(entry: {
   name: string;
   kind: "file" | "directory";
@@ -32,7 +43,11 @@ export function isOpenClawDefaultWorkspaceEntry(entry: {
     .split("/")
     .map((segment) => segment.trim().toLowerCase())
     .filter(Boolean);
-  if (pathSegments.some((segment) => OPENCLAW_WORKSPACE_HIDDEN_DIR_NAMES.has(segment))) {
+  if (
+    entry.path &&
+    isRelativeWorkspacePath(entry.path) &&
+    pathSegments.some((segment) => OPENCLAW_WORKSPACE_HIDDEN_DIR_NAMES.has(segment))
+  ) {
     return true;
   }
   if (entry.kind === "directory") {

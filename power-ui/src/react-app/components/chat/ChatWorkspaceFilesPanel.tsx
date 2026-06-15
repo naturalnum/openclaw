@@ -303,6 +303,17 @@ export function ChatWorkspaceFilesPanel({
     entriesCountRef.current = entries.length;
   }, [entries.length]);
 
+  useEffect(() => {
+    setPath(null);
+    setEntries([]);
+    setParentPath(null);
+    setBreadcrumb("");
+    setError(null);
+    setPreview({ status: "idle", entry: null, result: null, error: null });
+    setPaneMode("split");
+    setShowAllFiles(false);
+  }, [agentId]);
+
   const load = useCallback(async () => {
     const id = agentId.trim();
     if (!id) {

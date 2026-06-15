@@ -374,35 +374,6 @@ function fileToChatAttachment(file: File): Promise<ChatAttachment | null> {
   });
 }
 
-type AgentWorkbenchEventPayload = Extract<WorkbenchAdapterEvent, { type: "agent" }>["payload"];
-
-function toolEventMayChangeWorkspaceFiles(payload: AgentWorkbenchEventPayload): boolean {
-  if (payload.stream !== "tool") {
-    return false;
-  }
-  const data = payload.data ?? {};
-  const phase = typeof data.phase === "string" ? data.phase : "";
-  if (phase && phase !== "start" && phase !== "result") {
-    return false;
-  }
-  const name = typeof data.name === "string" ? data.name.toLowerCase() : "";
-  if (/(write|edit|patch|create|delete|upload|apply_patch|fs)/i.test(name)) {
-    return true;
-  }
-  const args = data.args;
-  if (!args || typeof args !== "object") {
-    return false;
-  }
-  const record = args as Record<string, unknown>;
-  const command = typeof record.command === "string" ? record.command : "";
-  if (/[>]|tee\s+|touch\s+|mkdir\s+|rm\s+|mv\s+|cp\s+|apply_patch/.test(command)) {
-    return true;
-  }
-  return ["path", "filePath", "filename", "target"].some(
-    (key) => typeof record[key] === "string" && record[key].trim().length > 0,
-  );
-}
-
 function TypingDots({ className }: { className?: string }) {
   return (
     <span className={cn("inline-flex items-center gap-1", className)} aria-hidden>
@@ -555,24 +526,21 @@ export function ChatPage() {
   const {
     previewActive: workspacePreviewActive,
     setPreviewActive: setWorkspacePreviewActive,
+    railOpen: workspaceRailOpen,
     fullscreen: workspacePreviewFullscreen,
     canFullscreen: workspaceCanFullscreen,
     toggleFullscreen: toggleWorkspacePreviewFullscreen,
   } = useWorkspaceRail();
 
   const workspaceAgentId = useMemo(() => {
-    return selectedProjectId?.trim() || snapshot?.currentProjectId?.trim() || "";
-  }, [selectedProjectId, snapshot?.currentProjectId]);
+    return selectedProjectId?.trim() || "";
+  }, [selectedProjectId]);
 
-  const [workspaceRailRevealedByFileChange, setWorkspaceRailRevealedByFileChange] = useState(false);
-  const workspaceRailEligible = Boolean(
-    workspaceAgentId && (workspacePreviewActive || workspaceRailRevealedByFileChange),
-  );
+  const workspaceRailEligible = Boolean(workspaceAgentId && workspaceRailOpen);
   const activeFileAccept = CHAT_FILE_ACCEPT;
 
   useEffect(() => {
     setWorkspacePreviewActive(false);
-    setWorkspaceRailRevealedByFileChange(false);
   }, [setWorkspacePreviewActive, workspaceAgentId]);
 
   useEffect(() => {
@@ -580,7 +548,6 @@ export function ChatPage() {
       return undefined;
     }
     let timer: number | null = null;
-    let sawWorkspaceFileMutation = false;
     const scheduleReload = () => {
       if (timer != null) {
         window.clearTimeout(timer);
@@ -593,23 +560,8 @@ export function ChatPage() {
     const unsubscribe = adapter.subscribe((event: WorkbenchAdapterEvent) => {
       if (event.type === "chat") {
         const agentId = parseAgentSessionKey(event.sessionKey)?.agentId ?? "";
-        if (agentId === workspaceAgentId && event.state === "final" && sawWorkspaceFileMutation) {
-          setWorkspaceRailRevealedByFileChange(true);
+        if (agentId === workspaceAgentId && event.state === "final") {
           scheduleReload();
-          sawWorkspaceFileMutation = false;
-        }
-        if (event.state === "error" || event.state === "aborted") {
-          sawWorkspaceFileMutation = false;
-        }
-        return;
-      }
-      if (event.type === "agent") {
-        const sessionKey =
-          typeof event.payload.sessionKey === "string" ? event.payload.sessionKey : "";
-        const agentId = parseAgentSessionKey(sessionKey)?.agentId ?? "";
-        if (agentId === workspaceAgentId) {
-          sawWorkspaceFileMutation =
-            sawWorkspaceFileMutation || toolEventMayChangeWorkspaceFiles(event.payload);
         }
       }
     });
