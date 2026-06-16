@@ -867,7 +867,7 @@ function SidebarNav({
                             setProjectContextOnlyId("");
                             patchSettings({ sessionKey: s.key, lastActiveSessionKey: s.key });
                             void onSelectSession?.(s.key, null, {
-                              skipSessionProject: isPowerQuickSessionKey(s.key),
+                              skipSessionProject: true,
                             });
                             onPick?.();
                           }}

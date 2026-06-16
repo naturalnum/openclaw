@@ -1,4 +1,4 @@
-import { ArrowUpOutlined } from "@ant-design/icons";
+import { ArrowUpOutlined, DownloadOutlined, FileTextOutlined } from "@ant-design/icons";
 import { App } from "antd";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -133,7 +133,52 @@ function shouldShowToolStepsList(
   return false;
 }
 
-function renderChatMessageBubble(msg: unknown, key: string) {
+function renderChatMediaAttachments(
+  attachments: ChatMediaAttachment[],
+  options?: {
+    agentId?: string | null;
+    onDownload?: (attachment: ChatMediaAttachment) => void;
+  },
+) {
+  if (attachments.length === 0) {
+    return null;
+  }
+  const canDownload = Boolean(options?.agentId?.trim() && options?.onDownload);
+  return (
+    <div className="mt-2 flex flex-col gap-1.5">
+      {attachments.map((attachment) => (
+        <div
+          key={attachment.path}
+          className="flex items-center gap-2 rounded-xl border border-slate-200/70 bg-slate-50/70 px-2.5 py-2 text-xs text-slate-700"
+        >
+          <FileTextOutlined className="shrink-0 text-slate-500" aria-hidden />
+          <span className="min-w-0 flex-1 truncate font-medium" title={attachment.name}>
+            {attachment.name}
+          </span>
+          {canDownload ? (
+            <button
+              type="button"
+              onClick={() => options?.onDownload?.(attachment)}
+              className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 active:scale-[0.98]"
+            >
+              <DownloadOutlined className="text-[11px]" aria-hidden />
+              下载
+            </button>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function renderChatMessageBubble(
+  msg: unknown,
+  key: string,
+  options?: {
+    mediaAgentId?: string | null;
+    onDownloadMedia?: (attachment: ChatMediaAttachment) => void;
+  },
+) {
   if (!isRenderableChatMessage(msg) || !messageHasVisibleText(msg)) {
     return null;
   }
@@ -142,6 +187,10 @@ function renderChatMessageBubble(msg: unknown, key: string) {
   const isUser = role === "user";
   const isAssistant = role === "assistant";
   const displayText = isAssistant ? sanitizeChatDisplayText(text) : text;
+  const mediaAttachments = isAssistant ? extractMediaAttachments(text) : [];
+  if (!displayText && mediaAttachments.length === 0) {
+    return null;
+  }
   return (
     <div key={key} className={cn("flex w-full", isUser ? "justify-end" : "justify-start")}>
       <div
@@ -153,11 +202,17 @@ function renderChatMessageBubble(msg: unknown, key: string) {
             : "rounded-bl-md bg-white text-slate-800 ring-1 ring-slate-200/50",
         )}
       >
-        {isAssistant ? (
+        {isAssistant && displayText ? (
           <ChatMarkdownBody source={displayText} />
-        ) : (
+        ) : !isAssistant ? (
           <span className="whitespace-pre-wrap break-words">{displayText}</span>
-        )}
+        ) : null}
+        {isAssistant
+          ? renderChatMediaAttachments(mediaAttachments, {
+              agentId: options?.mediaAgentId,
+              onDownload: options?.onDownloadMedia,
+            })
+          : null}
       </div>
     </div>
   );
@@ -320,33 +375,42 @@ function mediaPathBasename(rawPath: string): string {
   return parts.length > 0 ? (parts[parts.length - 1] ?? "文件") : "文件";
 }
 
+type ChatMediaAttachment = {
+  path: string;
+  name: string;
+};
+
+function normalizeMediaPath(rawPath: string): string {
+  return rawPath
+    .trim()
+    .replace(/^`+|`+$/g, "")
+    .replace(/^"+|"+$/g, "")
+    .replace(/^'+|'+$/g, "")
+    .trim();
+}
+
+function extractMediaAttachments(text: string): ChatMediaAttachment[] {
+  const seen = new Set<string>();
+  const attachments: ChatMediaAttachment[] = [];
+  for (const line of text.split("\n")) {
+    const match = line.trim().match(/^MEDIA:(.+)$/);
+    const rawPath = match?.[1] ? normalizeMediaPath(match[1]) : "";
+    if (!rawPath || seen.has(rawPath)) {
+      continue;
+    }
+    seen.add(rawPath);
+    attachments.push({
+      path: rawPath,
+      name: mediaPathBasename(rawPath),
+    });
+  }
+  return attachments;
+}
+
 function sanitizeChatDisplayText(text: string): string {
   const lines = text.split("\n");
-  const mediaNames = new Set<string>();
-  for (const line of lines) {
-    const match = line.trim().match(/^MEDIA:(.+)$/);
-    if (match?.[1]) {
-      mediaNames.add(mediaPathBasename(match[1]));
-    }
-  }
   const bodyWithoutMediaLines = lines
-    .filter((line) => {
-      const match = line.trim().match(/^MEDIA:(.+)$/);
-      if (!match?.[1]) {
-        return true;
-      }
-      const filename = mediaPathBasename(match[1]);
-      if (mediaNames.size === 0) {
-        return true;
-      }
-      const mentionedElsewhere = lines.some((other) => {
-        if (other === line) {
-          return false;
-        }
-        return other.includes(filename);
-      });
-      return !mentionedElsewhere;
-    })
+    .filter((line) => !line.trim().match(/^MEDIA:(.+)$/))
     .join("\n");
   return bodyWithoutMediaLines.replace(/\n{3,}/g, "\n\n").trim();
 }
@@ -416,6 +480,7 @@ export function ChatPage() {
     snapshotError,
     selectedProjectId,
     selectedSessionKey,
+    sessionProjectDetached,
     activeRuntime,
     selectSession,
     sendUserMessage,
@@ -446,7 +511,7 @@ export function ChatPage() {
 
     if (rawSession) {
       const hasProjectParam = Boolean(pid);
-      const skipSessionProject = isPowerQuickSessionKey(rawSession);
+      const skipSessionProject = !hasProjectParam || isPowerQuickSessionKey(rawSession);
       const agentId = isPowerQuickSessionKey(rawSession)
         ? null
         : (parseAgentSessionKey(rawSession)?.agentId ?? pid ?? null);
@@ -522,6 +587,10 @@ export function ChatPage() {
 
   const agents = snapshot?.agentsList?.agents ?? [];
   const defaultAgentId = snapshot?.agentsList?.defaultId ?? null;
+  const chatMediaAgentId = useMemo(
+    () => parseAgentSessionKey(selectedSessionKey)?.agentId ?? selectedProjectId ?? defaultAgentId,
+    [defaultAgentId, selectedProjectId, selectedSessionKey],
+  );
   const [workspaceFilesReloadToken, setWorkspaceFilesReloadToken] = useState(0);
   const {
     previewActive: workspacePreviewActive,
@@ -533,11 +602,30 @@ export function ChatPage() {
   } = useWorkspaceRail();
 
   const workspaceAgentId = useMemo(() => {
+    if (sessionProjectDetached || isPowerQuickSessionKey(selectedSessionKey)) {
+      return "";
+    }
     return selectedProjectId?.trim() || "";
-  }, [selectedProjectId]);
+  }, [selectedProjectId, selectedSessionKey, sessionProjectDetached]);
 
   const workspaceRailEligible = Boolean(workspaceAgentId && workspaceRailOpen);
   const activeFileAccept = CHAT_FILE_ACCEPT;
+
+  const handleDownloadMediaAttachment = useCallback(
+    async (attachment: ChatMediaAttachment) => {
+      const agentId = chatMediaAgentId?.trim();
+      if (!adapter || !agentId) {
+        message.warning("当前会话暂时无法定位文件所属项目，请稍后重试。");
+        return;
+      }
+      try {
+        await adapter.downloadProjectFile(agentId, attachment.path);
+      } catch (err) {
+        message.error(err instanceof Error ? err.message : "下载失败，请稍后重试。");
+      }
+    },
+    [adapter, chatMediaAgentId, message],
+  );
 
   useEffect(() => {
     setWorkspacePreviewActive(false);
@@ -1105,6 +1193,10 @@ export function ChatPage() {
                       renderChatMessageBubble(
                         msg,
                         `lead-${i}-${isRenderableChatMessage(msg) && typeof msg.timestamp === "number" ? msg.timestamp : i}`,
+                        {
+                          mediaAgentId: chatMediaAgentId,
+                          onDownloadMedia: handleDownloadMediaAttachment,
+                        },
                       ),
                     )}
                     {optimisticUserBubble &&
@@ -1177,6 +1269,10 @@ export function ChatPage() {
                       renderChatMessageBubble(
                         msg,
                         `tail-${i}-${isRenderableChatMessage(msg) && typeof msg.timestamp === "number" ? msg.timestamp : i}`,
+                        {
+                          mediaAgentId: chatMediaAgentId,
+                          onDownloadMedia: handleDownloadMediaAttachment,
+                        },
                       ),
                     )}
                   </div>

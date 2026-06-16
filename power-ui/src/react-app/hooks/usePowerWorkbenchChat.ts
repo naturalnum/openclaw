@@ -226,6 +226,8 @@ export function usePowerWorkbenchChat(
   const selectedProjectIdRef = useRef<string | null>(null);
   const selectedSessionKeyRef = useRef("");
   const quickChatDraftRef = useRef(false);
+  const sessionProjectDetachedRef = useRef(false);
+  const detachedSessionKeysRef = useRef(new Set<string>());
   const refreshSnapshotSeqRef = useRef(0);
   const selectSessionSeqRef = useRef(0);
   const emptyHistoryReloadAttemptsRef = useRef(new Map<string, number>());
@@ -236,6 +238,12 @@ export function usePowerWorkbenchChat(
   const [connected, setConnected] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedSessionKey, setSelectedSessionKey] = useState("");
+  const [sessionProjectDetached, setSessionProjectDetached] = useState(false);
+
+  const setDetachedSessionProject = useCallback((detached: boolean) => {
+    sessionProjectDetachedRef.current = detached;
+    setSessionProjectDetached(detached);
+  }, []);
 
   useEffect(() => {
     selectedProjectIdRef.current = selectedProjectId;
@@ -310,12 +318,23 @@ export function usePowerWorkbenchChat(
         }
         snapshotRef.current = snap;
         setSnapshot(snap);
-        setSelectedProjectId(snap.currentProjectId);
-        selectedProjectIdRef.current = snap.currentProjectId;
         const key = snap.currentSessionKey?.trim() || requestedSessionKey || "";
+        const detachedSelection =
+          skipProjectDefault ||
+          skipSessionProject ||
+          (key ? isPowerQuickSessionKey(key) || detachedSessionKeysRef.current.has(key) : false);
+        const nextProjectId = detachedSelection ? null : snap.currentProjectId;
+        setSelectedProjectId(nextProjectId);
+        selectedProjectIdRef.current = nextProjectId;
         setSelectedSessionKey(key);
         selectedSessionKeyRef.current = key;
         if (key) {
+          if (detachedSelection) {
+            detachedSessionKeysRef.current.add(key);
+          } else {
+            detachedSessionKeysRef.current.delete(key);
+          }
+          setDetachedSessionProject(detachedSelection || !nextProjectId);
           patchSettings({ sessionKey: key, lastActiveSessionKey: key });
           const rt = getOrCreateRuntime(key);
           rt.sessionKey = key;
@@ -385,7 +404,14 @@ export function usePowerWorkbenchChat(
         }
       }
     },
-    [adapter, bumpRuntime, bumpSessionsVersion, getOrCreateRuntime, patchSettings],
+    [
+      adapter,
+      bumpRuntime,
+      bumpSessionsVersion,
+      getOrCreateRuntime,
+      patchSettings,
+      setDetachedSessionProject,
+    ],
   );
 
   const refreshSnapshotRef = useRef(refreshSnapshot);
@@ -397,13 +423,17 @@ export function usePowerWorkbenchChat(
     }
     const scoped = loadSettings();
     const preferred = scoped.lastActiveSessionKey.trim() || scoped.sessionKey.trim() || null;
+    if (preferred) {
+      detachedSessionKeysRef.current.add(preferred);
+    }
+    setDetachedSessionProject(Boolean(preferred));
     void refreshSnapshotRef.current({
       projectId: null,
       sessionKey: preferred,
-      skipProjectDefault: preferred ? isPowerQuickSessionKey(preferred) : false,
-      skipSessionProject: preferred ? isPowerQuickSessionKey(preferred) : false,
+      skipProjectDefault: Boolean(preferred),
+      skipSessionProject: Boolean(preferred),
     });
-  }, [adapter]);
+  }, [adapter, setDetachedSessionProject]);
 
   useEffect(() => {
     if (!adapter) {
@@ -423,9 +453,17 @@ export function usePowerWorkbenchChat(
               const scoped = loadSettings();
               const preferred =
                 key || scoped.lastActiveSessionKey.trim() || scoped.sessionKey.trim() || null;
+              const detached =
+                Boolean(preferred) &&
+                (!selectedProjectIdRef.current ||
+                  sessionProjectDetachedRef.current ||
+                  isPowerQuickSessionKey(preferred) ||
+                  detachedSessionKeysRef.current.has(preferred));
               void refreshSnapshotRef.current({
-                projectId: selectedProjectIdRef.current,
+                projectId: detached ? null : selectedProjectIdRef.current,
                 sessionKey: preferred,
+                skipProjectDefault: detached,
+                skipSessionProject: detached,
               });
             }
             if (key) {
@@ -629,6 +667,13 @@ export function usePowerWorkbenchChat(
       const skipSessionProject = options?.skipSessionProject === true;
       const projectIdForSelection =
         isPowerQuickSessionKey(key) || skipSessionProject ? null : projectId;
+      const detachedSelection = isPowerQuickSessionKey(key) || skipSessionProject;
+      if (detachedSelection) {
+        detachedSessionKeysRef.current.add(key);
+      } else {
+        detachedSessionKeysRef.current.delete(key);
+      }
+      setDetachedSessionProject(detachedSelection);
       patchSettings({ sessionKey: key, lastActiveSessionKey: key });
       setSelectedSessionKey(key);
       setSelectedProjectId(projectIdForSelection);
@@ -685,7 +730,15 @@ export function usePowerWorkbenchChat(
         }
       }
     },
-    [adapter, connected, bumpRuntime, getOrCreateRuntime, patchSettings, refreshSnapshot],
+    [
+      adapter,
+      connected,
+      bumpRuntime,
+      getOrCreateRuntime,
+      patchSettings,
+      refreshSnapshot,
+      setDetachedSessionProject,
+    ],
   );
 
   const sendUserMessage = useCallback(
@@ -704,6 +757,8 @@ export function usePowerWorkbenchChat(
         return false;
       }
       const quickChatDraft = quickChatDraftRef.current && !selectedSessionKeyRef.current.trim();
+      const selectedSessionDetached =
+        Boolean(selectedSessionKeyRef.current.trim()) && sessionProjectDetachedRef.current;
       const fallbackProjectId =
         snapshotRef.current?.agentsList?.defaultId ??
         snapshotRef.current?.agentsList?.agents?.[0]?.id ??
@@ -737,6 +792,7 @@ export function usePowerWorkbenchChat(
         setSelectedProjectId(quickChatDraft ? null : projectId);
         selectedSessionKeyRef.current = sessionKey;
         selectedProjectIdRef.current = quickChatDraft ? null : projectId;
+        setDetachedSessionProject(quickChatDraft);
         quickChatDraftRef.current = false;
         patchSettings({ sessionKey, lastActiveSessionKey: sessionKey });
         const draftRuntime = getOrCreateRuntime(sessionKey);
@@ -785,11 +841,20 @@ export function usePowerWorkbenchChat(
       bumpRuntime();
       await sendPromise;
       bumpRuntime();
+      const refreshAsDetached =
+        isPowerQuickSessionKey(sessionKey) ||
+        selectedSessionDetached ||
+        sessionProjectDetachedRef.current ||
+        detachedSessionKeysRef.current.has(sessionKey);
+      if (refreshAsDetached) {
+        detachedSessionKeysRef.current.add(sessionKey);
+      }
       void refreshSnapshot(
         {
-          projectId: isPowerQuickSessionKey(sessionKey) ? null : projectId,
+          projectId: refreshAsDetached ? null : projectId,
           sessionKey,
-          skipProjectDefault: isPowerQuickSessionKey(sessionKey),
+          skipProjectDefault: refreshAsDetached,
+          skipSessionProject: refreshAsDetached,
         },
         { reloadChatHistory: false },
       );
@@ -803,6 +868,7 @@ export function usePowerWorkbenchChat(
       getOrCreateRuntime,
       patchSettings,
       refreshSnapshot,
+      setDetachedSessionProject,
     ],
   );
 
@@ -817,12 +883,21 @@ export function usePowerWorkbenchChat(
     void refreshSnapshot({
       projectId: selectedProjectIdRef.current,
       sessionKey: key,
+      skipProjectDefault:
+        isPowerQuickSessionKey(key) ||
+        sessionProjectDetachedRef.current ||
+        detachedSessionKeysRef.current.has(key),
+      skipSessionProject:
+        isPowerQuickSessionKey(key) ||
+        sessionProjectDetachedRef.current ||
+        detachedSessionKeysRef.current.has(key),
     });
   }, [bumpRuntime, getOrCreateRuntime, refreshSnapshot]);
 
   const setActiveAgent = useCallback(
     (projectId: string | null) => {
       quickChatDraftRef.current = false;
+      setDetachedSessionProject(false);
       setSelectedProjectId(projectId);
       setSelectedSessionKey("");
       selectedProjectIdRef.current = projectId;
@@ -830,13 +905,14 @@ export function usePowerWorkbenchChat(
       patchSettings({ sessionKey: "", lastActiveSessionKey: "" });
       void refreshSnapshot({ projectId, sessionKey: null });
     },
-    [patchSettings, refreshSnapshot],
+    [patchSettings, refreshSnapshot, setDetachedSessionProject],
   );
 
   const startNewConversation = useCallback(
     (nextProjectId?: string | null, options?: { preferQuickChat?: boolean }) => {
       if (options?.preferQuickChat) {
         quickChatDraftRef.current = true;
+        setDetachedSessionProject(true);
         selectedProjectIdRef.current = null;
         setSelectedProjectId(null);
         selectedSessionKeyRef.current = "";
@@ -857,6 +933,7 @@ export function usePowerWorkbenchChat(
             snapshotRef.current?.agentsList?.defaultId ??
             null);
       quickChatDraftRef.current = false;
+      setDetachedSessionProject(false);
       if (nextProjectId !== undefined && nextProjectId !== null) {
         setSelectedProjectId(nextProjectId);
         selectedProjectIdRef.current = nextProjectId;
@@ -866,7 +943,7 @@ export function usePowerWorkbenchChat(
       patchSettings({ sessionKey: "", lastActiveSessionKey: "" });
       void refreshSnapshot({ projectId, sessionKey: null });
     },
-    [patchSettings, refreshSnapshot],
+    [patchSettings, refreshSnapshot, setDetachedSessionProject],
   );
 
   const reloadActiveChat = useCallback(async () => {
@@ -908,9 +985,15 @@ export function usePowerWorkbenchChat(
         return;
       }
       await adapter.renameSession(key, next);
+      const detached =
+        isPowerQuickSessionKey(key) ||
+        sessionProjectDetachedRef.current ||
+        detachedSessionKeysRef.current.has(key);
       void refreshSnapshot({
-        projectId: selectedProjectIdRef.current,
+        projectId: detached ? null : selectedProjectIdRef.current,
         sessionKey: key,
+        skipProjectDefault: detached,
+        skipSessionProject: detached,
       });
     },
     [adapter, refreshSnapshot],
@@ -923,6 +1006,7 @@ export function usePowerWorkbenchChat(
     connected,
     selectedProjectId,
     selectedSessionKey,
+    sessionProjectDetached,
     sessionsVersion,
     activeRuntime,
     refreshSnapshot,
