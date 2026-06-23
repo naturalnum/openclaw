@@ -1,5 +1,6 @@
 import { App as AntApp, ConfigProvider, theme } from "antd";
 import { HashRouter } from "react-router-dom";
+import { LocalUsersProvider } from "../context/LocalUsersContext";
 import { AppRouter } from "../router/AppRouter";
 
 /**
@@ -32,9 +33,11 @@ export function App() {
         }}
       >
         <AntApp style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-          <HashRouter>
-            <AppRouter />
-          </HashRouter>
+          <LocalUsersProvider>
+            <HashRouter>
+              <AppRouter />
+            </HashRouter>
+          </LocalUsersProvider>
         </AntApp>
       </ConfigProvider>
     </div>

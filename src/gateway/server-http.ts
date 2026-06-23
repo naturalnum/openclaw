@@ -83,6 +83,7 @@ let bundledChannelsModulePromise:
 let identityAvatarModulePromise: Promise<typeof import("../agents/identity-avatar.js")> | undefined;
 let controlUiModulePromise: Promise<typeof import("./control-ui.js")> | undefined;
 let embeddingsHttpModulePromise: Promise<typeof import("./embeddings-http.js")> | undefined;
+let localUsersHttpModulePromise: Promise<typeof import("./local-users-http.js")> | undefined;
 let modelsHttpModulePromise: Promise<typeof import("./models-http.js")> | undefined;
 let openAiHttpModulePromise: Promise<typeof import("./openai-http.js")> | undefined;
 let openResponsesHttpModulePromise: Promise<typeof import("./openresponses-http.js")> | undefined;
@@ -110,6 +111,11 @@ function getControlUiModule() {
 function getEmbeddingsHttpModule() {
   embeddingsHttpModulePromise ??= import("./embeddings-http.js");
   return embeddingsHttpModulePromise;
+}
+
+function getLocalUsersHttpModule() {
+  localUsersHttpModulePromise ??= import("./local-users-http.js");
+  return localUsersHttpModulePromise;
 }
 
 function getModelsHttpModule() {
@@ -231,6 +237,10 @@ function isSessionKillPath(pathname: string): boolean {
 
 function isSessionHistoryPath(pathname: string): boolean {
   return /^\/sessions\/[^/]+\/history$/.test(pathname);
+}
+
+function isLocalUsersPath(pathname: string): boolean {
+  return pathname === "/local-users" || pathname.startsWith("/local-users/");
 }
 
 function isA2uiPath(pathname: string): boolean {
@@ -955,6 +965,18 @@ export function createGatewayHttpServer(opts: {
           name: "sessions-history",
           run: async () =>
             (await getSessionHistoryHttpModule()).handleSessionHistoryHttpRequest(req, res, {
+              auth: resolvedAuth,
+              trustedProxies,
+              allowRealIpFallback,
+              rateLimiter,
+            }),
+        });
+      }
+      if (isLocalUsersPath(requestPath)) {
+        requestStages.push({
+          name: "local-users",
+          run: async () =>
+            (await getLocalUsersHttpModule()).handleLocalUsersHttpRequest(req, res, {
               auth: resolvedAuth,
               trustedProxies,
               allowRealIpFallback,

@@ -207,14 +207,15 @@ export async function getReplyFromConfig(
     }
   }
 
-  const workspaceDirRaw = resolveAgentWorkspaceDir(cfg, agentId) ?? DEFAULT_AGENT_WORKSPACE_DIR;
+  const defaultWorkspaceDirRaw =
+    resolveAgentWorkspaceDir(cfg, agentId) ?? DEFAULT_AGENT_WORKSPACE_DIR;
   const workspace = useFastTestBootstrap
-    ? (await fs.mkdir(workspaceDirRaw, { recursive: true }), { dir: workspaceDirRaw })
+    ? (await fs.mkdir(defaultWorkspaceDirRaw, { recursive: true }), { dir: defaultWorkspaceDirRaw })
     : await ensureAgentWorkspace({
-        dir: workspaceDirRaw,
+        dir: defaultWorkspaceDirRaw,
         ensureBootstrapFiles: !agentCfg?.skipBootstrap && !isFastTestEnv,
       });
-  const workspaceDir = workspace.dir;
+  let workspaceDir = workspace.dir;
   const agentDir = resolveAgentDir(cfg, agentId);
   const timeoutMs = resolveAgentTimeoutMs({ cfg, overrideSeconds: opts?.timeoutOverrideSeconds });
   const configuredTypingSeconds =
@@ -282,6 +283,17 @@ export async function getReplyFromConfig(
     triggerBodyNormalized,
     bodyStripped,
   } = sessionState;
+  const sessionWorkspaceDirRaw = normalizeOptionalString(sessionEntry.workspaceDir);
+  if (sessionWorkspaceDirRaw && sessionWorkspaceDirRaw !== workspaceDir) {
+    const sessionWorkspace = useFastTestBootstrap
+      ? (await fs.mkdir(sessionWorkspaceDirRaw, { recursive: true }),
+        { dir: sessionWorkspaceDirRaw })
+      : await ensureAgentWorkspace({
+          dir: sessionWorkspaceDirRaw,
+          ensureBootstrapFiles: false,
+        });
+    workspaceDir = sessionWorkspace.dir;
+  }
   if (resetTriggered && normalizeOptionalString(bodyStripped)) {
     const { applyResetModelOverride } = await loadSessionResetModelRuntime();
     await applyResetModelOverride({

@@ -147,6 +147,19 @@ export async function applySessionsPatchToStore(params: {
     }
   }
 
+  if ("workspaceDir" in patch) {
+    const raw = patch.workspaceDir;
+    if (raw === null) {
+      delete next.workspaceDir;
+    } else if (raw !== undefined) {
+      const trimmed = normalizeOptionalString(raw) ?? "";
+      if (!trimmed) {
+        return invalid("invalid workspaceDir: empty");
+      }
+      next.workspaceDir = trimmed;
+    }
+  }
+
   if ("spawnDepth" in patch) {
     const raw = patch.spawnDepth;
     if (raw === null) {

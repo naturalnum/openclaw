@@ -4,6 +4,7 @@ import type { ChatAttachment } from "../../../../ui/src/ui/ui-types";
 import type { GatewayWorkbenchAdapter } from "../../adapters/gateway-workbench-adapter";
 import type { WorkbenchSnapshot } from "../../adapters/mock-workbench-adapter";
 import type { WorkbenchAdapterEvent } from "../../adapters/workbench-adapter";
+import { extractText } from "../../compat/chat";
 import {
   abortChatRun,
   handleChatEvent,
@@ -104,12 +105,33 @@ function cleanChatMessageForDisplay(message: unknown): unknown {
   return message;
 }
 
+function isApprovalCommandLeak(message: unknown): boolean {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+  const role =
+    typeof (message as { role?: unknown }).role === "string"
+      ? (message as { role: string }).role.toLowerCase()
+      : "";
+  if (role !== "assistant") {
+    return false;
+  }
+  const text = extractText(message)?.trim() ?? "";
+  if (!text || !text.includes("/approve ")) {
+    return false;
+  }
+  return /^these are .*requests?[\s\S]*\n\s*(?:\/approve\s+[a-z0-9-]+\s+allow-once\s*)+$/i.test(
+    text,
+  );
+}
+
 function filterVisibleChatMessages(messages: unknown[]): unknown[] {
   return messages
     .filter(
       (message) =>
         message != null &&
         typeof message === "object" &&
+        !isApprovalCommandLeak(message) &&
         !shouldHideChatMessage(message, { showToolCalls: false }),
     )
     .map(cleanChatMessageForDisplay);
@@ -209,6 +231,7 @@ function resolveModelIdForSend(
 export function usePowerWorkbenchChat(
   adapter: GatewayWorkbenchAdapter | null,
   patchSettings: (patch: Partial<UiSettings>) => void,
+  userScope = "",
 ) {
   const [, bump] = useState(0);
   const [sessionsVersion, setSessionsVersion] = useState(0);
@@ -318,7 +341,13 @@ export function usePowerWorkbenchChat(
         }
         snapshotRef.current = snap;
         setSnapshot(snap);
-        const key = snap.currentSessionKey?.trim() || requestedSessionKey || "";
+        const requestedSessionVisible = requestedSessionKey
+          ? (snap.sessionsResult?.sessions ?? []).some(
+              (session) => session.key === requestedSessionKey,
+            )
+          : false;
+        const key =
+          snap.currentSessionKey?.trim() || (requestedSessionVisible ? requestedSessionKey : "");
         const detachedSelection =
           skipProjectDefault ||
           skipSessionProject ||
@@ -786,8 +815,8 @@ export function usePowerWorkbenchChat(
           displayText || (hasAttachments ? "图片附件" : trimmed ? trimmed : "文件附件");
         const label = buildUniqueSessionLabel(buildSessionLabelFromPrompt(labelSeed), labels);
         sessionKey = quickChatDraft
-          ? buildPowerQuickSessionKey(projectId)
-          : buildPowerSessionKey(projectId);
+          ? buildPowerQuickSessionKey(projectId, userScope)
+          : buildPowerSessionKey(projectId, userScope);
         setSelectedSessionKey(sessionKey);
         setSelectedProjectId(quickChatDraft ? null : projectId);
         selectedSessionKeyRef.current = sessionKey;
@@ -806,6 +835,12 @@ export function usePowerWorkbenchChat(
           quickChat: quickChatDraft,
           sessionKey,
         });
+        if (newKey.trim() && newKey.trim() !== sessionKey) {
+          runtimesRef.current.delete(sessionKey);
+          setSelectedSessionKey(newKey.trim());
+          selectedSessionKeyRef.current = newKey.trim();
+          patchSettings({ sessionKey: newKey.trim(), lastActiveSessionKey: newKey.trim() });
+        }
         sessionKey = newKey.trim();
         bumpSessionsVersion();
       }

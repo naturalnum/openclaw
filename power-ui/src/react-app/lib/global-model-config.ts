@@ -2,13 +2,20 @@
  * Mirrors `power-ui/src/app.ts` global model helpers so React settings can
  * persist `models.providers` via `config.set` without importing the Lit shell.
  */
-import { cloneConfigObject, serializeConfigForm } from "../../compat/controllers";
-import type { WorkbenchModelConfig } from "../../views/workbench";
+import { cloneConfigObject, serializeConfigForm } from "../../compat/controllers.js";
+import type { WorkbenchModelConfig } from "../../views/workbench.js";
 
 export type { WorkbenchModelConfig };
 
 const DEFAULT_PROVIDER_PREFIX = "provider";
 export const REDACTED_SENTINEL = "__OPENCLAW_REDACTED__";
+
+type MutableProviderConfig = Record<string, unknown> & {
+  baseUrl?: string;
+  apiKey?: string;
+  api?: string;
+  models: Array<{ id: string; name: string }>;
+};
 
 function createLocalId(): string {
   if (
@@ -86,21 +93,47 @@ export function resolveProjectWorkspacePath(
   config: Record<string, unknown> | null | undefined,
   projectName: string,
   existingWorkspaces: string[] = [],
+  options: { userFolder?: string | null } = {},
 ): string {
   const base = readDefaultAgentWorkspace(config)?.replace(/\/+$/, "") ?? "~/.openclaw/workspace";
   const slug = slugifyProjectFolderName(projectName);
+  const userFolder = options.userFolder?.trim();
+  const projectBase = userFolder
+    ? `${base}/users/${slugifyProjectFolderName(userFolder)}/projects`
+    : base;
   const used = new Set(
     existingWorkspaces
       .map((workspace) => workspace.trim().replaceAll("\\", "/").replace(/\/+$/, ""))
       .filter(Boolean),
   );
-  let candidate = `${base}/${slug}`;
+  let candidate = `${projectBase}/${slug}`;
   let index = 2;
   while (used.has(candidate)) {
-    candidate = `${base}/${slug}-${index}`;
+    candidate = `${projectBase}/${slug}-${index}`;
     index += 1;
   }
   return candidate;
+}
+
+function slugifySessionFolderName(value: string): string {
+  const normalized = value
+    .trim()
+    .normalize("NFKC")
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized.slice(0, 96) || `session-${createLocalId().slice(0, 8)}`;
+}
+
+export function resolveTemporaryChatWorkspacePath(
+  config: Record<string, unknown> | null | undefined,
+  userFolder: string | null | undefined,
+  sessionKey: string,
+): string {
+  const base = readDefaultAgentWorkspace(config)?.replace(/\/+$/, "") ?? "~/.openclaw/workspace";
+  const user = slugifyProjectFolderName(userFolder?.trim() || "default");
+  const session = slugifySessionFolderName(sessionKey);
+  return `${base}/users/${user}/default/temp/${session}`;
 }
 
 export function readDefaultAgentWorkspace(
@@ -227,7 +260,7 @@ export function buildNextGlobalModelConfig(params: {
     typeof existingModels.providers === "object" && existingModels.providers !== null
       ? (existingModels.providers as Record<string, Record<string, unknown>>)
       : {};
-  const nextProviders: Record<string, Record<string, unknown>> = {};
+  const nextProviders: Record<string, MutableProviderConfig> = {};
 
   for (const [index, modelConfig] of params.modelConfigs.entries()) {
     if (!modelConfig.enabled) {
@@ -244,7 +277,7 @@ export function buildNextGlobalModelConfig(params: {
       existingProviders[providerId] !== null
         ? existingProviders[providerId]
         : {};
-    const providerEntry =
+    const providerEntry: MutableProviderConfig =
       nextProviders[providerId] ??
       ({
         ...existingProvider,
@@ -255,7 +288,7 @@ export function buildNextGlobalModelConfig(params: {
             ? existingProvider.api
             : "openai-completions",
         models: [],
-      } as Record<string, unknown> & { models: Array<{ id: string; name: string }> });
+      } satisfies MutableProviderConfig);
 
     providerEntry.baseUrl = modelConfig.baseUrl.trim();
     providerEntry.apiKey = isRedactedSentinelValue(modelConfig.apiKey)

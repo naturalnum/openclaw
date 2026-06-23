@@ -17,13 +17,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { parseAgentSessionKey } from "../../../../ui/src/ui/session-key";
 import type { GatewayWorkbenchAdapter } from "../../adapters/gateway-workbench-adapter";
+import { extractText } from "../../compat/chat";
 import type { AgentsListResult } from "../../compat/types";
 import type { UiSettings } from "../../compat/ui-core";
+import {
+  buildLocalUserScope,
+  isProjectInLocalUserScope,
+  stripScopedProjectName,
+} from "../../integrations/openclaw/local-user-scope";
 import {
   isPowerQuickSessionKey,
   isProtectedMainSessionKey,
 } from "../../integrations/openclaw/session-keys";
 import { PowerBrandMark } from "../components/ui/PowerBrandMark";
+import { useLocalUsers } from "../context/LocalUsersContext";
 import { useWorkbenchChat, WorkbenchChatProvider } from "../context/WorkbenchChatContext";
 import { WorkspaceRailProvider } from "../context/WorkspaceRailContext";
 import { useGatewayWorkbenchAdapter } from "../hooks/useGatewayWorkbenchAdapter";
@@ -100,6 +107,12 @@ function pathTitle(pathname: string): string {
   if (pathname === ROUTES.settingsMcp) {
     return "设置 · MCP";
   }
+  if (pathname === ROUTES.settingsAccount) {
+    return "设置 · 账号";
+  }
+  if (pathname === ROUTES.settingsUsers) {
+    return "设置 · 用户";
+  }
   if (pathname === ROUTES.settings || pathname.startsWith(`${ROUTES.settings}/`)) {
     return "设置";
   }
@@ -107,6 +120,23 @@ function pathTitle(pathname: string): string {
 }
 
 type NavProject = { id: string; name: string; workspace: string | null };
+
+function recentLabelFromMessages(messages: unknown[]): string {
+  for (const message of messages) {
+    if (!message || typeof message !== "object") {
+      continue;
+    }
+    const row = message as { role?: unknown; content?: unknown };
+    if (typeof row.role === "string" && row.role.toLowerCase() !== "user") {
+      continue;
+    }
+    const text = extractText(message);
+    if (text?.trim()) {
+      return sessionDisplayLabel(text);
+    }
+  }
+  return "新对话";
+}
 
 type SidebarNavProps = {
   collapsed: boolean;
@@ -128,6 +158,9 @@ type SidebarNavProps = {
   projects: NavProject[];
   projectsLoading: boolean;
   onProjectsReload: () => void;
+  userFolder: string;
+  localUsersEnabled: boolean;
+  canManageUsers: boolean;
 };
 
 function SidebarNav({
@@ -145,6 +178,9 @@ function SidebarNav({
   projects,
   projectsLoading,
   onProjectsReload,
+  userFolder,
+  localUsersEnabled,
+  canManageUsers,
 }: SidebarNavProps) {
   const navigate = useNavigate();
   const { message, modal } = App.useApp();
@@ -176,6 +212,19 @@ function SidebarNav({
   const location = useLocation();
   const [settingsFlyoutOpen, setSettingsFlyoutOpen] = useState(false);
   const settingsFlyoutRef = useRef<HTMLDivElement | null>(null);
+  const visibleSettingsNavItems = useMemo(
+    () =>
+      SETTINGS_NAV_ITEMS.filter((item) => {
+        if (item.path === ROUTES.settingsUsers) {
+          return canManageUsers;
+        }
+        if (item.path === ROUTES.settingsAccount) {
+          return localUsersEnabled && !canManageUsers;
+        }
+        return true;
+      }),
+    [canManageUsers, localUsersEnabled],
+  );
 
   const isSettingsSection = location.pathname.startsWith(ROUTES.settings);
   const activeSearchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
@@ -369,6 +418,7 @@ function SidebarNav({
         projects
           .map((project) => project.workspace)
           .filter((workspace): workspace is string => Boolean(workspace?.trim())),
+        { userFolder },
       );
       const projectId = await adapter.createProject(name, workspace);
       if (!projectId) {
@@ -383,7 +433,7 @@ function SidebarNav({
     } finally {
       setCreateProjectBusy(false);
     }
-  }, [adapter, navigate, newProjectName, onPick, onProjectsReload, projects]);
+  }, [adapter, navigate, newProjectName, onPick, onProjectsReload, projects, userFolder]);
 
   const submitRename = useCallback(async () => {
     const key = renameKey.trim();
@@ -691,7 +741,7 @@ function SidebarNav({
                         {openProjectMenuKey === p.id ? (
                           <div
                             ref={menuRef}
-                            className="absolute right-0 top-full z-30 mt-0.5 min-w-[8rem] rounded-lg border border-slate-200/90 bg-white py-1 shadow-lg"
+                            className="absolute bottom-full right-0 z-30 mb-0.5 min-w-[8rem] rounded-lg border border-slate-200/90 bg-white py-1 shadow-lg"
                             role="menu"
                           >
                             <button
@@ -763,7 +813,7 @@ function SidebarNav({
                                 {openMenuKey === s.key ? (
                                   <div
                                     ref={menuRef}
-                                    className="absolute right-0 top-full z-30 mt-0.5 min-w-[7.5rem] rounded-lg border border-slate-200/90 bg-white py-1 shadow-lg"
+                                    className="absolute bottom-full right-0 z-30 mb-0.5 min-w-[7.5rem] rounded-lg border border-slate-200/90 bg-white py-1 shadow-lg"
                                     role="menu"
                                   >
                                     <button
@@ -897,7 +947,7 @@ function SidebarNav({
                           {openMenuKey === s.key ? (
                             <div
                               ref={menuRef}
-                              className="absolute right-0 top-full z-30 mt-0.5 min-w-[7.5rem] rounded-lg border border-slate-200/90 bg-white py-1 shadow-lg"
+                              className="absolute bottom-full right-0 z-30 mb-0.5 min-w-[7.5rem] rounded-lg border border-slate-200/90 bg-white py-1 shadow-lg"
                               role="menu"
                             >
                               <button
@@ -996,7 +1046,7 @@ function SidebarNav({
                   : "invisible pointer-events-none opacity-0 group-hover/settings:visible group-hover/settings:pointer-events-auto group-hover/settings:opacity-100",
             )}
           >
-            {SETTINGS_NAV_ITEMS.map((item) => (
+            {visibleSettingsNavItems.map((item) => (
               <NavLink
                 key={item.path}
                 role="menuitem"
@@ -1183,8 +1233,18 @@ function SidebarNav({
 function PowerShellLayoutContent() {
   const location = useLocation();
   const { settings, patchSettings } = usePowerUiSettings();
-  const adapter = useGatewayWorkbenchAdapter(settings);
-  const { selectSession, sessionsVersion, setActiveAgent } = useWorkbenchChat();
+  const localUsers = useLocalUsers();
+  const userScope = buildLocalUserScope(localUsers.user);
+  const canManageUsers = localUsers.enabled && localUsers.user?.role === "admin";
+  const adapter = useGatewayWorkbenchAdapter(settings, userScope);
+  const {
+    selectSession,
+    sessionsVersion,
+    setActiveAgent,
+    selectedSessionKey,
+    sessionProjectDetached,
+    activeRuntime,
+  } = useWorkbenchChat();
   const {
     sessions: recentSessions,
     loading: recentLoading,
@@ -1196,14 +1256,76 @@ function PowerShellLayoutContent() {
   const [navProjects, setNavProjects] = useState<NavProject[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [projectsReloadToken, setProjectsReloadToken] = useState(0);
+  const [optimisticRecentSessions, setOptimisticRecentSessions] = useState<RecentSessionNavItem[]>(
+    [],
+  );
+  const projectsReloadTimersRef = useRef<number[]>([]);
+  const recentReloadTimersRef = useRef<number[]>([]);
 
   const reloadProjects = useCallback(() => {
     setProjectsReloadToken((n) => n + 1);
+    for (const timer of projectsReloadTimersRef.current) {
+      window.clearTimeout(timer);
+    }
+    projectsReloadTimersRef.current = [300, 900].map((delay) =>
+      window.setTimeout(() => {
+        setProjectsReloadToken((n) => n + 1);
+      }, delay),
+    );
   }, []);
+
+  useEffect(
+    () => () => {
+      for (const timer of projectsReloadTimersRef.current) {
+        window.clearTimeout(timer);
+      }
+      projectsReloadTimersRef.current = [];
+    },
+    [],
+  );
 
   useEffect(() => {
     void refetchRecent();
+    for (const timer of recentReloadTimersRef.current) {
+      window.clearTimeout(timer);
+    }
+    recentReloadTimersRef.current = [500, 1200].map((delay) =>
+      window.setTimeout(() => {
+        void refetchRecent();
+      }, delay),
+    );
+    return () => {
+      for (const timer of recentReloadTimersRef.current) {
+        window.clearTimeout(timer);
+      }
+      recentReloadTimersRef.current = [];
+    };
   }, [refetchRecent, sessionsVersion]);
+
+  useEffect(() => {
+    const key = selectedSessionKey.trim();
+    if (!key || !sessionProjectDetached) {
+      return;
+    }
+    const label = recentLabelFromMessages(activeRuntime?.chatMessages ?? []);
+    setOptimisticRecentSessions((current) => [
+      { key, label, updatedAt: Date.now() },
+      ...current.filter((session) => session.key !== key),
+    ]);
+  }, [
+    activeRuntime?.chatMessages,
+    activeRuntime?.chatMessages.length,
+    selectedSessionKey,
+    sessionProjectDetached,
+  ]);
+
+  const displayRecentSessions = useMemo(() => {
+    const serverKeys = new Set(recentSessions.map((session) => session.key));
+    const optimistic = optimisticRecentSessions.filter((session) => !serverKeys.has(session.key));
+    return [...optimistic, ...recentSessions].toSorted(
+      (a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0),
+    );
+  }, [optimisticRecentSessions, recentSessions]);
 
   useEffect(() => {
     if (!adapter) {
@@ -1215,11 +1337,15 @@ function PowerShellLayoutContent() {
     void (async () => {
       try {
         const res = await adapter.request<AgentsListResult>("agents.list", {});
-        const rows = (res.agents ?? []).map((a) => ({
-          id: a.id,
-          name: (a.identity?.name ?? a.name ?? a.id).trim() || a.id,
-          workspace: typeof a.workspace === "string" && a.workspace.trim() ? a.workspace : null,
-        }));
+        const rows = (res.agents ?? [])
+          .filter((a) => isProjectInLocalUserScope(a.id, userScope))
+          .map((a) => ({
+            id: a.id,
+            name:
+              stripScopedProjectName((a.identity?.name ?? a.name ?? a.id).trim(), userScope) ||
+              a.id,
+            workspace: typeof a.workspace === "string" && a.workspace.trim() ? a.workspace : null,
+          }));
         if (!cancelled) {
           setNavProjects(rows);
         }
@@ -1236,7 +1362,7 @@ function PowerShellLayoutContent() {
     return () => {
       cancelled = true;
     };
-  }, [adapter, projectsReloadToken]);
+  }, [adapter, projectsReloadToken, userScope]);
 
   const mobileTitle = useMemo(() => pathTitle(location.pathname), [location.pathname]);
 
@@ -1256,12 +1382,15 @@ function PowerShellLayoutContent() {
     onSelectProject: (projectId: string) => {
       setActiveAgent(projectId);
     },
-    recentSessions,
+    recentSessions: displayRecentSessions,
     recentLoading,
     onRecentSessionsChange: () => void refetchRecent(),
     projects: navProjects,
     projectsLoading,
     onProjectsReload: reloadProjects,
+    userFolder: localUsers.user?.id ?? "",
+    localUsersEnabled: localUsers.enabled,
+    canManageUsers,
   };
 
   return (
@@ -1336,9 +1465,11 @@ function PowerShellLayoutContent() {
 
 export function PowerShellLayout() {
   const { settings, patchSettings } = usePowerUiSettings();
-  const adapter = useGatewayWorkbenchAdapter(settings);
+  const localUsers = useLocalUsers();
+  const userScope = buildLocalUserScope(localUsers.user);
+  const adapter = useGatewayWorkbenchAdapter(settings, userScope);
   return (
-    <WorkbenchChatProvider adapter={adapter} patchSettings={patchSettings}>
+    <WorkbenchChatProvider adapter={adapter} patchSettings={patchSettings} userScope={userScope}>
       <WorkspaceRailProvider>
         <PowerShellLayoutContent />
       </WorkspaceRailProvider>

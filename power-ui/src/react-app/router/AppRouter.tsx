@@ -1,11 +1,13 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { PowerShellLayout } from "../layout/PowerShellLayout";
 import { ChatPage } from "../pages/ChatPage";
+import { SettingsAccountPage } from "../pages/settings/SettingsAccountPage";
 import { SettingsConnectionPage } from "../pages/settings/SettingsConnectionPage";
 import { SettingsConnectorsPage } from "../pages/settings/SettingsConnectorsPage";
 import { SettingsLayout } from "../pages/settings/SettingsLayout";
 import { SettingsMcpPage } from "../pages/settings/SettingsMcpPage";
 import { SettingsModelsPage } from "../pages/settings/SettingsModelsPage";
+import { SettingsUsersPage } from "../pages/settings/SettingsUsersPage";
 import { SkillsPage } from "../pages/SkillsPage";
 
 /**
@@ -24,6 +26,8 @@ export function AppRouter() {
           <Route path="models" element={<SettingsModelsPage />} />
           <Route path="connectors" element={<SettingsConnectorsPage />} />
           <Route path="mcp" element={<SettingsMcpPage />} />
+          <Route path="account" element={<SettingsAccountPage />} />
+          <Route path="users" element={<SettingsUsersPage />} />
         </Route>
       </Route>
     </Routes>

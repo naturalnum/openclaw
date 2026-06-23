@@ -1,6 +1,8 @@
 import { CloseOutlined } from "@ant-design/icons";
 import { Modal } from "antd";
+import { useEffect, useMemo } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { useLocalUsers } from "../../context/LocalUsersContext";
 import { ROUTES } from "../../router/paths";
 import { SETTINGS_NAV_ITEMS } from "../../router/settings-nav";
 
@@ -15,6 +17,33 @@ export function SettingsLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const open = location.pathname.startsWith(ROUTES.settings);
+  const localUsers = useLocalUsers();
+  const canManageUsers = localUsers.enabled && localUsers.user?.role === "admin";
+  const visibleNavItems = useMemo(
+    () =>
+      SETTINGS_NAV_ITEMS.filter((item) => {
+        if (item.path === ROUTES.settingsUsers) {
+          return canManageUsers;
+        }
+        if (item.path === ROUTES.settingsAccount) {
+          return localUsers.enabled && !canManageUsers;
+        }
+        return true;
+      }),
+    [canManageUsers, localUsers.enabled],
+  );
+
+  useEffect(() => {
+    if (location.pathname === ROUTES.settingsUsers && !canManageUsers) {
+      navigate(localUsers.enabled ? ROUTES.settingsAccount : ROUTES.settingsConnection, {
+        replace: true,
+      });
+      return;
+    }
+    if (location.pathname === ROUTES.settingsAccount && canManageUsers) {
+      navigate(ROUTES.settingsUsers, { replace: true });
+    }
+  }, [canManageUsers, localUsers.enabled, location.pathname, navigate]);
 
   const closeSettings = () => {
     // 不用 history.back：在设置子页之间切换后 -1 只会回到上一分区，弹窗仍开着
@@ -49,7 +78,7 @@ export function SettingsLayout() {
             <span className="text-sm font-semibold text-slate-900">设置</span>
           </div>
           <nav className="flex-1 overflow-y-auto p-2" aria-label="设置分区">
-            {SETTINGS_NAV_ITEMS.map((item) => (
+            {visibleNavItems.map((item) => (
               <NavLink
                 key={item.path}
                 to={item.path}

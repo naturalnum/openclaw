@@ -18,7 +18,7 @@ export function usePowerUiSettings() {
   );
 
   useEffect(() => {
-    if (settings.token.trim() || !isViteDevPage()) {
+    if (!isViteDevPage()) {
       return undefined;
     }
     let cancelled = false;
@@ -29,15 +29,19 @@ export function usePowerUiSettings() {
           return;
         }
         const token = payload?.token?.trim() ?? "";
-        if (!token) {
+        const gatewayUrl = payload?.gatewayUrl?.trim() ?? "";
+        if (!token && !gatewayUrl) {
           return;
         }
         const current = loadSettings();
         const next: UiSettings = {
           ...current,
-          gatewayUrl: payload?.gatewayUrl?.trim() || current.gatewayUrl,
-          token,
+          gatewayUrl: gatewayUrl || current.gatewayUrl,
+          token: token || current.token,
         };
+        if (next.gatewayUrl === current.gatewayUrl && next.token === current.token) {
+          return;
+        }
         saveSettings(next);
         setSettings(next);
       })
@@ -45,7 +49,7 @@ export function usePowerUiSettings() {
     return () => {
       cancelled = true;
     };
-  }, [settings.token]);
+  }, [settings.gatewayUrl, settings.token]);
 
   const refresh = useCallback(() => {
     setSettings(loadSettings());

@@ -10,11 +10,21 @@ import type {
 } from "../compat/types.ts";
 import { PowerGatewayClient } from "../integrations/openclaw/gateway-client.ts";
 import {
+  buildScopedProjectName,
+  isProjectInLocalUserScope,
+  isSessionInLocalUserScope,
+  stripScopedProjectName,
+} from "../integrations/openclaw/local-user-scope.ts";
+import {
   buildPowerQuickSessionKey,
   buildPowerSessionKey,
   buildSessionLabelFromPrompt,
   isPowerQuickSessionKey,
 } from "../integrations/openclaw/session-keys.ts";
+import {
+  readDefaultAgentWorkspace,
+  resolveTemporaryChatWorkspacePath,
+} from "../react-app/lib/global-model-config.ts";
 import type { WorkbenchSnapshot } from "./mock-workbench-adapter.ts";
 import type {
   WorkbenchDirectoryCreateResult,
@@ -37,6 +47,7 @@ import type {
 
 type GatewayAdapterOptions = {
   getSettings: () => { gatewayUrl: string; token: string };
+  getUserScope?: () => string;
 };
 
 type ModelsListResult = {
@@ -217,9 +228,12 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
   private readonly gateway: PowerGatewayClient;
   private listeners = new Set<(event: WorkbenchAdapterEvent) => void>();
   private readonly workspaceRootByAgentId = new Map<string, string>();
+  private readonly getUserScope: () => string;
+  private configSnapshot: Record<string, unknown> | null = null;
 
   constructor(options: GatewayAdapterOptions) {
     this.gateway = new PowerGatewayClient(options.getSettings);
+    this.getUserScope = options.getUserScope ?? (() => "");
     this.gateway.subscribe((event) => {
       for (const listener of this.listeners) {
         listener(event);
@@ -250,15 +264,28 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
   }
 
   async request<T>(method: string, params?: unknown): Promise<T> {
-    return await this.gateway.request<T>(method, params);
+    const result = await this.gateway.request<T>(method, params);
+    if (method === "agents.list") {
+      return this.filterAgentsList(result as AgentsListResult) as T;
+    }
+    if (method === "sessions.list") {
+      return this.filterSessionsList(result as SessionsListResult) as T;
+    }
+    return result;
   }
 
   async snapshot(args: WorkbenchSelection): Promise<WorkbenchSnapshot> {
-    const agentsList = await requiredRequest(
+    const userScope = this.getUserScope().trim();
+    const sanitizedArgs =
+      userScope && args.sessionKey && !isSessionInLocalUserScope(args.sessionKey, userScope)
+        ? { ...args, sessionKey: null, skipSessionProject: true, skipProjectDefault: true }
+        : args;
+    const rawAgentsList = await requiredRequest(
       this.gateway.request<AgentsListResult>("agents.list", {}),
       "agents.list",
     );
-    const sessionsResult = await requiredRequest(
+    const agentsList = this.filterAgentsList(rawAgentsList);
+    const rawSessionsResult = await requiredRequest(
       this.gateway.request<SessionsListResult>("sessions.list", {
         includeGlobal: false,
         includeUnknown: true,
@@ -266,7 +293,8 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
       }),
       "sessions.list",
     );
-    const selection = resolveSelection(args, agentsList, sessionsResult);
+    const sessionsResult = this.filterSessionsList(rawSessionsResult);
+    const selection = resolveSelection(sanitizedArgs, agentsList, sessionsResult);
     const requests: Array<Promise<unknown>> = [
       safeRequest(this.gateway.request<ModelsListResult>("models.list", {}), { models: [] }),
       safeRequest(
@@ -320,6 +348,16 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
         { messages?: unknown[] },
       ];
 
+    this.configSnapshot = configSnapshot?.config ?? null;
+    for (const agent of agentsList.agents) {
+      if (typeof agent.workspace === "string" && agent.workspace.trim()) {
+        this.workspaceRootByAgentId.set(agent.id, agent.workspace);
+      }
+    }
+    const defaultWorkspace = readDefaultAgentWorkspace(this.configSnapshot);
+    if (defaultWorkspace && agentsList.defaultId) {
+      this.workspaceRootByAgentId.set(agentsList.defaultId, defaultWorkspace);
+    }
     if (agentFilesList?.agentId && agentFilesList.workspace) {
       this.workspaceRootByAgentId.set(agentFilesList.agentId, agentFilesList.workspace);
     }
@@ -660,6 +698,15 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
     return trimmed.replaceAll("\\", "/").replace(/\/+$/, "");
   }
 
+  private async loadConfigSnapshot(): Promise<Record<string, unknown> | null> {
+    const result = await safeRequest(
+      this.gateway.request<{ config?: Record<string, unknown> }>("config.get", {}),
+      null,
+    );
+    this.configSnapshot = result?.config ?? null;
+    return this.configSnapshot;
+  }
+
   async renameProject(projectId: string, name: string): Promise<void> {
     await requiredRequest(
       this.gateway.request("agents.update", {
@@ -687,7 +734,7 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
       return null;
     }
     const created = await this.gateway.request<{ agentId: string }>("agents.create", {
-      name: projectName,
+      name: buildScopedProjectName(projectName, this.getUserScope()),
       workspace: projectWorkspace,
     });
     return typeof created.agentId === "string" ? created.agentId : null;
@@ -699,20 +746,51 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
     modelId: string,
     options?: { label?: string | null; quickChat?: boolean; sessionKey?: string | null },
   ): Promise<WorkbenchSendResult> {
+    const userScope = this.getUserScope();
+    const requestedSessionKey = options?.sessionKey?.trim() ?? "";
     const sessionKey =
-      options?.sessionKey?.trim() ||
-      (options?.quickChat ? buildPowerQuickSessionKey(projectId) : buildPowerSessionKey(projectId));
+      requestedSessionKey &&
+      (!userScope || isSessionInLocalUserScope(requestedSessionKey, userScope))
+        ? requestedSessionKey
+        : options?.quickChat
+          ? buildPowerQuickSessionKey(projectId, userScope)
+          : buildPowerSessionKey(projectId, userScope);
     const label = options?.label?.trim() || buildSessionLabelFromPrompt(text);
     const model = modelId.trim();
-    await this.gateway.request("sessions.patch", {
-      key: sessionKey,
-      label,
-      ...(model ? { model } : {}),
-    });
-    for (const listener of this.listeners) {
-      listener({ type: "chat", sessionKey, runId: null, state: "delta", text: null });
+    let workspaceDir: string | undefined;
+    if (options?.quickChat) {
+      const userFolder = userScope.trim().replace(/^u-/, "") || null;
+      const config = this.configSnapshot ?? (await this.loadConfigSnapshot());
+      workspaceDir = resolveTemporaryChatWorkspacePath(config, userFolder, sessionKey);
     }
-    return { sessionKey, runId: null };
+    const created = await safeRequest(
+      this.gateway.request<{ key?: string }>("sessions.create", {
+        agentId: projectId,
+        key: sessionKey,
+        label,
+        ...(model ? { model } : {}),
+        ...(workspaceDir ? { workspaceDir } : {}),
+      }),
+      null,
+    );
+    const canonicalSessionKey = created?.key?.trim() || sessionKey;
+    if (!created?.key) {
+      await this.gateway.request("sessions.patch", {
+        key: canonicalSessionKey,
+        label,
+        ...(model ? { model } : {}),
+      });
+    }
+    for (const listener of this.listeners) {
+      listener({
+        type: "chat",
+        sessionKey: canonicalSessionKey,
+        runId: null,
+        state: "delta",
+        text: null,
+      });
+    }
+    return { sessionKey: canonicalSessionKey, runId: null };
   }
 
   async addUserMessage(
@@ -750,6 +828,48 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
 
   async setSkillEnabled(skillKey: string, enabled: boolean) {
     await this.gateway.request("skills.update", { skillKey, enabled });
+  }
+
+  private filterAgentsList(result: AgentsListResult): AgentsListResult {
+    const scope = this.getUserScope().trim();
+    if (!scope) {
+      return result;
+    }
+    const agents = (result.agents ?? [])
+      .filter((agent) => isProjectInLocalUserScope(agent.id, scope))
+      .map((agent) => {
+        const name =
+          typeof agent.name === "string" ? stripScopedProjectName(agent.name, scope) : agent.name;
+        const identity =
+          agent.identity && typeof agent.identity === "object"
+            ? {
+                ...agent.identity,
+                ...(typeof agent.identity.name === "string"
+                  ? { name: stripScopedProjectName(agent.identity.name, scope) }
+                  : {}),
+              }
+            : agent.identity;
+        return { ...agent, name, identity };
+      });
+    return {
+      ...result,
+      defaultId: agents[0]?.id ?? "",
+      agents,
+    };
+  }
+
+  private filterSessionsList(result: SessionsListResult): SessionsListResult {
+    const scope = this.getUserScope().trim();
+    if (!scope) {
+      return result;
+    }
+    return {
+      ...result,
+      sessions: (result.sessions ?? []).filter(
+        (session) =>
+          typeof session.key === "string" && isSessionInLocalUserScope(session.key, scope),
+      ),
+    };
   }
 
   async saveSkillKey(_skillKey: string, _value: string): Promise<WorkbenchSkillMessage> {

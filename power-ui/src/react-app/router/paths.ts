@@ -12,6 +12,8 @@ export const ROUTES = {
   settingsModels: "/settings/models",
   settingsConnectors: "/settings/connectors",
   settingsMcp: "/settings/mcp",
+  settingsAccount: "/settings/account",
+  settingsUsers: "/settings/users",
 } as const;
 
 export type PowerUiPath = (typeof ROUTES)[keyof typeof ROUTES];

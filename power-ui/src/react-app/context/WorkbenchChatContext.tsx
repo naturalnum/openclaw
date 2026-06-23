@@ -10,11 +10,17 @@ const WorkbenchChatContext = createContext<WorkbenchChatContextValue | null>(nul
 type ProviderProps = {
   adapter: GatewayWorkbenchAdapter | null;
   patchSettings: (patch: Partial<UiSettings>) => void;
+  userScope?: string;
   children: ReactNode;
 };
 
-export function WorkbenchChatProvider({ adapter, patchSettings, children }: ProviderProps) {
-  const value = usePowerWorkbenchChat(adapter, patchSettings);
+export function WorkbenchChatProvider({
+  adapter,
+  patchSettings,
+  userScope = "",
+  children,
+}: ProviderProps) {
+  const value = usePowerWorkbenchChat(adapter, patchSettings, userScope);
   return <WorkbenchChatContext.Provider value={value}>{children}</WorkbenchChatContext.Provider>;
 }
 

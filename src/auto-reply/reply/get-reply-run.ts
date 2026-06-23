@@ -284,8 +284,16 @@ export async function runPreparedReply(
     isNewSession ? sessionCtx : { ...sessionCtx, ThreadStarterBody: undefined },
     { includeFormattingHints: !useFastReplyRuntime },
   );
+  const dashboardWorkspacePrompt = sessionEntry?.workspaceDir
+    ? [
+        "This dashboard session uses an isolated temporary workspace.",
+        "When you create a user-requested file, save it in the current workspace and include a final `MEDIA:<absolute-file-path>` line for each generated file.",
+        "The `MEDIA:` line is required because the dashboard uses it to render a direct download button for the user.",
+      ].join(" ")
+    : "";
   const extraSystemPromptParts = [
     inboundMetaPrompt,
+    dashboardWorkspacePrompt,
     groupChatContext,
     groupIntro,
     groupSystemPrompt,

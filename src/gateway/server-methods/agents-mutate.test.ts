@@ -443,6 +443,31 @@ describe("agents.create", () => {
     );
   });
 
+  it("keeps ascii user scope when creating scoped non-ascii project names", async () => {
+    const { respond, promise } = makeCall("agents.create", {
+      name: "u-admin-漫剧",
+      workspace: "/tmp/users/admin/projects/漫剧",
+    });
+    await promise;
+
+    expect(respond).toHaveBeenCalledWith(
+      true,
+      expect.objectContaining({
+        ok: true,
+        agentId: expect.stringMatching(/^u-admin-[0-9a-f]{12}$/),
+        name: "u-admin-漫剧",
+      }),
+      undefined,
+    );
+    expect(mocks.applyAgentConfig).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        agentId: expect.stringMatching(/^u-admin-[0-9a-f]{12}$/),
+        name: "u-admin-漫剧",
+      }),
+    );
+  });
+
   it("rejects creating a duplicate agent", async () => {
     mocks.findAgentEntryIndex.mockReturnValue(0);
 

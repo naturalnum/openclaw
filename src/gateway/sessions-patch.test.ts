@@ -105,6 +105,32 @@ function createAllowlistedAnthropicModelCfg(): OpenClawConfig {
 }
 
 describe("gateway sessions patch", () => {
+  test("persists dashboard session workspaceDir overrides", async () => {
+    const entry = expectPatchOk(
+      await runPatch({
+        patch: { key: MAIN_SESSION_KEY, workspaceDir: "/tmp/openclaw/users/admin/temp/session-1" },
+      }),
+    );
+    expect(entry.workspaceDir).toBe("/tmp/openclaw/users/admin/temp/session-1");
+  });
+
+  test("clears dashboard session workspaceDir overrides", async () => {
+    const store: Record<string, SessionEntry> = {
+      [MAIN_SESSION_KEY]: {
+        sessionId: "session-1",
+        updatedAt: 1,
+        workspaceDir: "/tmp/openclaw/users/admin/temp/session-1",
+      },
+    };
+    const entry = expectPatchOk(
+      await runPatch({
+        store,
+        patch: { key: MAIN_SESSION_KEY, workspaceDir: null },
+      }),
+    );
+    expect(entry.workspaceDir).toBeUndefined();
+  });
+
   test("persists thinkingLevel=off (does not clear)", async () => {
     const entry = expectPatchOk(
       await runPatch({

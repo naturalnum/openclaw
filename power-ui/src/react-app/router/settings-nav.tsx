@@ -1,4 +1,11 @@
-import { ApiOutlined, CloudServerOutlined, LinkOutlined, RobotOutlined } from "@ant-design/icons";
+import {
+  ApiOutlined,
+  CloudServerOutlined,
+  LinkOutlined,
+  RobotOutlined,
+  TeamOutlined,
+  UserOutlined,
+} from "@ant-design/icons";
 import type { ReactNode } from "react";
 import { ROUTES } from "./paths";
 
@@ -34,5 +41,17 @@ export const SETTINGS_NAV_ITEMS: SettingsNavItem[] = [
     title: "MCP",
     description: "全局 MCP 服务器摘要",
     icon: <CloudServerOutlined />,
+  },
+  {
+    path: ROUTES.settingsAccount,
+    title: "账号",
+    description: "当前账号与退出登录",
+    icon: <UserOutlined />,
+  },
+  {
+    path: ROUTES.settingsUsers,
+    title: "用户",
+    description: "本盒子本地用户",
+    icon: <TeamOutlined />,
   },
 ];

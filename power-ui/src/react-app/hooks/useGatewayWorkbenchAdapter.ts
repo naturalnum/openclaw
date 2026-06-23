@@ -3,9 +3,12 @@ import { GatewayWorkbenchAdapter } from "../../adapters/gateway-workbench-adapte
 import type { UiSettings } from "../../compat/ui-core";
 
 /**
- * One gateway adapter per gateway URL + token pair; disposes on change or unmount.
+ * One gateway adapter per gateway URL + token + local-user scope pair; disposes on change or unmount.
  */
-export function useGatewayWorkbenchAdapter(settings: Pick<UiSettings, "gatewayUrl" | "token">) {
+export function useGatewayWorkbenchAdapter(
+  settings: Pick<UiSettings, "gatewayUrl" | "token">,
+  userScope = "",
+) {
   const [adapter, setAdapter] = useState<GatewayWorkbenchAdapter | null>(null);
 
   useEffect(() => {
@@ -14,12 +17,13 @@ export function useGatewayWorkbenchAdapter(settings: Pick<UiSettings, "gatewayUr
         gatewayUrl: settings.gatewayUrl.trim(),
         token: settings.token.trim(),
       }),
+      getUserScope: () => userScope.trim(),
     });
     setAdapter(next);
     return () => {
       next.dispose();
     };
-  }, [settings.gatewayUrl, settings.token]);
+  }, [settings.gatewayUrl, settings.token, userScope]);
 
   return adapter;
 }

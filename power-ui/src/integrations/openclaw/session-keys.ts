@@ -1,23 +1,24 @@
 import { normalizeAgentId, parseAgentSessionKey } from "../../../../ui/src/ui/session-key.ts";
 import { generateUUID } from "../../compat/ui-core.ts";
+import { buildScopedChatSessionRest } from "./local-user-scope.ts";
 
 function truncateWords(input: string, limit: number) {
   return input.trim().split(/\s+/).filter(Boolean).slice(0, limit).join(" ");
 }
 
-export function buildPowerSessionKey(projectId: string) {
+export function buildPowerSessionKey(projectId: string, userScope = "") {
   const normalizedProjectId = normalizeAgentId(projectId);
-  return `agent:${normalizedProjectId}:power:${generateUUID()}`;
+  return `agent:${normalizedProjectId}:${buildScopedChatSessionRest("power", userScope)}:${generateUUID()}`;
 }
 
-export function buildPowerQuickSessionKey(agentId: string) {
+export function buildPowerQuickSessionKey(agentId: string, userScope = "") {
   const normalizedAgentId = normalizeAgentId(agentId);
-  return `agent:${normalizedAgentId}:quick:${generateUUID()}`;
+  return `agent:${normalizedAgentId}:${buildScopedChatSessionRest("quick", userScope)}:${generateUUID()}`;
 }
 
 export function isPowerQuickSessionKey(sessionKey: string | null | undefined) {
   const parsed = parseAgentSessionKey(sessionKey);
-  return parsed?.rest.startsWith("quick:") === true;
+  return parsed?.rest.startsWith("quick:") === true || parsed?.rest.includes(":quick:") === true;
 }
 
 const SESSION_LABEL_MAX_LENGTH = 64;

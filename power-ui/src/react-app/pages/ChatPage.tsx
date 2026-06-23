@@ -11,11 +11,13 @@ import type { ChatAttachment } from "../../../../ui/src/ui/ui-types";
 import type { WorkbenchUploadedFile } from "../../adapters/workbench-adapter";
 import type { WorkbenchAdapterEvent } from "../../adapters/workbench-adapter";
 import { extractText } from "../../compat/chat";
+import { buildLocalUserScope } from "../../integrations/openclaw/local-user-scope";
 import { isPowerQuickSessionKey } from "../../integrations/openclaw/session-keys";
 import { ChatMarkdownBody } from "../components/chat/ChatMarkdownBody";
 import { ChatModelPicker } from "../components/chat/ChatModelPicker";
 import { ChatToolStepsList, type ChatToolStepsPhase } from "../components/chat/ChatToolStepsList";
 import { ChatWorkspaceFilesPanel } from "../components/chat/ChatWorkspaceFilesPanel";
+import { useLocalUsers } from "../context/LocalUsersContext";
 import { useWorkbenchChat } from "../context/WorkbenchChatContext";
 import { useWorkspaceRail } from "../context/WorkspaceRailContext";
 import { useGatewayWorkbenchAdapter } from "../hooks/useGatewayWorkbenchAdapter";
@@ -474,7 +476,9 @@ function ClipIcon({ className }: { className?: string }) {
 export function ChatPage() {
   const { message } = App.useApp();
   const { settings, patchSettings } = usePowerUiSettings();
-  const adapter = useGatewayWorkbenchAdapter(settings);
+  const localUsers = useLocalUsers();
+  const userScope = buildLocalUserScope(localUsers.user);
+  const adapter = useGatewayWorkbenchAdapter(settings, userScope);
   const {
     snapshot,
     snapshotError,

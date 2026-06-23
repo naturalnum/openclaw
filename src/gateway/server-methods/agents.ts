@@ -395,6 +395,14 @@ function sanitizeIdentityLine(value: string): string {
 function deriveAgentIdForCreate(rawName: string, workspaceDir: string): string {
   const trimmedName = rawName.trim();
   const agentId = normalizeAgentId(trimmedName);
+  const hasNonAscii = Array.from(trimmedName).some((char) => char.charCodeAt(0) > 0x7f);
+  if (hasNonAscii) {
+    const digest = createHash("sha1")
+      .update(`${trimmedName}\n${workspaceDir.trim()}`)
+      .digest("hex")
+      .slice(0, 12);
+    return agentId === DEFAULT_AGENT_ID ? `agent-${digest}` : `${agentId}-${digest}`;
+  }
   if (agentId !== DEFAULT_AGENT_ID) {
     return agentId;
   }
