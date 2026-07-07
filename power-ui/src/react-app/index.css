@@ -245,10 +245,10 @@
 }
 
 #root .power-workspace-rail--closed {
-  width: 44px;
-  opacity: 1;
-  border-color: rgba(226, 232, 240, 0.45);
-  pointer-events: auto;
+  width: 0;
+  opacity: 0;
+  border-color: transparent;
+  pointer-events: none;
 }
 
 #root .power-workspace-rail__inner {

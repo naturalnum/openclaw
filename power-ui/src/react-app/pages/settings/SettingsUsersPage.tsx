@@ -1,5 +1,5 @@
 import { LogoutOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
-import { Alert, App, Button, Form, Input, Select, Space, Switch, Tag } from "antd";
+import { Alert, App, Button, Form, Input, Select, Space, Switch, Tag, Tooltip } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { useLocalUsers } from "../../context/LocalUsersContext";
@@ -108,6 +108,13 @@ export function SettingsUsersPage() {
       status?: LocalUserStatus;
     },
   ) => {
+    if (
+      user.id === localUsers.user?.id &&
+      (patch.role !== undefined || patch.status !== undefined)
+    ) {
+      message.warning("不能修改当前登录账号的角色或启用状态");
+      return;
+    }
     setSavingId(user.id);
     try {
       await localUsersRequest(requestSettings, `/local-users/${encodeURIComponent(user.id)}`, {
@@ -251,61 +258,74 @@ export function SettingsUsersPage() {
           {users.length === 0 ? (
             <div className="px-3 py-8 text-center text-sm text-slate-500">暂无用户</div>
           ) : (
-            users.map((user) => (
-              <div
-                key={user.id}
-                className="flex flex-col gap-3 px-3 py-3 sm:flex-row sm:items-center"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate text-sm font-semibold text-slate-900">
-                      {user.displayName || user.id}
-                    </span>
-                    <Tag color={user.role === "admin" ? "geekblue" : "default"}>
-                      {user.role === "admin" ? "管理员" : "用户"}
-                    </Tag>
-                    <Tag color={user.status === "active" ? "green" : "red"}>
-                      {user.status === "active" ? "启用" : "禁用"}
-                    </Tag>
+            users.map((user) => {
+              const isCurrentUser = user.id === localUsers.user?.id;
+              const selfEditTitle = isCurrentUser
+                ? "不能修改当前登录账号的角色或启用状态"
+                : undefined;
+              return (
+                <div
+                  key={user.id}
+                  className="flex flex-col gap-3 px-3 py-3 sm:flex-row sm:items-center"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-sm font-semibold text-slate-900">
+                        {user.displayName || user.id}
+                      </span>
+                      <Tag color={user.role === "admin" ? "geekblue" : "default"}>
+                        {user.role === "admin" ? "管理员" : "用户"}
+                      </Tag>
+                      <Tag color={user.status === "active" ? "green" : "red"}>
+                        {user.status === "active" ? "启用" : "禁用"}
+                      </Tag>
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      {user.id} · 最近登录：{formatDate(user.lastLoginAt)}
+                    </div>
                   </div>
-                  <div className="mt-1 text-xs text-slate-500">
-                    {user.id} · 最近登录：{formatDate(user.lastLoginAt)}
-                  </div>
-                </div>
-                <Space size="small" wrap>
-                  <Select<LocalUserRole>
-                    size="small"
-                    value={user.role}
-                    className="w-[92px]"
-                    disabled={savingId === user.id}
-                    onChange={(role) => void patchUser(user, { role })}
-                    options={[
-                      { value: "user", label: "用户" },
-                      { value: "admin", label: "管理员" },
-                    ]}
-                  />
-                  <span className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-xs">
-                    启用
-                    <Switch
+                  <Space size="small" wrap>
+                    <Tooltip title={selfEditTitle}>
+                      <span>
+                        <Select<LocalUserRole>
+                          size="small"
+                          value={user.role}
+                          className="w-[92px]"
+                          disabled={savingId === user.id || isCurrentUser}
+                          onChange={(role) => void patchUser(user, { role })}
+                          options={[
+                            { value: "user", label: "用户" },
+                            { value: "admin", label: "管理员" },
+                          ]}
+                        />
+                      </span>
+                    </Tooltip>
+                    <Tooltip title={selfEditTitle}>
+                      <span className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-xs">
+                        启用
+                        <Switch
+                          size="small"
+                          checked={user.status === "active"}
+                          disabled={isCurrentUser}
+                          loading={savingId === user.id}
+                          onChange={(checked) =>
+                            void patchUser(user, { status: checked ? "active" : "disabled" })
+                          }
+                        />
+                      </span>
+                    </Tooltip>
+                    <Button
                       size="small"
-                      checked={user.status === "active"}
+                      icon={<SaveOutlined />}
                       loading={savingId === user.id}
-                      onChange={(checked) =>
-                        void patchUser(user, { status: checked ? "active" : "disabled" })
-                      }
-                    />
-                  </span>
-                  <Button
-                    size="small"
-                    icon={<SaveOutlined />}
-                    loading={savingId === user.id}
-                    onClick={() => void resetPassword(user)}
-                  >
-                    重置密码
-                  </Button>
-                </Space>
-              </div>
-            ))
+                      onClick={() => void resetPassword(user)}
+                    >
+                      重置密码
+                    </Button>
+                  </Space>
+                </div>
+              );
+            })
           )}
         </div>
       </div>

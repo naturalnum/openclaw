@@ -1355,6 +1355,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "0.18.2",
+    "@anthropic-ai/sdk": "0.81.0",
     "@anthropic-ai/vertex-sdk": "^0.15.0",
     "@aws-sdk/client-bedrock": "3.1028.0",
     "@aws-sdk/client-bedrock-runtime": "3.1028.0",

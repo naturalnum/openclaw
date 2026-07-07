@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import plugin from "./index.ts";
 import {
   encryptContent,
   decryptContent,
@@ -315,6 +316,87 @@ describe("file-encryption-plugin", () => {
       const result = validate(undefined);
 
       expect(result.ok).toBe(true);
+    });
+  });
+
+  describe("before_tool_call encryption hook", () => {
+    it("encrypts memory file writes before the tool runs", () => {
+      const keyBase64 = encryptionKey.toString("base64");
+      let handler:
+        | ((event: {
+            toolName: string;
+            params: Record<string, unknown>;
+          }) => { params: Record<string, unknown> } | void)
+        | null = null;
+
+      plugin.register({
+        pluginConfig: {
+          encryptionKey: keyBase64,
+          encryptedPaths: ["**/memory/**"],
+          mode: "both",
+        },
+        logger: {
+          debug() {},
+          error() {},
+          info() {},
+        },
+        on(name: string, callback: typeof handler) {
+          if (name === "before_tool_call") {
+            handler = callback;
+          }
+        },
+      } as never);
+
+      expect(handler).toBeTypeOf("function");
+      const result = handler?.({
+        toolName: "write",
+        params: {
+          path: "/tmp/openclaw-test/memory/private-note.md",
+          content: "private memory text",
+        },
+      });
+
+      expect(result?.params.content).toBeTypeOf("string");
+      const encrypted = String(result?.params.content);
+      expect(encrypted).not.toBe("private memory text");
+      expect(isEncryptedContent(encrypted)).toBe(true);
+      expect(decryptContent(encrypted, encryptionKey)).toBe("private memory text");
+    });
+
+    it("does not encrypt writes outside configured memory paths", () => {
+      let handler:
+        | ((event: {
+            toolName: string;
+            params: Record<string, unknown>;
+          }) => { params: Record<string, unknown> } | void)
+        | null = null;
+
+      plugin.register({
+        pluginConfig: {
+          encryptionKey: encryptionKey.toString("base64"),
+          encryptedPaths: ["**/memory/**"],
+        },
+        logger: {
+          debug() {},
+          error() {},
+          info() {},
+        },
+        on(name: string, callback: typeof handler) {
+          if (name === "before_tool_call") {
+            handler = callback;
+          }
+        },
+      } as never);
+
+      const result = handler?.({
+        toolName: "write",
+        params: {
+          path: "/tmp/openclaw-test/notes/private-note.md",
+          content: "plain note",
+        },
+      });
+
+      expect(result).toBeUndefined();
     });
   });
 });

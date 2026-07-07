@@ -1,3 +1,8 @@
+import {
+  parseExecApprovalRequested,
+  parseExecApprovalResolved,
+  parsePluginApprovalRequested,
+} from "../../../../ui/src/ui/controllers/exec-approval.ts";
 import type { WorkbenchAdapterEvent } from "../../adapters/workbench-adapter.ts";
 import { extractText } from "../../compat/chat.ts";
 import {
@@ -254,6 +259,30 @@ export class PowerGatewayClient {
   }
 
   private handleEvent(event: GatewayEventFrame) {
+    if (event.event === "exec.approval.requested") {
+      const request = parseExecApprovalRequested(event.payload);
+      if (request) {
+        this.emit({ type: "approval", state: "requested", request });
+      }
+      return;
+    }
+
+    if (event.event === "plugin.approval.requested") {
+      const request = parsePluginApprovalRequested(event.payload);
+      if (request) {
+        this.emit({ type: "approval", state: "requested", request });
+      }
+      return;
+    }
+
+    if (event.event === "exec.approval.resolved" || event.event === "plugin.approval.resolved") {
+      const resolved = parseExecApprovalResolved(event.payload);
+      if (resolved) {
+        this.emit({ type: "approval", state: "resolved", id: resolved.id });
+      }
+      return;
+    }
+
     if (event.event === "agent") {
       const payload = event.payload as AgentEventPayload | undefined;
       if (!payload) {

@@ -4,6 +4,10 @@ import type { ChatAttachment } from "../../../../ui/src/ui/ui-types";
 import type { GatewayWorkbenchAdapter } from "../../adapters/gateway-workbench-adapter";
 import type { WorkbenchSnapshot } from "../../adapters/mock-workbench-adapter";
 import type { WorkbenchAdapterEvent } from "../../adapters/workbench-adapter";
+import type {
+  WorkbenchApprovalDecision,
+  WorkbenchApprovalRequest,
+} from "../../adapters/workbench-adapter";
 import { extractText } from "../../compat/chat";
 import {
   abortChatRun,
@@ -105,7 +109,7 @@ function cleanChatMessageForDisplay(message: unknown): unknown {
   return message;
 }
 
-function isApprovalCommandLeak(message: unknown): boolean {
+export function isApprovalCommandLeak(message: unknown): boolean {
   if (!message || typeof message !== "object") {
     return false;
   }
@@ -113,16 +117,50 @@ function isApprovalCommandLeak(message: unknown): boolean {
     typeof (message as { role?: unknown }).role === "string"
       ? (message as { role: string }).role.toLowerCase()
       : "";
-  if (role !== "assistant") {
+  if (!["assistant", "tool", "tool_result", "toolresult"].includes(role)) {
     return false;
   }
   const text = extractText(message)?.trim() ?? "";
   if (!text || !text.includes("/approve ")) {
     return false;
   }
+  // Approval is rendered through the dedicated permission card. Older agents can still
+  // emit the raw slash-command helper; keep that internal control text out of chat.
+  if (/\/approve\s+[a-z0-9-]+\s+(?:allow-once|allow-always|deny)/i.test(text)) {
+    return true;
+  }
   return /^these are .*requests?[\s\S]*\n\s*(?:\/approve\s+[a-z0-9-]+\s+allow-once\s*)+$/i.test(
     text,
   );
+}
+
+export function isInternalExecFollowupMessage(message: unknown): boolean {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+  const role =
+    typeof (message as { role?: unknown }).role === "string"
+      ? (message as { role: string }).role.toLowerCase()
+      : "";
+  if (!["assistant", "tool", "tool_result", "toolresult"].includes(role)) {
+    return false;
+  }
+  const text = extractText(message)?.trim() ?? "";
+  return (
+    text.startsWith("An async command the user already approved has completed.") ||
+    text.startsWith("An async command did not run.")
+  );
+}
+
+function pruneApprovalQueue(queue: WorkbenchApprovalRequest[]) {
+  const now = Date.now();
+  return queue.filter((entry) => entry.expiresAtMs > now);
+}
+
+function addApprovalRequest(queue: WorkbenchApprovalRequest[], request: WorkbenchApprovalRequest) {
+  const next = pruneApprovalQueue(queue).filter((entry) => entry.id !== request.id);
+  next.unshift(request);
+  return next;
 }
 
 function filterVisibleChatMessages(messages: unknown[]): unknown[] {
@@ -132,6 +170,7 @@ function filterVisibleChatMessages(messages: unknown[]): unknown[] {
         message != null &&
         typeof message === "object" &&
         !isApprovalCommandLeak(message) &&
+        !isInternalExecFollowupMessage(message) &&
         !shouldHideChatMessage(message, { showToolCalls: false }),
     )
     .map(cleanChatMessageForDisplay);
@@ -262,6 +301,9 @@ export function usePowerWorkbenchChat(
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedSessionKey, setSelectedSessionKey] = useState("");
   const [sessionProjectDetached, setSessionProjectDetached] = useState(false);
+  const [approvalQueue, setApprovalQueue] = useState<WorkbenchApprovalRequest[]>([]);
+  const [approvalBusy, setApprovalBusy] = useState(false);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
 
   const setDetachedSessionProject = useCallback((detached: boolean) => {
     sessionProjectDetachedRef.current = detached;
@@ -483,7 +525,7 @@ export function usePowerWorkbenchChat(
               const preferred =
                 key || scoped.lastActiveSessionKey.trim() || scoped.sessionKey.trim() || null;
               const detached =
-                Boolean(preferred) &&
+                preferred !== null &&
                 (!selectedProjectIdRef.current ||
                   sessionProjectDetachedRef.current ||
                   isPowerQuickSessionKey(preferred) ||
@@ -499,6 +541,24 @@ export function usePowerWorkbenchChat(
               void loadChatHistory(getOrCreateRuntime(key));
             }
           }
+          return;
+        }
+
+        if (event.type === "approval") {
+          if (event.state === "requested") {
+            setApprovalQueue((current) => addApprovalRequest(current, event.request));
+            setApprovalError(null);
+            const delay = Math.max(0, event.request.expiresAtMs - Date.now() + 500);
+            window.setTimeout(() => {
+              setApprovalQueue((current) =>
+                pruneApprovalQueue(current).filter((entry) => entry.id !== event.request.id),
+              );
+            }, delay);
+            return;
+          }
+          setApprovalQueue((current) =>
+            pruneApprovalQueue(current).filter((entry) => entry.id !== event.id),
+          );
           return;
         }
 
@@ -1034,6 +1094,31 @@ export function usePowerWorkbenchChat(
     [adapter, refreshSnapshot],
   );
 
+  const decideApproval = useCallback(
+    async (request: WorkbenchApprovalRequest, decision: WorkbenchApprovalDecision) => {
+      if (!adapter || approvalBusy) {
+        return;
+      }
+      setApprovalBusy(true);
+      setApprovalError(null);
+      try {
+        const method =
+          request.kind === "plugin" ? "plugin.approval.resolve" : "exec.approval.resolve";
+        await adapter.request(method, {
+          id: request.id,
+          decision,
+        });
+        setApprovalQueue((current) => current.filter((entry) => entry.id !== request.id));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setApprovalError(`审批失败：${message}`);
+      } finally {
+        setApprovalBusy(false);
+      }
+    },
+    [adapter, approvalBusy],
+  );
+
   return {
     snapshot,
     snapshotLoading,
@@ -1044,6 +1129,10 @@ export function usePowerWorkbenchChat(
     sessionProjectDetached,
     sessionsVersion,
     activeRuntime,
+    approvalQueue: pruneApprovalQueue(approvalQueue),
+    approvalBusy,
+    approvalError,
+    decideApproval,
     refreshSnapshot,
     selectSession,
     sendUserMessage,

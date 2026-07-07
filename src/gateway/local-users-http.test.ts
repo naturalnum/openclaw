@@ -206,6 +206,39 @@ describe("local users HTTP", () => {
     expect(login.status).toBe(401);
   });
 
+  it("does not let admins change their own role or enabled status", async () => {
+    const admin = await initAdmin();
+
+    const demoteSelf = await jsonRequest("/local-users/owner", {
+      method: "PATCH",
+      sessionToken: admin.token,
+      body: { role: "user" },
+    });
+    expect(demoteSelf.status).toBe(403);
+    await expect(demoteSelf.json()).resolves.toMatchObject({
+      ok: false,
+      error: { type: "forbidden" },
+    });
+
+    const disableSelf = await jsonRequest("/local-users/owner", {
+      method: "PATCH",
+      sessionToken: admin.token,
+      body: { status: "disabled" },
+    });
+    expect(disableSelf.status).toBe(403);
+    await expect(disableSelf.json()).resolves.toMatchObject({
+      ok: false,
+      error: { type: "forbidden" },
+    });
+
+    const list = await jsonRequest("/local-users", { sessionToken: admin.token });
+    expect(list.status).toBe(200);
+    await expect(list.json()).resolves.toMatchObject({
+      ok: true,
+      users: [{ id: "owner", role: "admin", status: "active" }],
+    });
+  });
+
   it("blocks non-admin sessions from managing users", async () => {
     const admin = await initAdmin();
     await jsonRequest("/local-users", {

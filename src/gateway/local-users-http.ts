@@ -7,6 +7,7 @@ import {
   hasAnyLocalUsers,
   initializeLocalAdmin,
   listLocalUsers,
+  normalizeLocalUserId,
   resolveLocalUserSession,
   updateLocalUser,
   type LocalUserRole,
@@ -265,7 +266,8 @@ export async function handleLocalUsersHttpRequest(
       sendMethodNotAllowed(res, "PATCH");
       return true;
     }
-    if (!(await requireLocalAdminSession(req, res))) {
+    const adminUser = await requireLocalAdminSession(req, res);
+    if (!adminUser) {
       return true;
     }
     const body = await readJsonBodyOrError(req, res, MAX_BODY_BYTES);
@@ -298,6 +300,19 @@ export async function handleLocalUsersHttpRequest(
       (status !== undefined && !isLocalUserStatus(status))
     ) {
       sendInvalidRequest(res, "displayName, password, role, or status is invalid");
+      return true;
+    }
+    if (
+      normalizeLocalUserId(userIdFromPath) === adminUser.id &&
+      (role !== undefined || status !== undefined)
+    ) {
+      sendJson(res, 403, {
+        ok: false,
+        error: {
+          type: "forbidden",
+          message: "不能修改当前登录账号的角色或启用状态。请使用另一个管理员账号操作。",
+        },
+      });
       return true;
     }
     try {

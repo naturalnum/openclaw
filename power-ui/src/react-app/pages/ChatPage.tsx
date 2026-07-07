@@ -1,4 +1,10 @@
-import { ArrowUpOutlined, DownloadOutlined, FileTextOutlined } from "@ant-design/icons";
+import {
+  ArrowUpOutlined,
+  DownloadOutlined,
+  FileTextOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
+} from "@ant-design/icons";
 import { App } from "antd";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -9,7 +15,11 @@ import {
 import { parseAgentSessionKey } from "../../../../ui/src/ui/session-key";
 import type { ChatAttachment } from "../../../../ui/src/ui/ui-types";
 import type { WorkbenchUploadedFile } from "../../adapters/workbench-adapter";
-import type { WorkbenchAdapterEvent } from "../../adapters/workbench-adapter";
+import type {
+  WorkbenchAdapterEvent,
+  WorkbenchApprovalDecision,
+  WorkbenchApprovalRequest,
+} from "../../adapters/workbench-adapter";
 import { extractText } from "../../compat/chat";
 import { buildLocalUserScope } from "../../integrations/openclaw/local-user-scope";
 import { isPowerQuickSessionKey } from "../../integrations/openclaw/session-keys";
@@ -454,6 +464,96 @@ function TypingDots({ className }: { className?: string }) {
   );
 }
 
+function formatApprovalRemaining(expiresAtMs: number) {
+  const seconds = Math.max(0, Math.floor((expiresAtMs - Date.now()) / 1000));
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m`;
+}
+
+function ApprovalPromptCard({
+  busy,
+  error,
+  pendingCount,
+  request,
+  onDecision,
+}: {
+  busy: boolean;
+  error: string | null;
+  pendingCount: number;
+  request: WorkbenchApprovalRequest;
+  onDecision: (request: WorkbenchApprovalRequest, decision: WorkbenchApprovalDecision) => void;
+}) {
+  const isPlugin = request.kind === "plugin";
+  const title = isPlugin ? (request.pluginTitle ?? "需要插件权限确认") : "需要执行权限确认";
+  const description = isPlugin ? request.pluginDescription : request.request.command;
+  const meta = [
+    request.request.host ? `Host: ${request.request.host}` : null,
+    request.request.cwd ? `CWD: ${request.request.cwd}` : null,
+    request.request.security ? `Security: ${request.request.security}` : null,
+    request.request.ask ? `Ask: ${request.request.ask}` : null,
+  ].filter(Boolean);
+  return (
+    <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50/80 p-3 text-sm shadow-sm shadow-amber-100/60">
+      <div className="mb-2 flex items-start justify-between gap-3">
+        <div>
+          <div className="font-semibold text-amber-950">{title}</div>
+          <div className="mt-0.5 text-xs text-amber-800">
+            {formatApprovalRemaining(request.expiresAtMs)} 后过期
+            {pendingCount > 1 ? ` · 还有 ${pendingCount - 1} 个待确认` : ""}
+          </div>
+        </div>
+        <span className="rounded-full bg-white/70 px-2 py-0.5 text-[11px] font-medium text-amber-800 ring-1 ring-amber-200">
+          {isPlugin ? "plugin" : "exec"}
+        </span>
+      </div>
+      {description ? (
+        <pre className="max-h-28 overflow-auto whitespace-pre-wrap rounded-xl bg-white/80 px-3 py-2 text-xs leading-relaxed text-slate-800 ring-1 ring-amber-100">
+          {description}
+        </pre>
+      ) : null}
+      {meta.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-amber-900/80">
+          {meta.map((item) => (
+            <span key={item} className="rounded-full bg-white/60 px-2 py-0.5 ring-1 ring-amber-100">
+              {item}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {error ? <div className="mt-2 text-xs font-medium text-rose-600">{error}</div> : null}
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onDecision(request, "allow-once")}
+          className="rounded-xl bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          允许一次
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onDecision(request, "allow-always")}
+          className="rounded-xl border border-amber-200 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 transition hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          始终允许
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onDecision(request, "deny")}
+          className="rounded-xl border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          拒绝
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ClipIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -486,6 +586,10 @@ export function ChatPage() {
     selectedSessionKey,
     sessionProjectDetached,
     activeRuntime,
+    approvalQueue,
+    approvalBusy,
+    approvalError,
+    decideApproval,
     selectSession,
     sendUserMessage,
     stopGeneration,
@@ -600,6 +704,7 @@ export function ChatPage() {
     previewActive: workspacePreviewActive,
     setPreviewActive: setWorkspacePreviewActive,
     railOpen: workspaceRailOpen,
+    setRailOpen: setWorkspaceRailOpen,
     fullscreen: workspacePreviewFullscreen,
     canFullscreen: workspaceCanFullscreen,
     toggleFullscreen: toggleWorkspacePreviewFullscreen,
@@ -612,7 +717,7 @@ export function ChatPage() {
     return selectedProjectId?.trim() || "";
   }, [selectedProjectId, selectedSessionKey, sessionProjectDetached]);
 
-  const workspaceRailEligible = Boolean(workspaceAgentId && workspaceRailOpen);
+  const workspaceRailEligible = Boolean(workspaceAgentId);
   const activeFileAccept = CHAT_FILE_ACCEPT;
 
   const handleDownloadMediaAttachment = useCallback(
@@ -724,6 +829,7 @@ export function ChatPage() {
     Boolean(liveStreamText.trim()) && liveStreamText.trim() !== tailAssistantText;
   const showStream = showLiveStream;
   const busy = sending || runActive || Boolean(activeRuntime?.chatSending) || showStream;
+  const activeApproval = approvalQueue[0] ?? null;
   const activityStartedAt =
     activeRuntime?.chatStreamStartedAt ?? optimisticUserBubble?.ts ?? (busy ? activityNowMs : null);
   const elapsedLabel =
@@ -1155,6 +1261,25 @@ export function ChatPage() {
               <p className="truncate text-sm text-slate-500">新建或选择会话以开始</p>
             )}
           </div>
+          {workspaceRailEligible ? (
+            <button
+              type="button"
+              aria-label={workspaceRailOpen ? "收起最近修改" : "展开最近修改"}
+              title={workspaceRailOpen ? "收起最近修改" : "展开最近修改"}
+              aria-expanded={workspaceRailOpen}
+              onClick={() => setWorkspaceRailOpen(!workspaceRailOpen)}
+              className={cn(
+                "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200/80 bg-white text-slate-500 shadow-sm shadow-slate-200/70 transition",
+                "hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300/70",
+              )}
+            >
+              {workspaceRailOpen ? (
+                <MenuUnfoldOutlined className="text-[15px]" aria-hidden />
+              ) : (
+                <MenuFoldOutlined className="text-[15px]" aria-hidden />
+              )}
+            </button>
+          ) : null}
         </header>
 
         <div className="relative flex min-h-0 min-w-0 bg-white">
@@ -1323,6 +1448,15 @@ export function ChatPage() {
                     无法从模型目录确认是否支持图片。若助手仍称未收到图，请换用已知支持视觉的模型或升级网关。
                   </div>
                 ) : null}
+                {activeApproval ? (
+                  <ApprovalPromptCard
+                    request={activeApproval}
+                    busy={approvalBusy}
+                    error={approvalError}
+                    pendingCount={approvalQueue.length}
+                    onDecision={decideApproval}
+                  />
+                ) : null}
                 {pendingAttachments.length > 0 ? (
                   <div className="mb-2 flex flex-wrap gap-2">
                     {pendingAttachments.map((att) => (
@@ -1488,36 +1622,38 @@ export function ChatPage() {
           {workspaceRailEligible ? (
             <aside
               className={cn(
-                "power-workspace-rail block min-h-0 shrink-0 overflow-hidden border-l border-slate-200/45 bg-white",
+                "power-workspace-rail relative block min-h-0 shrink-0 overflow-hidden border-l border-slate-200/45 bg-white",
                 workspacePreviewActive
                   ? "power-workspace-rail--preview"
                   : "power-workspace-rail--list",
-                "power-workspace-rail--open",
+                workspaceRailOpen ? "power-workspace-rail--open" : "power-workspace-rail--closed",
                 workspacePreviewFullscreen && "power-workspace-rail--fullscreen",
               )}
               aria-hidden={false}
             >
-              <div className="power-workspace-rail__inner">
-                {adapter ? (
-                  <ChatWorkspaceFilesPanel
-                    adapter={adapter}
-                    agentId={workspaceAgentId}
-                    showToolbar={false}
-                    onPreviewActiveChange={setWorkspacePreviewActive}
-                    reloadToken={workspaceFilesReloadToken}
-                    canFullscreen={workspaceCanFullscreen}
-                    previewFullscreen={workspacePreviewFullscreen}
-                    onToggleFullscreen={toggleWorkspacePreviewFullscreen}
-                  />
-                ) : (
-                  <div className="flex h-full flex-col bg-[#fafafa] px-4 py-5 text-sm text-slate-500">
-                    <div className="mb-2 text-[13px] font-semibold text-slate-800">最近修改</div>
-                    <div className="rounded-xl border border-slate-200/70 bg-white px-3 py-2 text-xs leading-relaxed">
-                      正在连接工作区文件服务…
+              {workspaceRailOpen ? (
+                <div className="power-workspace-rail__inner">
+                  {adapter ? (
+                    <ChatWorkspaceFilesPanel
+                      adapter={adapter}
+                      agentId={workspaceAgentId}
+                      showToolbar={false}
+                      onPreviewActiveChange={setWorkspacePreviewActive}
+                      reloadToken={workspaceFilesReloadToken}
+                      canFullscreen={workspaceCanFullscreen}
+                      previewFullscreen={workspacePreviewFullscreen}
+                      onToggleFullscreen={toggleWorkspacePreviewFullscreen}
+                    />
+                  ) : (
+                    <div className="flex h-full flex-col bg-[#fafafa] px-4 py-5 text-sm text-slate-500">
+                      <div className="mb-2 text-[13px] font-semibold text-slate-800">最近修改</div>
+                      <div className="rounded-xl border border-slate-200/70 bg-white px-3 py-2 text-xs leading-relaxed">
+                        正在连接工作区文件服务…
+                      </div>
                     </div>
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
+              ) : null}
             </aside>
           ) : null}
         </div>

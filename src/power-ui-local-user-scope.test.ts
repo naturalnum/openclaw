@@ -9,7 +9,10 @@ import {
   buildPowerQuickSessionKey,
   buildPowerSessionKey,
 } from "../power-ui/src/integrations/openclaw/session-keys.js";
-import { resolveTemporaryChatWorkspacePath } from "../power-ui/src/react-app/lib/global-model-config.js";
+import {
+  resolveProjectWorkspacePath,
+  resolveTemporaryChatWorkspacePath,
+} from "../power-ui/src/react-app/lib/global-model-config.js";
 
 describe("Power UI local user scope", () => {
   it("keeps projects and sessions isolated by local user scope", () => {
@@ -31,6 +34,7 @@ describe("Power UI local user scope", () => {
     expect(isSessionInLocalUserScope(adminQuickSession, adminScope)).toBe(true);
     expect(isSessionInLocalUserScope(xixiQuickSession, adminScope)).toBe(false);
     expect(isSessionInLocalUserScope(adminQuickSession, xixiScope)).toBe(false);
+    expect(isSessionInLocalUserScope("agent:main:quick:legacy", adminScope)).toBe(false);
   });
 
   it("places temporary chat workspaces under the local user temp folder", () => {
@@ -50,5 +54,37 @@ describe("Power UI local user scope", () => {
     ).toBe(
       "/tmp/openclaw-workspace/users/admin/default/temp/agent-main-user-u-admin-quick-abc-def",
     );
+  });
+
+  it("places project workspaces under the owning local user projects folder", () => {
+    expect(
+      resolveProjectWorkspacePath(
+        {
+          agents: {
+            defaults: {
+              workspace: "/tmp/openclaw-workspace",
+            },
+          },
+        },
+        "漫剧",
+        [],
+        { userFolder: "xixi" },
+      ),
+    ).toBe("/tmp/openclaw-workspace/users/xixi/projects/漫剧");
+
+    expect(
+      resolveProjectWorkspacePath(
+        {
+          agents: {
+            defaults: {
+              workspace: "/tmp/openclaw-workspace",
+            },
+          },
+        },
+        "漫剧",
+        ["/tmp/openclaw-workspace/users/xixi/projects/漫剧"],
+        { userFolder: "xixi" },
+      ),
+    ).toBe("/tmp/openclaw-workspace/users/xixi/projects/漫剧-2");
   });
 });

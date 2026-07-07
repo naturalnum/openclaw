@@ -111,6 +111,31 @@ export type WorkbenchCodeTerminalReadResult = {
   reset: boolean;
 };
 
+export type WorkbenchApprovalRequestPayload = {
+  command: string;
+  cwd?: string | null;
+  host?: string | null;
+  security?: string | null;
+  ask?: string | null;
+  agentId?: string | null;
+  resolvedPath?: string | null;
+  sessionKey?: string | null;
+};
+
+export type WorkbenchApprovalRequest = {
+  id: string;
+  kind: "exec" | "plugin";
+  request: WorkbenchApprovalRequestPayload;
+  pluginTitle?: string;
+  pluginDescription?: string | null;
+  pluginSeverity?: string | null;
+  pluginId?: string | null;
+  createdAtMs: number;
+  expiresAtMs: number;
+};
+
+export type WorkbenchApprovalDecision = "allow-once" | "allow-always" | "deny";
+
 export type WorkbenchAdapterEvent =
   | {
       type: "chat";
@@ -129,6 +154,16 @@ export type WorkbenchAdapterEvent =
       type: "connection";
       connected: boolean;
       error?: string | null;
+    }
+  | {
+      type: "approval";
+      state: "requested";
+      request: WorkbenchApprovalRequest;
+    }
+  | {
+      type: "approval";
+      state: "resolved";
+      id: string;
     };
 
 export interface WorkbenchAdapter {

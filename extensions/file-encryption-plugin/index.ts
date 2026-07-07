@@ -97,8 +97,10 @@ function matchesEncryptedPath(filePath: string, patterns: string[]): boolean {
     if (regex.test(normalized)) {
       return true;
     }
-    // Also check if the path contains the pattern segment
-    if (normalized.includes(pattern.replace("**/", "").replace("/**", ""))) {
+    // Plain path entries can be used as simple contains rules. Glob entries must
+    // use the glob matcher above so patterns such as **/memory/** do not match
+    // the directory itself.
+    if (!pattern.includes("*") && normalized.includes(pattern)) {
       return true;
     }
   }
@@ -126,6 +128,9 @@ function resolveEncryptionKey(configKey?: string): Buffer {
   }
 
   try {
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(keySource) || keySource.length % 4 !== 0) {
+      throw new Error("Invalid base64 encoding");
+    }
     const keyBuffer = Buffer.from(keySource, "base64");
     if (keyBuffer.length !== 32) {
       throw new Error(
