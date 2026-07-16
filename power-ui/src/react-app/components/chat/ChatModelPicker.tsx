@@ -66,7 +66,7 @@ export function ChatModelPicker({
   if (!models.length) {
     return (
       <div className="max-w-[min(100vw-2rem,280px)] rounded-lg border border-dashed border-slate-300 bg-slate-50 px-2.5 py-2 text-left text-xs leading-snug text-slate-500">
-        暂无可用模型（请检查网关与模型目录）
+        未配置模型（请先在设置中配置模型）
       </div>
     );
   }

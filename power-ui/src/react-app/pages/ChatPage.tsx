@@ -161,9 +161,9 @@ function renderChatMediaAttachments(
       {attachments.map((attachment) => (
         <div
           key={attachment.path}
-          className="flex items-center gap-2 rounded-xl border border-slate-200/70 bg-slate-50/70 px-2.5 py-2 text-xs text-slate-700"
+          className="flex items-center gap-2 rounded-xl border border-neutral-300/75 bg-neutral-50/80 px-2.5 py-2 text-xs text-slate-700"
         >
-          <FileTextOutlined className="shrink-0 text-slate-500" aria-hidden />
+          <FileTextOutlined className="shrink-0 text-neutral-500" aria-hidden />
           <span className="min-w-0 flex-1 truncate font-medium" title={attachment.name}>
             {attachment.name}
           </span>
@@ -171,7 +171,7 @@ function renderChatMediaAttachments(
             <button
               type="button"
               onClick={() => options?.onDownload?.(attachment)}
-              className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 active:scale-[0.98]"
+              className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-neutral-300/80 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 shadow-sm transition hover:bg-neutral-50 active:scale-[0.98]"
             >
               <DownloadOutlined className="text-[11px]" aria-hidden />
               下载
@@ -210,8 +210,8 @@ function renderChatMessageBubble(
         className={cn(
           "max-w-[min(100%,42rem)] rounded-2xl px-3 py-2 text-sm leading-snug",
           isUser
-            ? "rounded-br-md bg-[#fbfbfa] text-slate-900 ring-1 ring-slate-200/60"
-            : "rounded-bl-md bg-white text-slate-800 ring-1 ring-slate-200/50",
+            ? "rounded-br-md bg-[#fbfbfa] text-slate-900 ring-1 ring-neutral-300/80"
+            : "rounded-bl-md bg-white text-slate-800 ring-1 ring-neutral-300/75",
         )}
       >
         {isAssistant && displayText ? (
@@ -1149,8 +1149,10 @@ export function ChatPage() {
     [addFilesFromList],
   );
 
+  const hasConfiguredModel = Boolean(effectiveModelRef.trim());
   const canSend =
-    Boolean(draft.trim()) || pendingAttachments.length > 0 || pendingWorkspaceFiles.length > 0;
+    hasConfiguredModel &&
+    (Boolean(draft.trim()) || pendingAttachments.length > 0 || pendingWorkspaceFiles.length > 0);
 
   const handleSend = async () => {
     if (!canSend || sending) {
@@ -1244,7 +1246,7 @@ export function ChatPage() {
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-white">
       <main className="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] bg-white">
-        <header className="power-chat-page-header flex h-14 shrink-0 items-center justify-between gap-3 border-b border-slate-200/35 bg-white/95 px-5 backdrop-blur">
+        <header className="power-chat-page-header flex h-14 shrink-0 items-center justify-between gap-3 border-b border-stone-200/80 bg-white/95 px-5 backdrop-blur">
           <div className="min-w-0 flex-1 pt-0.5">
             {currentSessionLabel ? (
               <>
@@ -1269,8 +1271,8 @@ export function ChatPage() {
               aria-expanded={workspaceRailOpen}
               onClick={() => setWorkspaceRailOpen(!workspaceRailOpen)}
               className={cn(
-                "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200/80 bg-white text-slate-500 shadow-sm shadow-slate-200/70 transition",
-                "hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300/70",
+                "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-stone-200/90 bg-white text-slate-500 shadow-sm shadow-stone-200/60 transition",
+                "hover:border-stone-300 hover:bg-stone-50 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300/70",
               )}
             >
               {workspaceRailOpen ? (
@@ -1340,7 +1342,7 @@ export function ChatPage() {
                       return (extractText(m) ?? "").trim() === optimisticUserBubble.text.trim();
                     }) ? (
                       <div className="flex w-full justify-end">
-                        <div className="max-w-[min(100%,42rem)] rounded-2xl rounded-br-md bg-[#fbfbfa] px-3 py-2 text-sm leading-snug text-slate-900 ring-1 ring-slate-200/60">
+                        <div className="max-w-[min(100%,42rem)] rounded-2xl rounded-br-md bg-[#fbfbfa] px-3 py-2 text-sm leading-snug text-slate-900 ring-1 ring-neutral-300/80">
                           <span className="whitespace-pre-wrap break-words">
                             {optimisticUserBubble.text || "（仅附件消息）"}
                           </span>
@@ -1354,7 +1356,7 @@ export function ChatPage() {
                     ) : null}
                     {visibleStreamSegments.map((seg, i) => (
                       <div key={`seg-${seg.ts}-${i}`} className="flex w-full justify-start">
-                        <div className="max-w-[min(100%,42rem)] rounded-2xl rounded-bl-md bg-white px-3 py-2 text-sm text-slate-700 ring-1 ring-slate-200/50">
+                        <div className="max-w-[min(100%,42rem)] rounded-2xl rounded-bl-md bg-white px-3 py-2 text-sm text-slate-700 ring-1 ring-neutral-300/75">
                           <ChatMarkdownBody
                             className="chat-markdown break-words text-sm leading-snug text-slate-700 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
                             source={sanitizeChatDisplayText(seg.text)}
@@ -1422,7 +1424,7 @@ export function ChatPage() {
               ) : null}
             </div>
 
-            <div className="power-composer-fade relative shrink-0 px-3 pb-6 pt-9 sm:px-6 sm:pb-8 sm:pt-10">
+            <div className="power-composer-fade relative shrink-0 px-3 pb-6 pt-5 sm:px-6 sm:pb-8 sm:pt-6">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -1517,7 +1519,7 @@ export function ChatPage() {
                 <div
                   className={cn(
                     "power-surface flex items-end gap-2 rounded-[26px] border px-2.5 py-2 transition-[box-shadow,border-color,transform] sm:gap-2.5 sm:px-3 sm:py-2.5",
-                    "focus-within:border-slate-400/45 focus-within:shadow-xl focus-within:shadow-slate-300/25 focus-within:ring-1 focus-within:ring-slate-300/60 focus-within:ring-offset-0",
+                    "focus-within:border-stone-400/55 focus-within:shadow-xl focus-within:shadow-stone-300/25 focus-within:ring-1 focus-within:ring-stone-300/70 focus-within:ring-offset-0",
                   )}
                   onDragOver={(e) => {
                     e.preventDefault();
@@ -1539,7 +1541,7 @@ export function ChatPage() {
                       busy
                     }
                     onClick={() => fileInputRef.current?.click()}
-                    className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300/60 focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-35"
+                    className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-500 transition hover:bg-stone-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300/70 focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-35"
                   >
                     <ClipIcon className="h-5 w-5" />
                   </button>
@@ -1548,7 +1550,11 @@ export function ChatPage() {
                     id="chat-composer"
                     rows={1}
                     placeholder={
-                      defaultAgentId || agents[0] ? "有问题，尽管问…" : "请先在设置里配置网关与助手"
+                      !hasConfiguredModel
+                        ? "请先在设置中配置模型"
+                        : defaultAgentId || agents[0]
+                          ? "有问题，尽管问…"
+                          : "请先在设置里配置网关与助手"
                     }
                     value={draft}
                     onChange={(e) => {
@@ -1595,8 +1601,8 @@ export function ChatPage() {
                         ? "border border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100 focus-visible:ring-rose-300/50 enabled:active:scale-95"
                         : canSend && !sending
                           ? cn(
-                              "shadow-sm shadow-slate-300/35 enabled:active:scale-95",
-                              "focus-visible:ring-slate-300/60",
+                              "shadow-sm shadow-stone-300/35 enabled:active:scale-95",
+                              "focus-visible:ring-stone-300/70",
                               BRAND.primary,
                               BRAND.primaryText,
                             )
@@ -1622,7 +1628,7 @@ export function ChatPage() {
           {workspaceRailEligible ? (
             <aside
               className={cn(
-                "power-workspace-rail relative block min-h-0 shrink-0 overflow-hidden border-l border-slate-200/45 bg-white",
+                "power-workspace-rail relative block min-h-0 shrink-0 overflow-hidden border-l border-stone-200/85 bg-white",
                 workspacePreviewActive
                   ? "power-workspace-rail--preview"
                   : "power-workspace-rail--list",

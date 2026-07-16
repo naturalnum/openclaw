@@ -3,9 +3,12 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { resolveStateDir } from "../config/paths.js";
 
-const USERS_DIRNAME = "users";
+const AUTH_DIRNAME = "auth";
+const AUTH_USERS_DIRNAME = "users";
+const WORKSPACE_USERS_DIRNAME = "users";
 const PROFILE_FILENAME = "profile.json";
-const SESSIONS_FILENAME = "_sessions.json";
+const SESSIONS_FILENAME = "sessions.json";
+const LEGACY_SESSIONS_FILENAME = "_sessions.json";
 const SESSION_TOKEN_BYTES = 32;
 const DEFAULT_SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const USER_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{1,62}$/;
@@ -89,7 +92,7 @@ export function validateLocalUserId(id: string): string {
 }
 
 export function resolveLocalUsersDir(stateDir: string = resolveStateDir()): string {
-  return path.join(stateDir, USERS_DIRNAME);
+  return path.join(stateDir, AUTH_DIRNAME, AUTH_USERS_DIRNAME);
 }
 
 export function resolveLocalUserDir(userId: string, stateDir: string = resolveStateDir()): string {
@@ -104,7 +107,63 @@ export function resolveLocalUserProfilePath(
 }
 
 function resolveLocalUserSessionsPath(stateDir: string = resolveStateDir()): string {
-  return path.join(resolveLocalUsersDir(stateDir), SESSIONS_FILENAME);
+  return path.join(stateDir, AUTH_DIRNAME, SESSIONS_FILENAME);
+}
+
+function resolveLegacyLocalUsersDir(stateDir: string = resolveStateDir()): string {
+  return path.join(stateDir, WORKSPACE_USERS_DIRNAME);
+}
+
+function resolveLegacyLocalUserProfilePath(
+  userId: string,
+  stateDir: string = resolveStateDir(),
+): string {
+  return path.join(
+    resolveLegacyLocalUsersDir(stateDir),
+    validateLocalUserId(userId),
+    PROFILE_FILENAME,
+  );
+}
+
+function resolveLegacyLocalUserSessionsPath(stateDir: string = resolveStateDir()): string {
+  return path.join(resolveLegacyLocalUsersDir(stateDir), LEGACY_SESSIONS_FILENAME);
+}
+
+export function resolveLocalUserWorkspaceRoot(
+  userId: string,
+  stateDir: string = resolveStateDir(),
+): string {
+  return path.join(stateDir, WORKSPACE_USERS_DIRNAME, validateLocalUserId(userId));
+}
+
+export function resolveLocalUserDefaultWorkspace(
+  userId: string,
+  stateDir: string = resolveStateDir(),
+): string {
+  return path.join(resolveLocalUserWorkspaceRoot(userId, stateDir), "default");
+}
+
+export function resolveLocalUserDefaultAgentId(userId: string): string {
+  const id = validateLocalUserId(userId);
+  const digest = createHash("sha1").update(`local-user-default\n${id}`).digest("hex").slice(0, 12);
+  return `agent-${digest}`;
+}
+
+export function resolveLocalUserProjectsDir(
+  userId: string,
+  stateDir: string = resolveStateDir(),
+): string {
+  return path.join(resolveLocalUserWorkspaceRoot(userId, stateDir), "projects");
+}
+
+export async function ensureLocalUserWorkspaces(
+  userId: string,
+  stateDir: string = resolveStateDir(),
+): Promise<void> {
+  await Promise.all([
+    fs.mkdir(resolveLocalUserDefaultWorkspace(userId, stateDir), { recursive: true }),
+    fs.mkdir(resolveLocalUserProjectsDir(userId, stateDir), { recursive: true }),
+  ]);
 }
 
 function publicLocalUserProfile(profile: LocalUserProfile): PublicLocalUserProfile {
@@ -218,22 +277,40 @@ export async function readLocalUser(
   opts: { stateDir?: string } = {},
 ): Promise<LocalUserProfile | null> {
   const userId = validateLocalUserId(id);
-  return readJsonFile<LocalUserProfile>(resolveLocalUserProfilePath(userId, opts.stateDir));
+  const canonicalPath = resolveLocalUserProfilePath(userId, opts.stateDir);
+  const canonical = await readJsonFile<LocalUserProfile>(canonicalPath);
+  if (canonical) {
+    return canonical;
+  }
+  const legacy = await readJsonFile<LocalUserProfile>(
+    resolveLegacyLocalUserProfilePath(userId, opts.stateDir),
+  );
+  if (legacy) {
+    await writeJsonFile(canonicalPath, legacy);
+  }
+  return legacy;
 }
 
-export async function listLocalUsers(
-  opts: { stateDir?: string } = {},
-): Promise<PublicLocalUserProfile[]> {
-  const usersDir = resolveLocalUsersDir(opts.stateDir);
-  let entries: string[];
+async function readDirectoryEntries(dir: string): Promise<string[]> {
   try {
-    entries = await fs.readdir(usersDir);
+    return await fs.readdir(dir);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       return [];
     }
     throw err;
   }
+}
+
+export async function listLocalUsers(
+  opts: { stateDir?: string } = {},
+): Promise<PublicLocalUserProfile[]> {
+  const entries = [
+    ...new Set([
+      ...(await readDirectoryEntries(resolveLocalUsersDir(opts.stateDir))),
+      ...(await readDirectoryEntries(resolveLegacyLocalUsersDir(opts.stateDir))),
+    ]),
+  ];
   const profiles = await Promise.all(
     entries.map(async (entry) => {
       try {
@@ -272,6 +349,7 @@ export async function createLocalUser(
     updatedAt: now,
   };
   await writeJsonFile(resolveLocalUserProfilePath(id, input.stateDir), profile);
+  await ensureLocalUserWorkspaces(id, input.stateDir);
   return publicLocalUserProfile(profile);
 }
 
@@ -345,11 +423,19 @@ function hashSessionToken(token: string): string {
 }
 
 async function readLocalUserSessions(stateDir: string | undefined): Promise<LocalUserSessionsFile> {
-  return (
-    (await readJsonFile<LocalUserSessionsFile>(resolveLocalUserSessionsPath(stateDir))) ?? {
-      sessions: [],
-    }
+  const canonicalPath = resolveLocalUserSessionsPath(stateDir);
+  const canonical = await readJsonFile<LocalUserSessionsFile>(canonicalPath);
+  if (canonical) {
+    return canonical;
+  }
+  const legacy = await readJsonFile<LocalUserSessionsFile>(
+    resolveLegacyLocalUserSessionsPath(stateDir),
   );
+  if (legacy) {
+    await writeJsonFile(canonicalPath, legacy);
+    return legacy;
+  }
+  return { sessions: [] };
 }
 
 async function writeLocalUserSessions(

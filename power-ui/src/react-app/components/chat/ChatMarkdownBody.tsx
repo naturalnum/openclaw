@@ -29,28 +29,28 @@ const mdComponents: Components = {
     <h3 className="mb-1 mt-1.5 text-sm font-semibold first:mt-0">{children}</h3>
   ),
   blockquote: ({ children }) => (
-    <blockquote className="my-2 border-l-4 border-slate-200 pl-3 text-slate-600">
+    <blockquote className="my-2 border-l-4 border-neutral-300 pl-3 text-slate-600">
       {children}
     </blockquote>
   ),
-  hr: () => <hr className="my-3 border-slate-200" />,
+  hr: () => <hr className="my-3 border-neutral-300" />,
   strong: ({ children }) => <strong className="font-semibold text-slate-900">{children}</strong>,
   em: ({ children }) => <em className="italic">{children}</em>,
   table: ({ children }) => (
-    <div className="my-2 max-w-full overflow-x-auto rounded-lg border border-slate-200">
+    <div className="my-2 max-w-full overflow-x-auto rounded-lg border border-neutral-300/80">
       <table className="w-full min-w-[12rem] border-collapse text-left text-[13px]">
         {children}
       </table>
     </div>
   ),
-  thead: ({ children }) => <thead className="bg-slate-50">{children}</thead>,
+  thead: ({ children }) => <thead className="bg-neutral-50">{children}</thead>,
   th: ({ children }) => (
-    <th className="border-b border-slate-200 px-2 py-1.5 font-semibold text-slate-800">
+    <th className="border-b border-neutral-300/80 px-2 py-1.5 font-semibold text-slate-800">
       {children}
     </th>
   ),
   td: ({ children }) => (
-    <td className="border-b border-slate-100 px-2 py-1.5 text-slate-700">{children}</td>
+    <td className="border-b border-neutral-200/80 px-2 py-1.5 text-slate-700">{children}</td>
   ),
   tr: ({ children }) => <tr>{children}</tr>,
   code: ({ className, children, ...props }) => {
@@ -58,7 +58,7 @@ const mdComponents: Components = {
     if (isInline) {
       return (
         <code
-          className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[13px] text-slate-800"
+          className="rounded bg-neutral-100 px-1 py-0.5 font-mono text-[13px] text-slate-800"
           {...props}
         >
           {children}
@@ -72,7 +72,7 @@ const mdComponents: Components = {
     );
   },
   pre: ({ children }) => (
-    <pre className="my-2 max-h-72 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 leading-snug">
+    <pre className="my-2 max-h-72 overflow-auto rounded-lg border border-neutral-300/80 bg-neutral-50 p-3 leading-snug">
       {children}
     </pre>
   ),

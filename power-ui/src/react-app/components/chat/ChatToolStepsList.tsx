@@ -10,7 +10,7 @@ function StepStatusIcon({ complete, active }: { complete: boolean; active: boole
   if (complete) {
     return (
       <span
-        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-600 ring-1 ring-slate-200/90"
+        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-neutral-100 text-neutral-600 ring-1 ring-neutral-300/80"
         aria-hidden
       >
         <CheckOutlined className="text-[11px]" />
@@ -20,7 +20,7 @@ function StepStatusIcon({ complete, active }: { complete: boolean; active: boole
   if (active) {
     return (
       <span
-        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white text-slate-500 ring-1 ring-slate-200/90"
+        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white text-neutral-500 ring-1 ring-neutral-300/80"
         aria-hidden
       >
         <LoadingOutlined spin className="text-[12px]" />
@@ -29,10 +29,10 @@ function StepStatusIcon({ complete, active }: { complete: boolean; active: boole
   }
   return (
     <span
-      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-50 text-slate-400 ring-1 ring-slate-200/70"
+      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-neutral-50 text-neutral-400 ring-1 ring-neutral-300/70"
       aria-hidden
     >
-      <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
+      <span className="h-1.5 w-1.5 rounded-full bg-neutral-300" />
     </span>
   );
 }
@@ -74,7 +74,7 @@ export function ChatToolStepsList({ steps, phase, fitContent = false, children }
     >
       <div
         className={cn(
-          "max-w-[min(100%,42rem)] rounded-2xl rounded-bl-md border border-slate-200/55 bg-white text-slate-700 shadow-sm shadow-slate-200/15",
+          "max-w-[min(100%,42rem)] rounded-2xl rounded-bl-md border border-neutral-300/75 bg-white text-slate-700 shadow-sm shadow-neutral-200/35",
           fitContent ? "w-fit" : "w-full",
         )}
       >
@@ -103,7 +103,7 @@ export function ChatToolStepsList({ steps, phase, fitContent = false, children }
                   >
                     {index < steps.length - 1 ? (
                       <span
-                        className="pointer-events-none absolute left-[1.625rem] top-6 bottom-0 w-px bg-slate-200/90"
+                        className="pointer-events-none absolute left-[1.625rem] top-6 bottom-0 w-px bg-neutral-300/80"
                         aria-hidden
                       />
                     ) : null}
@@ -142,7 +142,7 @@ export function ChatToolStepsList({ steps, phase, fitContent = false, children }
             className={cn(
               "text-[15px] leading-relaxed text-slate-800",
               fitContent ? "px-3 py-2" : "px-3 pb-2.5",
-              showSteps ? "border-t border-slate-200/50 pt-2" : fitContent ? "" : "pt-2",
+              showSteps ? "border-t border-neutral-300/70 pt-2" : fitContent ? "" : "pt-2",
             )}
           >
             {children}

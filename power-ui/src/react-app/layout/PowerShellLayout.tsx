@@ -12,7 +12,7 @@ import {
   SettingOutlined,
   ThunderboltOutlined,
 } from "@ant-design/icons";
-import { App } from "antd";
+import { App, Dropdown } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { parseAgentSessionKey } from "../../../../ui/src/ui/session-key";
@@ -23,7 +23,6 @@ import type { UiSettings } from "../../compat/ui-core";
 import {
   buildLocalUserScope,
   isProjectInLocalUserScope,
-  stripScopedProjectName,
 } from "../../integrations/openclaw/local-user-scope";
 import {
   isPowerQuickSessionKey,
@@ -194,7 +193,6 @@ function SidebarNav({
   const [expandedProjectSessionIds, setExpandedProjectSessionIds] = useState<Set<string>>(
     () => new Set(),
   );
-  const menuRef = useRef<HTMLDivElement | null>(null);
   const renameDialogRef = useRef<HTMLDialogElement>(null);
   const renameProjectDialogRef = useRef<HTMLDialogElement>(null);
   const createProjectDialogRef = useRef<HTMLDialogElement>(null);
@@ -264,21 +262,6 @@ function SidebarNav({
       "min-w-0 flex-1 truncate py-1 text-left text-[12.5px] leading-snug transition",
       selected ? "text-slate-900" : "font-medium text-slate-600 hover:text-slate-900",
     );
-
-  useEffect(() => {
-    if (!openMenuKey && !openProjectMenuKey) {
-      return undefined;
-    }
-    const onDoc = (ev: MouseEvent) => {
-      const el = menuRef.current;
-      if (el && ev.target instanceof Node && !el.contains(ev.target)) {
-        setOpenMenuKey(null);
-        setOpenProjectMenuKey(null);
-      }
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [openMenuKey, openProjectMenuKey]);
 
   useEffect(() => {
     if (!settingsFlyoutOpen) {
@@ -585,7 +568,12 @@ function SidebarNav({
 
       {!collapsed ? (
         <>
-          <div className="mt-3 flex min-h-0 max-h-[58%] shrink flex-col overflow-hidden border-t border-slate-200/70 px-2 pb-2 pt-3">
+          <div
+            className={cn(
+              "mt-3 flex flex-col overflow-hidden border-t border-stone-200/85 px-2 pb-2 pt-3",
+              projectsOpen ? "max-h-[62%] min-h-0 shrink-0" : "shrink-0",
+            )}
+          >
             <div
               className={cn(
                 sectionHeaderRowClass,
@@ -718,51 +706,53 @@ function SidebarNav({
                         >
                           {p.name}
                         </Link>
-                        <button
-                          type="button"
-                          aria-label={`${p.name} 项目操作`}
-                          title="项目更多操作"
-                          aria-expanded={openProjectMenuKey === p.id}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            setOpenProjectMenuKey((k) => (k === p.id ? null : p.id));
-                            setOpenMenuKey(null);
+                        <Dropdown
+                          trigger={["click"]}
+                          placement="bottomRight"
+                          overlayClassName="power-sidebar-action-dropdown"
+                          open={openProjectMenuKey === p.id}
+                          onOpenChange={(open) => {
+                            setOpenProjectMenuKey(open ? p.id : null);
+                            if (open) {
+                              setOpenMenuKey(null);
+                            }
                           }}
-                          className={cn(
-                            "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-[rgba(28,25,23,0.05)] hover:text-slate-700 focus:opacity-100",
-                            openProjectMenuKey === p.id
-                              ? "opacity-100"
-                              : "opacity-0 group-hover:opacity-100",
-                          )}
+                          menu={{
+                            items: [
+                              {
+                                key: "rename",
+                                icon: <EditOutlined className="text-[13px] text-slate-500" />,
+                                label: "重命名",
+                                onClick: () => openProjectRename(p),
+                              },
+                              {
+                                key: "delete",
+                                danger: true,
+                                label: "删除",
+                                onClick: () => deleteProject(p),
+                              },
+                            ],
+                          }}
                         >
-                          <MoreOutlined className="text-base" />
-                        </button>
-                        {openProjectMenuKey === p.id ? (
-                          <div
-                            ref={menuRef}
-                            className="absolute bottom-full right-0 z-30 mb-0.5 min-w-[8rem] rounded-lg border border-slate-200/90 bg-white py-1 shadow-lg"
-                            role="menu"
+                          <button
+                            type="button"
+                            aria-label={`${p.name} 项目操作`}
+                            title="项目更多操作"
+                            aria-expanded={openProjectMenuKey === p.id}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                            }}
+                            className={cn(
+                              "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-[rgba(28,25,23,0.05)] hover:text-slate-700 focus:opacity-100",
+                              openProjectMenuKey === p.id
+                                ? "opacity-100"
+                                : "opacity-0 group-hover:opacity-100",
+                            )}
                           >
-                            <button
-                              type="button"
-                              role="menuitem"
-                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-slate-800 hover:bg-slate-50"
-                              onClick={() => openProjectRename(p)}
-                            >
-                              <EditOutlined className="text-[13px] text-slate-500" />
-                              重命名
-                            </button>
-                            <button
-                              type="button"
-                              role="menuitem"
-                              className="block w-full px-3 py-2 text-left text-[12px] text-red-600 hover:bg-red-50"
-                              onClick={() => deleteProject(p)}
-                            >
-                              删除
-                            </button>
-                          </div>
-                        ) : null}
+                            <MoreOutlined className="text-base" />
+                          </button>
+                        </Dropdown>
                       </div>
                       {!collapsedProjectIds.has(p.id) ? (
                         <div className="ml-8 flex flex-col gap-1">
@@ -791,51 +781,54 @@ function SidebarNav({
                                 >
                                   {label}
                                 </Link>
-                                <button
-                                  type="button"
-                                  aria-label="会话操作"
-                                  aria-expanded={openMenuKey === s.key}
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    setOpenMenuKey((k) => (k === s.key ? null : s.key));
-                                    setOpenProjectMenuKey(null);
+                                <Dropdown
+                                  trigger={["click"]}
+                                  placement="bottomRight"
+                                  overlayClassName="power-sidebar-action-dropdown"
+                                  open={openMenuKey === s.key}
+                                  onOpenChange={(open) => {
+                                    setOpenMenuKey(open ? s.key : null);
+                                    if (open) {
+                                      setOpenProjectMenuKey(null);
+                                    }
                                   }}
-                                  className={cn(
-                                    "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100/65 hover:text-slate-800 focus:opacity-100",
-                                    openMenuKey === s.key
-                                      ? "opacity-100"
-                                      : "opacity-0 group-hover/session:opacity-100",
-                                  )}
+                                  menu={{
+                                    items: [
+                                      {
+                                        key: "rename",
+                                        icon: (
+                                          <MessageOutlined className="text-[13px] text-slate-500" />
+                                        ),
+                                        label: "重命名",
+                                        onClick: () => openRename(s),
+                                      },
+                                      {
+                                        key: "delete",
+                                        danger: true,
+                                        label: "删除",
+                                        onClick: () => void handleDeleteSession(s.key),
+                                      },
+                                    ],
+                                  }}
                                 >
-                                  <MoreOutlined className="text-[15px]" />
-                                </button>
-                                {openMenuKey === s.key ? (
-                                  <div
-                                    ref={menuRef}
-                                    className="absolute bottom-full right-0 z-30 mb-0.5 min-w-[7.5rem] rounded-lg border border-slate-200/90 bg-white py-1 shadow-lg"
-                                    role="menu"
+                                  <button
+                                    type="button"
+                                    aria-label="会话操作"
+                                    aria-expanded={openMenuKey === s.key}
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                    }}
+                                    className={cn(
+                                      "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100/65 hover:text-slate-800 focus:opacity-100",
+                                      openMenuKey === s.key
+                                        ? "opacity-100"
+                                        : "opacity-0 group-hover/session:opacity-100",
+                                    )}
                                   >
-                                    <button
-                                      type="button"
-                                      role="menuitem"
-                                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-slate-800 hover:bg-slate-50"
-                                      onClick={() => openRename(s)}
-                                    >
-                                      <MessageOutlined className="text-[13px] text-slate-500" />
-                                      重命名
-                                    </button>
-                                    <button
-                                      type="button"
-                                      role="menuitem"
-                                      title="删除会话"
-                                      className="block w-full px-3 py-1.5 text-left text-[12px] text-red-600 transition hover:bg-red-50"
-                                      onClick={() => void handleDeleteSession(s.key)}
-                                    >
-                                      删除
-                                    </button>
-                                  </div>
-                                ) : null}
+                                    <MoreOutlined className="text-[15px]" />
+                                  </button>
+                                </Dropdown>
                               </div>
                             );
                           })}
@@ -844,7 +837,7 @@ function SidebarNav({
                       {!collapsedProjectIds.has(p.id) && projectSessions.length > 6 ? (
                         <button
                           type="button"
-                          className="ml-8 mt-0.5 inline-flex h-6 items-center rounded-full border border-slate-200/70 bg-white/70 px-2.5 text-[11px] font-medium text-slate-500 shadow-sm shadow-slate-200/30 transition hover:border-slate-300 hover:bg-white hover:text-slate-900"
+                          className="ml-8 mt-0.5 inline-flex h-6 items-center rounded-full border border-stone-200/85 bg-white/70 px-2.5 text-[11px] font-medium text-slate-500 shadow-sm shadow-stone-200/30 transition hover:border-stone-300 hover:bg-white hover:text-slate-900"
                           onClick={() =>
                             setExpandedProjectSessionIds((prev) => {
                               const next = new Set(prev);
@@ -874,7 +867,12 @@ function SidebarNav({
             ) : null}
           </div>
 
-          <div className="flex min-h-[170px] flex-1 flex-col border-t border-slate-300/35 px-2 pt-2.5">
+          <div
+            className={cn(
+              "flex min-h-0 flex-col border-t border-stone-200/85 px-2 pt-2.5",
+              recentOpen ? "max-h-[34%] shrink-0" : "shrink-0",
+            )}
+          >
             <button
               type="button"
               aria-expanded={recentOpen}
@@ -926,50 +924,52 @@ function SidebarNav({
                           {label}
                         </Link>
                         <div className="relative flex shrink-0 items-center pr-0.5">
-                          <button
-                            type="button"
-                            aria-label="会话操作"
-                            aria-expanded={openMenuKey === s.key}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              setOpenMenuKey((k) => (k === s.key ? null : s.key));
+                          <Dropdown
+                            trigger={["click"]}
+                            placement="bottomRight"
+                            overlayClassName="power-sidebar-action-dropdown"
+                            open={openMenuKey === s.key}
+                            onOpenChange={(open) => {
+                              setOpenMenuKey(open ? s.key : null);
+                              if (open) {
+                                setOpenProjectMenuKey(null);
+                              }
                             }}
-                            className={cn(
-                              "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-[rgba(28,25,23,0.05)] hover:text-slate-800 focus:opacity-100",
-                              openMenuKey === s.key
-                                ? "opacity-100"
-                                : "opacity-0 group-hover/session:opacity-100",
-                            )}
+                            menu={{
+                              items: [
+                                {
+                                  key: "rename",
+                                  icon: <MessageOutlined className="text-[13px] text-slate-500" />,
+                                  label: "重命名",
+                                  onClick: () => openRename(s),
+                                },
+                                {
+                                  key: "delete",
+                                  danger: true,
+                                  label: "删除",
+                                  onClick: () => void handleDeleteSession(s.key),
+                                },
+                              ],
+                            }}
                           >
-                            <MoreOutlined className="text-base" />
-                          </button>
-                          {openMenuKey === s.key ? (
-                            <div
-                              ref={menuRef}
-                              className="absolute bottom-full right-0 z-30 mb-0.5 min-w-[7.5rem] rounded-lg border border-slate-200/90 bg-white py-1 shadow-lg"
-                              role="menu"
+                            <button
+                              type="button"
+                              aria-label="会话操作"
+                              aria-expanded={openMenuKey === s.key}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                              }}
+                              className={cn(
+                                "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-[rgba(28,25,23,0.05)] hover:text-slate-800 focus:opacity-100",
+                                openMenuKey === s.key
+                                  ? "opacity-100"
+                                  : "opacity-0 group-hover/session:opacity-100",
+                              )}
                             >
-                              <button
-                                type="button"
-                                role="menuitem"
-                                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-slate-800 hover:bg-slate-50"
-                                onClick={() => openRename(s)}
-                              >
-                                <MessageOutlined className="text-[13px] text-slate-500" />
-                                重命名
-                              </button>
-                              <button
-                                type="button"
-                                role="menuitem"
-                                title="删除会话"
-                                className="block w-full px-3 py-1.5 text-left text-[12px] text-red-600 transition hover:bg-red-50"
-                                onClick={() => void handleDeleteSession(s.key)}
-                              >
-                                删除
-                              </button>
-                            </div>
-                          ) : null}
+                              <MoreOutlined className="text-base" />
+                            </button>
+                          </Dropdown>
                         </div>
                       </div>
                     );
@@ -983,7 +983,7 @@ function SidebarNav({
 
       <div
         className={cn(
-          "mt-auto shrink-0 border-t border-slate-300/45",
+          "mt-auto shrink-0 border-t border-stone-200/90",
           collapsed ? "px-2 pb-3 pt-2" : "px-2 py-3",
         )}
       >
@@ -1338,12 +1338,10 @@ function PowerShellLayoutContent() {
       try {
         const res = await adapter.request<AgentsListResult>("agents.list", {});
         const rows = (res.agents ?? [])
-          .filter((a) => isProjectInLocalUserScope(a.id, userScope))
+          .filter((a) => isProjectInLocalUserScope(a.workspace, userScope))
           .map((a) => ({
             id: a.id,
-            name:
-              stripScopedProjectName((a.identity?.name ?? a.name ?? a.id).trim(), userScope) ||
-              a.id,
+            name: (a.identity?.name ?? a.name ?? a.id).trim() || a.id,
             workspace: typeof a.workspace === "string" && a.workspace.trim() ? a.workspace : null,
           }));
         if (!cancelled) {
@@ -1394,7 +1392,7 @@ function PowerShellLayoutContent() {
   };
 
   return (
-    <div className="flex h-[100dvh] flex-col overflow-hidden bg-[#fafafa] text-slate-900">
+    <div className="flex h-[100dvh] flex-col overflow-hidden bg-white text-slate-900">
       <header className="power-shell-mobile-header flex h-12 shrink-0 items-center gap-2 border-b border-slate-200/55 bg-white/82 px-3 shadow-sm shadow-slate-300/20 backdrop-blur md:hidden">
         <button
           type="button"
@@ -1411,7 +1409,7 @@ function PowerShellLayoutContent() {
       <div className="flex min-h-0 min-w-0 flex-1 flex-row">
         <aside
           className={cn(
-            "power-sidebar hidden min-h-0 shrink-0 flex-col border-r border-slate-200/55 md:flex",
+            "power-sidebar hidden min-h-0 shrink-0 flex-col border-r border-stone-200/90 md:flex",
             collapsed && "power-sidebar--collapsed",
           )}
           style={{ width: sidebarWidth }}
@@ -1433,8 +1431,8 @@ function PowerShellLayoutContent() {
               aria-label="关闭菜单"
               onClick={() => setMobileNavOpen(false)}
             />
-            <aside className="power-sidebar fixed inset-y-0 left-0 z-50 flex w-[min(100vw,280px)] max-w-[88vw] flex-col border-r border-slate-200/70 shadow-2xl md:hidden">
-              <div className="flex items-center justify-between border-b border-slate-200/80 px-3 py-2.5">
+            <aside className="power-sidebar fixed inset-y-0 left-0 z-50 flex w-[min(100vw,280px)] max-w-[88vw] flex-col border-r border-stone-200/90 shadow-2xl md:hidden">
+              <div className="flex items-center justify-between border-b border-stone-200/90 px-3 py-2.5">
                 <span className="text-sm font-semibold text-slate-900">菜单</span>
                 <button
                   type="button"

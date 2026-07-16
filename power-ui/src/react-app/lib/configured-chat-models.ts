@@ -150,15 +150,18 @@ export function buildComposerModelCatalog(
   const configs = modelConfigs ?? [];
   return providerRefs.map((ref) => {
     const fromCatalog = catalogByRef.get(ref);
-    if (fromCatalog) {
-      return fromCatalog;
-    }
     const slashIndex = ref.indexOf("/");
     const provider = slashIndex >= 0 ? ref.slice(0, slashIndex) : "";
     const modelId = slashIndex >= 0 ? ref.slice(slashIndex + 1) : ref;
     const row = configs.find(
       (c) => c.enabled && formatCatalogModelRef({ provider: c.provider, id: c.model }) === ref,
     );
+    if (fromCatalog) {
+      return {
+        ...fromCatalog,
+        name: row?.name?.trim() || fromCatalog.name,
+      };
+    }
     const displayName = row?.name?.trim() || modelId;
     return {
       id: modelId,
@@ -294,6 +297,12 @@ export function resolveChatModelPool(
   // 设置里配置了 models.providers 时，只展示这些模型，不回退到网关全量目录（避免 Nova 等与配置无关的项）。
   if (providerRefs.length > 0) {
     return buildComposerModelCatalog(catalog, providerRefs, modelConfigs);
+  }
+
+  // The Gateway catalog contains built-in fallback models even when the user has
+  // configured nothing. Do not present those fallbacks as an actual selection.
+  if (!resolvePrimaryModelFromConfig(snapshot?.openclawConfig ?? null).trim()) {
+    return [];
   }
 
   const agentId = resolveEffectiveAgentId(snapshot, selectedProjectId, selectedSessionKey);

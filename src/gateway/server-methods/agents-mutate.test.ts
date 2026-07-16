@@ -443,9 +443,9 @@ describe("agents.create", () => {
     );
   });
 
-  it("keeps ascii user scope when creating scoped non-ascii project names", async () => {
+  it("derives a workspace-specific id for a local-user project", async () => {
     const { respond, promise } = makeCall("agents.create", {
-      name: "u-admin-漫剧",
+      name: "漫剧",
       workspace: "/tmp/users/admin/projects/漫剧",
     });
     await promise;
@@ -454,17 +454,34 @@ describe("agents.create", () => {
       true,
       expect.objectContaining({
         ok: true,
-        agentId: expect.stringMatching(/^u-admin-[0-9a-f]{12}$/),
-        name: "u-admin-漫剧",
+        agentId: expect.stringMatching(/^agent-[0-9a-f]{12}$/),
+        name: "漫剧",
       }),
       undefined,
     );
     expect(mocks.applyAgentConfig).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        agentId: expect.stringMatching(/^u-admin-[0-9a-f]{12}$/),
-        name: "u-admin-漫剧",
+        agentId: expect.stringMatching(/^agent-[0-9a-f]{12}$/),
+        name: "漫剧",
       }),
+    );
+  });
+
+  it("avoids cross-user id collisions for ASCII project names", async () => {
+    const { respond, promise } = makeCall("agents.create", {
+      name: "demo",
+      workspace: "/tmp/users/alice/projects/demo",
+    });
+    await promise;
+
+    expect(respond).toHaveBeenCalledWith(
+      true,
+      expect.objectContaining({
+        agentId: expect.stringMatching(/^demo-[0-9a-f]{12}$/),
+        name: "demo",
+      }),
+      undefined,
     );
   });
 

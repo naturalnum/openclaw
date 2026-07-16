@@ -694,12 +694,12 @@ export function ChatWorkspaceFilesPanel({
             </div>
           ) : null}
           <div className="mx-auto max-w-[19.5rem]">
-            <div className="rounded-2xl border border-slate-200/50 bg-[#fafafa] p-2.5 shadow-sm shadow-neutral-900/[0.03]">
+            <div className="power-workspace-files-card rounded-2xl border border-stone-200/85 bg-[#fbfbfa] p-2.5 shadow-sm shadow-neutral-900/[0.03]">
               <div className="mb-2 flex items-center justify-between gap-2 px-0.5">
                 <span className="text-[13px] font-semibold text-slate-800">最近修改</span>
                 {uploadFileTrigger(
                   "上传文件",
-                  "inline-flex h-7 shrink-0 items-center gap-1 rounded-full border border-slate-200/70 bg-white px-2 text-[11px] font-medium text-neutral-700 transition hover:border-slate-300 hover:bg-slate-50",
+                  "inline-flex h-7 shrink-0 items-center gap-1 rounded-full border border-stone-200/90 bg-white px-2 text-[11px] font-medium text-neutral-700 transition hover:border-stone-300 hover:bg-stone-50",
                 )}
               </div>
               {loading ? (
@@ -970,8 +970,8 @@ function FileCard({
       className={cn(
         "group flex items-center gap-2 rounded-xl border px-2 py-2 transition-[background-color,border-color,box-shadow,transform]",
         active
-          ? "border-[rgba(226,232,240,0.72)] bg-white shadow-sm shadow-neutral-900/[0.05]"
-          : "border-transparent bg-[#f5f5f4] hover:border-[rgba(226,232,240,0.55)] hover:bg-white hover:shadow-sm hover:shadow-neutral-900/[0.04]",
+          ? "border-neutral-300/85 bg-white shadow-sm shadow-neutral-900/[0.045]"
+          : "border-transparent bg-neutral-100/75 hover:border-neutral-300/70 hover:bg-white hover:shadow-sm hover:shadow-neutral-900/[0.035]",
       )}
     >
       <button
@@ -983,8 +983,8 @@ function FileCard({
           className={cn(
             "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl",
             entry.kind === "directory"
-              ? "bg-[#efefed] text-neutral-600"
-              : "bg-white text-neutral-500 ring-1 ring-[rgba(226,232,240,0.65)]",
+              ? "bg-neutral-200/70 text-neutral-600"
+              : "bg-white text-neutral-500 ring-1 ring-neutral-300/80",
           )}
           aria-hidden
         >
@@ -1018,7 +1018,7 @@ function FileCard({
               e.stopPropagation();
               onDownload();
             }}
-            className="flex h-8 w-8 items-center justify-center rounded-full border border-[rgba(226,232,240,0.65)] bg-white text-neutral-500 transition hover:border-[rgba(203,213,225,0.85)] hover:bg-[#f5f5f4] hover:text-neutral-800"
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-neutral-300/80 bg-white text-neutral-500 transition hover:border-neutral-400/70 hover:bg-neutral-100 hover:text-neutral-800"
           >
             <DownloadOutlined className="text-[14px]" />
           </button>

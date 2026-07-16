@@ -13,6 +13,7 @@ const logPathTracker = createSuiteLogPathTracker("openclaw-test-env-log-level-")
 
 describe("OPENCLAW_LOG_LEVEL", () => {
   let originalEnv: string | undefined;
+  let originalLogFileEnv: string | undefined;
   let testLogPath = "";
 
   beforeAll(async () => {
@@ -21,8 +22,10 @@ describe("OPENCLAW_LOG_LEVEL", () => {
 
   beforeEach(() => {
     originalEnv = process.env.OPENCLAW_LOG_LEVEL;
+    originalLogFileEnv = process.env.OPENCLAW_LOG_FILE;
     testLogPath = logPathTracker.nextPath();
     delete process.env.OPENCLAW_LOG_LEVEL;
+    delete process.env.OPENCLAW_LOG_FILE;
     loggingState.invalidEnvLogLevelValue = null;
     resetLogger();
     setLoggerOverride(null);
@@ -33,6 +36,11 @@ describe("OPENCLAW_LOG_LEVEL", () => {
       delete process.env.OPENCLAW_LOG_LEVEL;
     } else {
       process.env.OPENCLAW_LOG_LEVEL = originalEnv;
+    }
+    if (originalLogFileEnv === undefined) {
+      delete process.env.OPENCLAW_LOG_FILE;
+    } else {
+      process.env.OPENCLAW_LOG_FILE = originalLogFileEnv;
     }
     loggingState.invalidEnvLogLevelValue = null;
     resetLogger();
@@ -87,5 +95,12 @@ describe("OPENCLAW_LOG_LEVEL", () => {
       .filter((line) => line.includes("OPENCLAW_LOG_LEVEL"));
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain('Ignoring invalid OPENCLAW_LOG_LEVEL="nope"');
+  });
+
+  it("uses OPENCLAW_LOG_FILE before logger initialization", () => {
+    setLoggerOverride({ level: "info", file: "/tmp/configured-openclaw.log" });
+    process.env.OPENCLAW_LOG_FILE = testLogPath;
+
+    expect(getResolvedLoggerSettings().file).toBe(testLogPath);
   });
 });

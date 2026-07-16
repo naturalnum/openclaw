@@ -1086,6 +1086,7 @@
     "./cli-entry": "./openclaw.mjs"
   },
   "scripts": {
+    "agent:package": "bash scripts/package-agent-app.sh",
     "android:assemble": "cd apps/android && ./gradlew :app:assemblePlayDebug",
     "android:assemble:third-party": "cd apps/android && ./gradlew :app:assembleThirdPartyDebug",
     "android:bundle:release": "bun apps/android/scripts/build-release-aab.ts",

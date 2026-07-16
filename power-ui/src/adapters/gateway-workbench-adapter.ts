@@ -10,10 +10,8 @@ import type {
 } from "../compat/types.ts";
 import { PowerGatewayClient } from "../integrations/openclaw/gateway-client.ts";
 import {
-  buildScopedProjectName,
-  isProjectInLocalUserScope,
+  isAgentInLocalUserScope,
   isSessionInLocalUserScope,
-  stripScopedProjectName,
 } from "../integrations/openclaw/local-user-scope.ts";
 import {
   buildPowerQuickSessionKey,
@@ -228,6 +226,7 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
   private readonly gateway: PowerGatewayClient;
   private listeners = new Set<(event: WorkbenchAdapterEvent) => void>();
   private readonly workspaceRootByAgentId = new Map<string, string>();
+  private visibleAgentIds: Set<string> | null = null;
   private readonly getUserScope: () => string;
   private configSnapshot: Record<string, unknown> | null = null;
 
@@ -253,7 +252,7 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
   }
 
   getDefaultModelId() {
-    return "gpt-5.4";
+    return "";
   }
 
   getDefaultSelection() {
@@ -734,7 +733,7 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
       return null;
     }
     const created = await this.gateway.request<{ agentId: string }>("agents.create", {
-      name: buildScopedProjectName(projectName, this.getUserScope()),
+      name: projectName,
       workspace: projectWorkspace,
     });
     return typeof created.agentId === "string" ? created.agentId : null;
@@ -835,22 +834,10 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
     if (!scope) {
       return result;
     }
-    const agents = (result.agents ?? [])
-      .filter((agent) => isProjectInLocalUserScope(agent.id, scope))
-      .map((agent) => {
-        const name =
-          typeof agent.name === "string" ? stripScopedProjectName(agent.name, scope) : agent.name;
-        const identity =
-          agent.identity && typeof agent.identity === "object"
-            ? {
-                ...agent.identity,
-                ...(typeof agent.identity.name === "string"
-                  ? { name: stripScopedProjectName(agent.identity.name, scope) }
-                  : {}),
-              }
-            : agent.identity;
-        return { ...agent, name, identity };
-      });
+    const agents = (result.agents ?? []).filter((agent) =>
+      isAgentInLocalUserScope(agent.workspace, scope),
+    );
+    this.visibleAgentIds = new Set(agents.map((agent) => agent.id));
     return {
       ...result,
       defaultId: agents[0]?.id ?? "",
@@ -865,10 +852,13 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
     }
     return {
       ...result,
-      sessions: (result.sessions ?? []).filter(
-        (session) =>
-          typeof session.key === "string" && isSessionInLocalUserScope(session.key, scope),
-      ),
+      sessions: (result.sessions ?? []).filter((session) => {
+        if (typeof session.key !== "string" || !isSessionInLocalUserScope(session.key, scope)) {
+          return false;
+        }
+        const agentId = parseAgentSessionKey(session.key)?.agentId;
+        return Boolean(agentId && this.visibleAgentIds?.has(agentId));
+      }),
     };
   }
 

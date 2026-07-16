@@ -6,6 +6,7 @@ import path from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 let stateDir = "";
+const writeConfigFileMock = vi.hoisted(() => vi.fn(async () => {}));
 
 vi.mock("../config/paths.js", () => ({
   resolveStateDir: () => stateDir,
@@ -13,6 +14,7 @@ vi.mock("../config/paths.js", () => ({
 
 vi.mock("../config/config.js", () => ({
   loadConfig: () => ({}),
+  writeConfigFile: writeConfigFileMock,
 }));
 
 vi.mock("./http-utils.js", async () => {
@@ -61,6 +63,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  writeConfigFileMock.mockClear();
   stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-local-users-http-"));
 });
 
@@ -136,6 +139,24 @@ describe("local users HTTP", () => {
 
     const after = await jsonRequest("/local-users/status");
     await expect(after.json()).resolves.toEqual({ ok: true, initialized: true });
+    expect(writeConfigFileMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agents: {
+          defaults: {
+            workspace: path.join(stateDir, "users", "owner", "default"),
+          },
+          list: [
+            expect.objectContaining({
+              id: expect.stringMatching(/^agent-[0-9a-f]{12}$/),
+              default: true,
+              name: "默认",
+              workspace: path.join(stateDir, "users", "owner", "default"),
+            }),
+          ],
+        },
+      }),
+    );
+    await expect(fs.stat(path.join(stateDir, "users", "owner", "projects"))).resolves.toBeDefined();
   });
 
   it("logs in without requiring gateway bearer auth", async () => {
@@ -174,6 +195,21 @@ describe("local users HTTP", () => {
       ok: true,
       user: { id: "alice", displayName: "Alice", role: "user", status: "active" },
     });
+    await expect(fs.stat(path.join(stateDir, "users", "alice", "default"))).resolves.toBeDefined();
+    await expect(fs.stat(path.join(stateDir, "users", "alice", "projects"))).resolves.toBeDefined();
+    expect(writeConfigFileMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        agents: expect.objectContaining({
+          list: [
+            expect.objectContaining({
+              id: expect.stringMatching(/^agent-[0-9a-f]{12}$/),
+              name: "默认",
+              workspace: path.join(stateDir, "users", "alice", "default"),
+            }),
+          ],
+        }),
+      }),
+    );
 
     const list = await jsonRequest("/local-users", { sessionToken: admin.token });
     expect(list.status).toBe(200);
@@ -204,6 +240,31 @@ describe("local users HTTP", () => {
       },
     });
     expect(login.status).toBe(401);
+  });
+
+  it("gives additional admins their own workspace roots", async () => {
+    const owner = await initAdmin();
+    const create = await jsonRequest("/local-users", {
+      method: "POST",
+      sessionToken: owner.token,
+      body: {
+        id: "alice-admin",
+        password: "alice admin secure password",
+        role: "admin",
+      },
+    });
+
+    expect(create.status).toBe(201);
+    await expect(create.json()).resolves.toMatchObject({
+      user: { id: "alice-admin", role: "admin" },
+    });
+    await expect(
+      fs.stat(path.join(stateDir, "users", "alice-admin", "default")),
+    ).resolves.toBeDefined();
+    await expect(
+      fs.stat(path.join(stateDir, "users", "alice-admin", "projects")),
+    ).resolves.toBeDefined();
+    await expect(fs.stat(path.join(stateDir, "users", "owner", "projects"))).resolves.toBeDefined();
   });
 
   it("does not let admins change their own role or enabled status", async () => {

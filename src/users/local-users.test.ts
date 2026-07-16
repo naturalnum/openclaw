@@ -10,6 +10,10 @@ import {
   initializeLocalAdmin,
   listLocalUsers,
   readLocalUser,
+  resolveLocalUserDefaultAgentId,
+  resolveLocalUserDefaultWorkspace,
+  resolveLocalUserProjectsDir,
+  resolveLocalUserProfilePath,
   resolveLocalUserSession,
   updateLocalUser,
   validateLocalUserId,
@@ -24,6 +28,14 @@ describe("local users", () => {
 
   afterEach(async () => {
     await fs.rm(stateDir, { recursive: true, force: true });
+  });
+
+  it("derives a stable private default-agent id per user", () => {
+    expect(resolveLocalUserDefaultAgentId("owner")).toMatch(/^agent-[0-9a-f]{12}$/);
+    expect(resolveLocalUserDefaultAgentId("owner")).toBe(resolveLocalUserDefaultAgentId("OWNER"));
+    expect(resolveLocalUserDefaultAgentId("owner")).not.toBe(
+      resolveLocalUserDefaultAgentId("alice"),
+    );
   });
 
   it("initializes the first local admin once", async () => {
@@ -44,6 +56,12 @@ describe("local users", () => {
       createdAt: "2026-01-01T00:00:00.000Z",
     });
     expect(admin).not.toHaveProperty("passwordHash");
+    await expect(
+      fs.stat(resolveLocalUserDefaultWorkspace("owner", stateDir)),
+    ).resolves.toMatchObject({ isDirectory: expect.any(Function) });
+    await expect(fs.stat(resolveLocalUserProjectsDir("owner", stateDir))).resolves.toMatchObject({
+      isDirectory: expect.any(Function),
+    });
     await expect(hasAnyLocalUsers({ stateDir })).resolves.toBe(true);
     await expect(
       initializeLocalAdmin({
@@ -75,6 +93,34 @@ describe("local users", () => {
     ]);
     const stored = await readLocalUser("alice", { stateDir });
     expect(stored?.passwordHash).toMatch(/^scrypt:v1:/);
+    expect(resolveLocalUserProfilePath("alice", stateDir)).toBe(
+      path.join(stateDir, "auth", "users", "alice", "profile.json"),
+    );
+    await expect(fs.stat(path.join(stateDir, "users", "alice", "default"))).resolves.toBeDefined();
+    await expect(fs.stat(path.join(stateDir, "users", "alice", "projects"))).resolves.toBeDefined();
+  });
+
+  it("migrates legacy user profiles and sessions into auth without deleting user workspaces", async () => {
+    await createLocalUser({
+      id: "alice",
+      password: "alice secure password",
+      stateDir,
+    });
+    const session = await createLocalUserSession({ userId: "alice", stateDir });
+    const canonicalProfile = resolveLocalUserProfilePath("alice", stateDir);
+    const legacyProfile = path.join(stateDir, "users", "alice", "profile.json");
+    await fs.rename(canonicalProfile, legacyProfile);
+    const canonicalSessions = path.join(stateDir, "auth", "sessions.json");
+    const legacySessions = path.join(stateDir, "users", "_sessions.json");
+    await fs.rename(canonicalSessions, legacySessions);
+
+    await expect(readLocalUser("alice", { stateDir })).resolves.toMatchObject({ id: "alice" });
+    await expect(
+      resolveLocalUserSession({ token: session.token, stateDir }),
+    ).resolves.toMatchObject({ user: { id: "alice" } });
+    await expect(fs.stat(canonicalProfile)).resolves.toBeDefined();
+    await expect(fs.stat(canonicalSessions)).resolves.toBeDefined();
+    await expect(fs.stat(path.join(stateDir, "users", "alice", "projects"))).resolves.toBeDefined();
   });
 
   it("authenticates active users and rejects wrong credentials", async () => {
@@ -187,7 +233,7 @@ describe("local users", () => {
       createdAt: "2026-03-01T00:00:00.000Z",
       expiresAt: "2026-03-01T00:00:01.000Z",
     });
-    const sessionsRaw = await fs.readFile(path.join(stateDir, "users", "_sessions.json"), "utf8");
+    const sessionsRaw = await fs.readFile(path.join(stateDir, "auth", "sessions.json"), "utf8");
     expect(sessionsRaw).not.toContain(result.token);
     await expect(
       resolveLocalUserSession({

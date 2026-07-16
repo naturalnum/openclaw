@@ -396,7 +396,9 @@ function deriveAgentIdForCreate(rawName: string, workspaceDir: string): string {
   const trimmedName = rawName.trim();
   const agentId = normalizeAgentId(trimmedName);
   const hasNonAscii = Array.from(trimmedName).some((char) => char.charCodeAt(0) > 0x7f);
-  if (hasNonAscii) {
+  const normalizedWorkspace = workspaceDir.trim().replace(/\\/g, "/");
+  const isLocalUserProject = /\/users\/[^/]+\/projects(?:\/|$)/i.test(normalizedWorkspace);
+  if (hasNonAscii || isLocalUserProject) {
     const digest = createHash("sha1")
       .update(`${trimmedName}\n${workspaceDir.trim()}`)
       .digest("hex")

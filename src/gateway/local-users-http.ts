@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { loadConfig } from "../config/config.js";
+import { loadConfig, writeConfigFile } from "../config/config.js";
 import {
   authenticateLocalUser,
   createLocalUserSession,
@@ -8,6 +8,8 @@ import {
   initializeLocalAdmin,
   listLocalUsers,
   normalizeLocalUserId,
+  resolveLocalUserDefaultAgentId,
+  resolveLocalUserDefaultWorkspace,
   resolveLocalUserSession,
   updateLocalUser,
   type LocalUserRole,
@@ -160,6 +162,50 @@ async function requireLocalAdminSession(
 
 function sendCredentialsError(res: ServerResponse): void {
   sendInvalidRequest(res, "id and password are required");
+}
+
+async function ensureLocalUserDefaultAgent(user: PublicLocalUserProfile): Promise<void> {
+  const cfg = loadConfig();
+  const workspace = resolveLocalUserDefaultWorkspace(user.id);
+  const agentId = resolveLocalUserDefaultAgentId(user.id);
+  const currentList = Array.isArray(cfg.agents?.list) ? cfg.agents.list : [];
+  const existingIndex = currentList.findIndex(
+    (entry) => entry?.id === agentId || entry?.workspace === workspace,
+  );
+  const entry = {
+    ...(existingIndex >= 0 ? currentList[existingIndex] : {}),
+    id: agentId,
+    name: "默认",
+    workspace,
+    identity: {
+      ...(existingIndex >= 0 ? currentList[existingIndex]?.identity : {}),
+      name: "默认",
+    },
+  };
+  const list = [...currentList];
+  if (existingIndex >= 0) {
+    list[existingIndex] = entry;
+  } else {
+    list.push(entry);
+  }
+  const hasDefault = list.some((item) => item?.default === true);
+  if (!hasDefault) {
+    const ownIndex = list.findIndex((item) => item?.id === agentId);
+    if (ownIndex >= 0) {
+      list[ownIndex] = { ...list[ownIndex], default: true };
+    }
+  }
+  await writeConfigFile({
+    ...cfg,
+    agents: {
+      ...cfg.agents,
+      defaults: {
+        ...cfg.agents?.defaults,
+        workspace: cfg.agents?.defaults?.workspace ?? workspace,
+      },
+      list,
+    },
+  });
 }
 
 async function readCredentialsBody(
@@ -360,6 +406,7 @@ export async function handleLocalUsersHttpRequest(
   if (pathname === "/local-users/init-admin") {
     try {
       const user = await initializeLocalAdmin({ id, password, displayName });
+      await ensureLocalUserDefaultAgent(user);
       const session = await createLocalUserSession({ userId: user.id });
       sendJson(res, 201, { ok: true, user, ...session });
     } catch (err) {
@@ -384,6 +431,7 @@ export async function handleLocalUsersHttpRequest(
         displayName,
         role: body.role ?? "user",
       });
+      await ensureLocalUserDefaultAgent(user);
       sendJson(res, 201, { ok: true, user });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -403,6 +451,7 @@ export async function handleLocalUsersHttpRequest(
     });
     return true;
   }
+  await ensureLocalUserDefaultAgent(authResult.user);
   const session = await createLocalUserSession({ userId: authResult.user.id });
   sendJson(res, 200, { ok: true, user: authResult.user, ...session });
   return true;

@@ -4,8 +4,30 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../src/config/config.js", () => ({
-  loadConfig: () => ({}),
-  readConfigFileSnapshot: vi.fn(async () => ({ config: {} })),
+  loadConfig: () => ({
+    models: {
+      providers: {
+        deepseek: {
+          baseUrl: "https://api.deepseek.com/v1",
+          apiKey: "test-key",
+          models: [{ id: "deepseek-chat" }],
+        },
+      },
+    },
+  }),
+  readConfigFileSnapshot: vi.fn(async () => ({
+    config: {
+      models: {
+        providers: {
+          deepseek: {
+            baseUrl: "https://api.deepseek.com/v1",
+            apiKey: "test-key",
+            models: [{ id: "deepseek-chat" }],
+          },
+        },
+      },
+    },
+  })),
 }));
 
 vi.mock("../../src/gateway/auth.js", () => ({
@@ -56,6 +78,15 @@ describe("power.code.settings.set", () => {
   let tempHomeDir = "";
 
   beforeEach(async () => {
+    for (const key of [
+      "ANTHROPIC_AUTH_TOKEN",
+      "OPENCLAW_CLAUDE_AUTH_TOKEN",
+      "ANTHROPIC_API_KEY",
+      "OPENCLAW_CLAUDE_API_KEY",
+      "DEEPSEEK_API_KEY",
+    ]) {
+      vi.stubEnv(key, "");
+    }
     tempHomeDir = await fs.mkdtemp(path.join(os.tmpdir(), "power-code-settings-test-"));
     process.env.HOME = tempHomeDir;
     await fs.mkdir(path.join(tempHomeDir, ".claude"), { recursive: true });
@@ -87,6 +118,7 @@ describe("power.code.settings.set", () => {
     if (tempHomeDir) {
       await fs.rm(tempHomeDir, { recursive: true, force: true });
     }
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
@@ -145,5 +177,38 @@ describe("power.code.settings.set", () => {
         model: "old-model",
       },
     });
+  });
+});
+
+describe("power.models.testText", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("proxies the model request through the gateway process", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { default: register } = await import("./plugin.js");
+    const { api, gatewayMethods } = createPluginApiMock();
+    register(api as never);
+
+    const handler = gatewayMethods.get("power.models.testText");
+    expect(handler).toBeDefined();
+    const result = await invokeHandler(handler!, {
+      provider: "deepseek",
+      model: "deepseek-chat",
+    });
+
+    expect(result).toEqual({ ok: true, data: { content: "ok" }, error: undefined });
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("https://api.deepseek.com/v1/chat/completions"),
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 });

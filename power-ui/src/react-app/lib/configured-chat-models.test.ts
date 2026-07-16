@@ -33,6 +33,11 @@ function minimalSnapshot(overrides: Partial<WorkbenchSnapshot> = {}): WorkbenchS
 }
 
 describe("resolveChatModelPool", () => {
+  it("returns no selectable models when model configuration is absent", () => {
+    const pool = resolveChatModelPool(minimalSnapshot(), null, "");
+    expect(pool).toEqual([]);
+  });
+
   it("prefers models.providers from openclaw config over full gateway catalog", () => {
     const snapshot = minimalSnapshot({
       openclawConfig: {

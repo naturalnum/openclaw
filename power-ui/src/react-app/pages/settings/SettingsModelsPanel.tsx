@@ -52,69 +52,32 @@ function modelSelectLabel(
   );
 }
 
-function resolveChatCompletionsUrl(baseUrl: string): string {
-  const normalized = baseUrl.trim().replace(/\/+$/, "");
-  if (!normalized) {
-    throw new Error("请填写 API Base URL");
+function validateModelConfig(config: WorkbenchModelConfig): string | null {
+  if (!config.provider.trim()) {
+    return "请填写模型服务商";
   }
-  return normalized.endsWith("/chat/completions") ? normalized : `${normalized}/chat/completions`;
+  if (!config.model.trim()) {
+    return "请填写模型 ID";
+  }
+  if (!config.baseUrl.trim()) {
+    return "请填写 API Base URL";
+  }
+  return null;
 }
 
-function extractModelTestErrorText(payload: unknown): string | null {
-  if (!payload || typeof payload !== "object") {
-    return null;
-  }
-  const error = (payload as { error?: unknown }).error;
-  if (typeof error === "string") {
-    return error;
-  }
-  if (error && typeof error === "object") {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim()) {
-      return message.trim();
-    }
-  }
-  const message = (payload as { message?: unknown }).message;
-  return typeof message === "string" && message.trim() ? message.trim() : null;
-}
-
-async function testTextModelConfig(config: WorkbenchModelConfig): Promise<string> {
+async function testTextModelConfig(
+  adapter: GatewayWorkbenchAdapter,
+  config: WorkbenchModelConfig,
+): Promise<string> {
   const model = config.model.trim();
   if (!model) {
     throw new Error("请填写模型 ID");
   }
-  if (config.apiKey.trim() === REDACTED_SENTINEL) {
-    throw new Error("出于安全原因，已保存的 Key 不会显示。请重新输入一次 API Key 后再测试。");
-  }
-  const response = await fetch(resolveChatCompletionsUrl(config.baseUrl), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(config.apiKey.trim() ? { Authorization: `Bearer ${config.apiKey.trim()}` } : {}),
-    },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: "user", content: "Reply with ok." }],
-      max_tokens: 8,
-      temperature: 0,
-      stream: false,
-    }),
+  const result = await adapter.request<{ content?: string }>("power.models.testText", {
+    provider: config.provider.trim(),
+    model,
   });
-  const text = await response.text().catch(() => "");
-  let payload: unknown = null;
-  try {
-    payload = text ? (JSON.parse(text) as unknown) : null;
-  } catch {
-    payload = null;
-  }
-  if (!response.ok) {
-    throw new Error(
-      (extractModelTestErrorText(payload) ?? text.trim()) || `HTTP ${response.status}`,
-    );
-  }
-  const content = (payload as { choices?: Array<{ message?: { content?: unknown } }> } | null)
-    ?.choices?.[0]?.message?.content;
-  return typeof content === "string" && content.trim() ? content.trim() : "ok";
+  return result.content?.trim() || "ok";
 }
 
 export function SettingsModelsPanel({ adapter, canUseGateway, onSaved }: Props) {
@@ -250,6 +213,16 @@ export function SettingsModelsPanel({ adapter, canUseGateway, onSaved }: Props) 
   };
 
   const toggleModelEnabled = (id: string, enabled: boolean) => {
+    const target = modelConfigs.find((row) => row.id === id);
+    if (enabled && target) {
+      const validationError = validateModelConfig(target);
+      if (validationError) {
+        setError(validationError);
+        message.error(validationError);
+        setEditingModelId(id);
+        return;
+      }
+    }
     const next = modelConfigs.map((row) => (row.id === id ? { ...row, enabled } : row));
     const currentStillEnabled = next.some(
       (row) => row.enabled && formatModelRef(row.provider, row.model) === currentModelId,
@@ -273,9 +246,19 @@ export function SettingsModelsPanel({ adapter, canUseGateway, onSaved }: Props) 
     if (!editingModel) {
       return;
     }
+    const validationError = validateModelConfig(editingModel);
+    if (validationError) {
+      setError(validationError);
+      message.error(validationError);
+      return;
+    }
+    const nextModelConfigs = modelConfigs.map((row) =>
+      row.id === editingModel.id ? { ...row, enabled: true } : row,
+    );
     const ref = formatModelRef(editingModel.provider, editingModel.model);
     const nextCurrentModelId = currentModelId.trim() || ref;
     void save({
+      modelConfigs: nextModelConfigs,
       currentModelId: nextCurrentModelId,
       closeEditor: true,
       successMessage: "模型配置已保存",
@@ -289,7 +272,10 @@ export function SettingsModelsPanel({ adapter, canUseGateway, onSaved }: Props) 
     setTesting(true);
     setError(null);
     try {
-      const content = await testTextModelConfig(editingModel);
+      if (!adapter) {
+        throw new Error("网关尚未连接");
+      }
+      const content = await testTextModelConfig(adapter, editingModel);
       message.success(`文本测试通过：${content}`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -434,21 +420,21 @@ export function SettingsModelsPanel({ adapter, canUseGateway, onSaved }: Props) 
         >
           <Form layout="vertical" size="small">
             <div className="grid gap-x-3 gap-y-1 md:grid-cols-2">
-              <Form.Item label="模型服务商" className="!mb-3">
+              <Form.Item label="模型服务商" required className="!mb-3">
                 <Input
                   value={editingModel.provider}
                   onChange={(e) => updateRow(editingModel.id, { provider: e.target.value })}
                   placeholder="deepseek、openai、minimax"
                 />
               </Form.Item>
-              <Form.Item label="模型 ID" className="!mb-3">
+              <Form.Item label="模型 ID" required className="!mb-3">
                 <Input
                   value={editingModel.model}
                   onChange={(e) => updateRow(editingModel.id, { model: e.target.value })}
                   placeholder="gpt-4o、claude-sonnet-4-5 等"
                 />
               </Form.Item>
-              <Form.Item label="API Base URL" className="!mb-3 md:col-span-2">
+              <Form.Item label="API Base URL" required className="!mb-3 md:col-span-2">
                 <Input
                   value={editingModel.baseUrl}
                   onChange={(e) => updateRow(editingModel.id, { baseUrl: e.target.value })}

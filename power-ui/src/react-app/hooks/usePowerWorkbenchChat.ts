@@ -25,6 +25,7 @@ import {
   resetToolStream,
   type ToolStreamEntry,
 } from "../../compat/ui-core";
+import { resolveLocalUserDefaultAgentId } from "../../integrations/openclaw/local-user-scope";
 import {
   buildPowerQuickSessionKey,
   buildPowerSessionKey,
@@ -235,12 +236,6 @@ function createRuntime(
   };
 }
 
-function pickModelId(snapshot: WorkbenchSnapshot | null, fallback: string): string {
-  const models = snapshot?.modelCatalog ?? [];
-  const first = models.find((m) => typeof m.id === "string" && m.id.trim());
-  return first?.id.trim() || fallback;
-}
-
 // Keep long-running MCP/tool calls visible; backend timeouts still own actual cancellation.
 const CHAT_RUN_STALE_MS = 20 * 60 * 1000;
 
@@ -253,7 +248,6 @@ function finalizeChatRun(rt: SessionRuntimeState) {
 
 function resolveModelIdForSend(
   snapshot: WorkbenchSnapshot | null,
-  fallback: string,
   sessionKey: string,
   projectId: string | null,
 ): string {
@@ -264,7 +258,7 @@ function resolveModelIdForSend(
     chatPreferredModelRef: loadSettings().chatPreferredModelRef,
     configuredModels: pool,
   });
-  return ref.trim() || pickModelId(snapshot, fallback);
+  return ref.trim();
 }
 
 export function usePowerWorkbenchChat(
@@ -848,12 +842,15 @@ export function usePowerWorkbenchChat(
       const quickChatDraft = quickChatDraftRef.current && !selectedSessionKeyRef.current.trim();
       const selectedSessionDetached =
         Boolean(selectedSessionKeyRef.current.trim()) && sessionProjectDetachedRef.current;
+      const visibleAgents = snapshotRef.current?.agentsList?.agents ?? [];
+      const localUserDefaultAgentId = resolveLocalUserDefaultAgentId(visibleAgents, userScope);
       const fallbackProjectId =
+        localUserDefaultAgentId ??
         snapshotRef.current?.agentsList?.defaultId ??
-        snapshotRef.current?.agentsList?.agents?.[0]?.id ??
+        visibleAgents[0]?.id ??
         null;
       const projectId = quickChatDraft
-        ? fallbackProjectId
+        ? localUserDefaultAgentId
         : (selectedProjectIdRef.current ??
           snapshotRef.current?.currentProjectId ??
           fallbackProjectId ??
@@ -863,10 +860,12 @@ export function usePowerWorkbenchChat(
       }
       const modelId = resolveModelIdForSend(
         snapshotRef.current,
-        adapter.getDefaultModelId(),
         selectedSessionKeyRef.current,
         quickChatDraft ? null : selectedProjectIdRef.current,
       );
+      if (!modelId) {
+        return false;
+      }
       let sessionKey = selectedSessionKeyRef.current.trim();
 
       if (!sessionKey) {

@@ -14,6 +14,30 @@
   color: #24272d;
 }
 
+.power-sidebar-action-dropdown .ant-dropdown-menu {
+  min-width: 7.5rem;
+  padding: 0.25rem;
+  border-radius: 0.625rem;
+  border: 1px solid rgba(214, 211, 206, 0.92);
+  box-shadow: 0 14px 32px rgba(28, 25, 23, 0.12);
+}
+
+.power-sidebar-action-dropdown .ant-dropdown-menu-item {
+  min-height: 1.875rem;
+  border-radius: 0.5rem;
+  font-size: 12px;
+}
+
+.power-sidebar-action-dropdown .ant-dropdown-menu-item-danger {
+  color: #dc2626;
+}
+
+.power-sidebar-action-dropdown .ant-dropdown-menu-item-danger:hover,
+.power-sidebar-action-dropdown .ant-dropdown-menu-item-danger-active {
+  background: #fff1f1 !important;
+  color: #b91c1c !important;
+}
+
 /* 选中文本：轻量中性色焦点提示 */
 #root ::selection {
   background-color: rgba(48, 52, 58, 0.16);
@@ -36,15 +60,15 @@
   display: flex;
   flex-direction: column;
   color: #24272d;
-  background: #fafafa;
+  background: #ffffff;
 }
 
 #root .power-surface {
-  background: rgba(255, 255, 255, 0.97);
-  border-color: rgba(203, 213, 225, 0.72);
+  background: rgba(255, 255, 255, 0.99);
+  border-color: rgba(212, 212, 216, 0.82);
   box-shadow:
-    0 1px 2px rgba(15, 23, 42, 0.035),
-    0 16px 42px rgba(15, 23, 42, 0.055);
+    0 1px 2px rgba(24, 24, 27, 0.035),
+    0 16px 42px rgba(24, 24, 27, 0.052);
 }
 
 #root .power-soft-button {
@@ -54,9 +78,9 @@
 }
 
 #root .power-sidebar {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.58)), #f8f8f7;
-  box-shadow: inset -1px 0 rgba(148, 163, 184, 0.15);
+  background: #ffffff;
+  border-color: rgba(228, 228, 231, 0.95);
+  box-shadow: none;
 }
 
 /* 侧栏会话/项目链接：避免 Ant/浏览器默认淡蓝悬停 */
@@ -87,16 +111,16 @@
 #root .power-sidebar .power-shell-tree-row:not(.power-shell-tree-row--selected):hover,
 #root .power-sidebar .power-shell-tree-row:not(.power-shell-tree-row--selected):has(a:hover),
 #root .power-sidebar .power-shell-tree-row:not(.power-shell-tree-row--selected):has(button:hover) {
-  background-color: rgba(28, 25, 23, 0.05);
+  background-color: rgba(244, 244, 245, 0.92);
 }
 
 #root .power-sidebar:not(.power-sidebar--collapsed) .power-shell-tree-row--selected {
-  background-color: rgba(28, 25, 23, 0.06);
+  background-color: rgba(244, 244, 245, 0.96);
   border-color: transparent;
 }
 
 #root .power-sidebar--collapsed .power-shell-tree-row--selected {
-  background-color: rgba(28, 25, 23, 0.06);
+  background-color: rgba(244, 244, 245, 0.96);
   border-color: transparent;
 }
 
@@ -117,7 +141,7 @@
   .power-shell-tree-row:not(.power-shell-tree-row--selected):has(button:hover),
 #root .power-sidebar--collapsed .power-shell-tree-row--selected:has(a:hover),
 #root .power-sidebar--collapsed .power-shell-tree-row--selected:has(button:hover) {
-  background-color: rgba(28, 25, 23, 0.06);
+  background-color: rgba(244, 244, 245, 0.96);
   border-color: transparent;
   box-shadow: none;
 }
@@ -135,21 +159,21 @@
 
 #root .power-sidebar a.power-settings-menu-item:hover,
 #root .power-sidebar a.power-settings-menu-item:focus-visible {
-  background-color: rgba(28, 25, 23, 0.05);
+  background-color: rgba(244, 244, 245, 0.92);
   border-color: transparent;
   color: rgb(15, 23, 42);
 }
 
 #root .power-sidebar a.power-settings-menu-item--active,
 #root .power-sidebar a.power-settings-menu-item--active[aria-current="page"] {
-  background-color: rgba(28, 25, 23, 0.06);
+  background-color: rgba(244, 244, 245, 0.96);
   border-color: transparent;
   color: rgb(15, 23, 42);
 }
 
 #root .power-sidebar a.power-settings-menu-item--active:hover,
 #root .power-sidebar a.power-settings-menu-item--active:focus-visible {
-  background-color: rgba(28, 25, 23, 0.06);
+  background-color: rgba(244, 244, 245, 0.96);
   border-color: transparent;
 }
 
@@ -160,20 +184,20 @@
 
 #root .power-chat-page-header {
   height: 3.5rem;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.35);
+  border-bottom: 1px solid rgba(228, 228, 231, 0.86);
 }
 
 /* 发送按钮默认态：浅灰，与输入框边框同系 */
 #root .power-composer-send--idle {
-  border: 1px solid rgba(226, 232, 240, 0.72);
-  background: #f5f5f4;
+  border: 1px solid rgba(228, 228, 231, 0.92);
+  background: #fafafa;
   color: #9ca3af;
   box-shadow: none;
 }
 
 #root .power-composer-send--idle:hover:not(:disabled) {
-  background: #efefed;
-  border-color: rgba(203, 213, 225, 0.85);
+  background: #f4f4f5;
+  border-color: rgba(212, 212, 216, 0.92);
   color: #6b7280;
 }
 
@@ -185,7 +209,8 @@
   background: linear-gradient(
     180deg,
     rgba(255, 255, 255, 0) 0%,
-    rgba(255, 255, 255, 0.86) 28%,
+    rgba(255, 255, 255, 0) 22%,
+    rgba(255, 255, 255, 0.86) 58%,
     #ffffff 100%
   );
 }
@@ -232,6 +257,15 @@
     width 320ms cubic-bezier(0.4, 0, 0.2, 1),
     opacity 280ms cubic-bezier(0.4, 0, 0.2, 1),
     border-color 320ms cubic-bezier(0.4, 0, 0.2, 1);
+  border-color: rgba(228, 228, 231, 0.9);
+}
+
+#root .power-workspace-files-card {
+  border-color: rgba(228, 228, 231, 0.92);
+  background: #ffffff;
+  box-shadow:
+    0 1px 2px rgba(24, 24, 27, 0.025),
+    0 12px 28px rgba(24, 24, 27, 0.035);
 }
 
 #root .power-workspace-rail--list.power-workspace-rail--open {

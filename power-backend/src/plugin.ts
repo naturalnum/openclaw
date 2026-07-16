@@ -61,6 +61,84 @@ type PowerClaudeSettings = {
 
 const DEFAULT_CLAUDE_BASE_URL = "https://api.deepseek.com/anthropic";
 const DEFAULT_CLAUDE_MODEL = "deepseek-chat";
+const MODEL_TEST_TIMEOUT_MS = 30_000;
+
+function modelTestErrorText(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+  const error = (payload as { error?: unknown }).error;
+  if (typeof error === "string" && error.trim()) {
+    return error.trim();
+  }
+  if (error && typeof error === "object") {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) {
+      return message.trim();
+    }
+  }
+  const message = (payload as { message?: unknown }).message;
+  return typeof message === "string" && message.trim() ? message.trim() : null;
+}
+
+async function testTextModel(params: unknown) {
+  const input = params && typeof params === "object" ? (params as Record<string, unknown>) : {};
+  const provider = typeof input.provider === "string" ? input.provider.trim() : "";
+  const model = typeof input.model === "string" ? input.model.trim() : "";
+  if (!provider || !model) {
+    throw new Error("provider and model are required");
+  }
+  const providers = (await readConfigFileSnapshot()).config.models?.providers;
+  const configuredProvider =
+    providers && Object.hasOwn(providers, provider) ? providers[provider] : undefined;
+  if (!configuredProvider) {
+    throw new Error("请先保存模型配置，再进行测试");
+  }
+  const configuredModel = configuredProvider.models?.some((entry) => entry.id === model);
+  if (!configuredModel) {
+    throw new Error("模型 ID 尚未保存，请先保存模型配置");
+  }
+  const baseUrl = configuredProvider.baseUrl?.trim();
+  if (!baseUrl) {
+    throw new Error("已保存的模型配置缺少 API Base URL");
+  }
+  const url = new URL(baseUrl);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("API Base URL must use http or https");
+  }
+  url.pathname = `${url.pathname.replace(/\/+$/, "")}/chat/completions`;
+
+  const configuredKey =
+    typeof configuredProvider.apiKey === "string" ? configuredProvider.apiKey.trim() : "";
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(configuredKey ? { Authorization: `Bearer ${configuredKey}` } : {}),
+    },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: "user", content: "Reply with ok." }],
+      max_tokens: 8,
+      temperature: 0,
+      stream: false,
+    }),
+    signal: AbortSignal.timeout(MODEL_TEST_TIMEOUT_MS),
+  });
+  const text = await response.text();
+  let payload: unknown = null;
+  try {
+    payload = text ? (JSON.parse(text) as unknown) : null;
+  } catch {
+    payload = null;
+  }
+  if (!response.ok) {
+    throw new Error(modelTestErrorText(payload) || text.trim() || `HTTP ${response.status}`);
+  }
+  const content = (payload as { choices?: Array<{ message?: { content?: unknown } }> } | null)
+    ?.choices?.[0]?.message?.content;
+  return { content: typeof content === "string" && content.trim() ? content.trim() : "ok" };
+}
 
 function parsePluginConfig(api: OpenClawPluginApi): PowerBackendPluginConfig {
   const raw = api.pluginConfig && typeof api.pluginConfig === "object" ? api.pluginConfig : {};
@@ -506,6 +584,17 @@ export default function register(api: OpenClawPluginApi) {
       sendError(respond, error);
     }
   });
+
+  api.registerGatewayMethod(
+    "power.models.testText",
+    async ({ params, respond }: GatewayRequestHandlerOptions) => {
+      try {
+        respond(true, await testTextModel(params));
+      } catch (error) {
+        sendError(respond, error);
+      }
+    },
+  );
 
   api.registerGatewayMethod(
     "power.fs.listDirs",

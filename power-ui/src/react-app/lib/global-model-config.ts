@@ -89,13 +89,26 @@ export function slugifyProjectFolderName(name: string): string {
 }
 
 /** 在默认 agent workspace 下为新建项目解析目录路径（由网关 resolveUserPath）。 */
+function resolveStateRootFromDefaultWorkspace(
+  config: Record<string, unknown> | null | undefined,
+): string {
+  const workspace = readDefaultAgentWorkspace(config)?.replaceAll("\\", "/").replace(/\/+$/, "");
+  if (!workspace) {
+    return "~/.openclaw";
+  }
+  const userWorkspaceMarker = workspace.match(
+    /^(.*)\/users\/[^/]+\/(?:default|projects(?:\/.*)?)$/,
+  );
+  return userWorkspaceMarker?.[1] || workspace;
+}
+
 export function resolveProjectWorkspacePath(
   config: Record<string, unknown> | null | undefined,
   projectName: string,
   existingWorkspaces: string[] = [],
   options: { userFolder?: string | null } = {},
 ): string {
-  const base = readDefaultAgentWorkspace(config)?.replace(/\/+$/, "") ?? "~/.openclaw/workspace";
+  const base = resolveStateRootFromDefaultWorkspace(config);
   const slug = slugifyProjectFolderName(projectName);
   const userFolder = options.userFolder?.trim();
   const projectBase = userFolder
@@ -130,7 +143,7 @@ export function resolveTemporaryChatWorkspacePath(
   userFolder: string | null | undefined,
   sessionKey: string,
 ): string {
-  const base = readDefaultAgentWorkspace(config)?.replace(/\/+$/, "") ?? "~/.openclaw/workspace";
+  const base = resolveStateRootFromDefaultWorkspace(config);
   const user = slugifyProjectFolderName(userFolder?.trim() || "default");
   const session = slugifySessionFolderName(sessionKey);
   return `${base}/users/${user}/default/temp/${session}`;
@@ -267,8 +280,15 @@ export function buildNextGlobalModelConfig(params: {
       continue;
     }
     const modelId = modelConfig.model.trim();
+    const providerName = modelConfig.provider.trim();
+    const baseUrl = modelConfig.baseUrl.trim();
+    // Never serialize placeholder or partially edited rows. The settings form
+    // reports the missing fields; this guard keeps config.set schema-safe.
+    if (!providerName || !modelId || !baseUrl) {
+      continue;
+    }
     const providerId = sanitizeProviderId(
-      modelConfig.provider,
+      providerName,
       modelConfig.name || modelId || `${DEFAULT_PROVIDER_PREFIX}-${index + 1}`,
     );
     const existingProvider =
@@ -281,8 +301,6 @@ export function buildNextGlobalModelConfig(params: {
       nextProviders[providerId] ??
       ({
         ...existingProvider,
-        baseUrl: "",
-        apiKey: "",
         api:
           typeof existingProvider.api === "string" && existingProvider.api.trim()
             ? existingProvider.api
@@ -290,12 +308,17 @@ export function buildNextGlobalModelConfig(params: {
         models: [],
       } satisfies MutableProviderConfig);
 
-    providerEntry.baseUrl = modelConfig.baseUrl.trim();
-    providerEntry.apiKey = isRedactedSentinelValue(modelConfig.apiKey)
+    providerEntry.baseUrl = baseUrl;
+    const apiKey = isRedactedSentinelValue(modelConfig.apiKey)
       ? typeof existingProvider.apiKey === "string"
-        ? existingProvider.apiKey
+        ? existingProvider.apiKey.trim()
         : ""
-      : modelConfig.apiKey;
+      : modelConfig.apiKey.trim();
+    if (apiKey) {
+      providerEntry.apiKey = apiKey;
+    } else {
+      delete providerEntry.apiKey;
+    }
     if (modelId) {
       providerEntry.models.push({
         id: modelId,
