@@ -211,4 +211,55 @@ describe("power.models.testText", () => {
       expect.objectContaining({ method: "POST" }),
     );
   });
+
+  it("uses Ollama's native chat API when the provider is configured as ollama", async () => {
+    const { readConfigFileSnapshot } = await import("../../src/config/config.js");
+    vi.mocked(readConfigFileSnapshot).mockResolvedValueOnce({
+      config: {
+        models: {
+          providers: {
+            ollama: {
+              api: "ollama",
+              apiKey: "ollama-local",
+              baseUrl: "http://127.0.0.1:11434",
+              models: [{ id: "qwen3-vl:4b", name: "qwen3-vl:4b" }],
+            },
+          },
+        },
+      },
+    } as never);
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ message: { content: "ok" } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { default: register } = await import("./plugin.js");
+    const { api, gatewayMethods } = createPluginApiMock();
+    register(api as never);
+
+    const handler = gatewayMethods.get("power.models.testText");
+    expect(handler).toBeDefined();
+    const result = await invokeHandler(handler!, {
+      provider: "ollama",
+      model: "qwen3-vl:4b",
+    });
+
+    expect(result).toEqual({ ok: true, data: { content: "ok" }, error: undefined });
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("http://127.0.0.1:11434/api/chat"),
+      expect.objectContaining({ method: "POST" }),
+    );
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    if (typeof request.body !== "string") {
+      throw new TypeError("expected request body to be a JSON string");
+    }
+    expect(JSON.parse(request.body) as unknown).toMatchObject({
+      model: "qwen3-vl:4b",
+      options: { num_predict: 8, temperature: 0 },
+      stream: false,
+    });
+  });
 });

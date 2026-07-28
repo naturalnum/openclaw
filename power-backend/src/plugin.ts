@@ -62,6 +62,39 @@ type PowerClaudeSettings = {
 const DEFAULT_CLAUDE_BASE_URL = "https://api.deepseek.com/anthropic";
 const DEFAULT_CLAUDE_MODEL = "deepseek-chat";
 const MODEL_TEST_TIMEOUT_MS = 30_000;
+const MAX_PREPARED_MEDIA_BYTES = 16 * 1024 * 1024;
+
+const POWER_MEDIA_BY_EXTENSION: Record<string, { capability: "audio" | "video"; mime: string }> = {
+  aac: { capability: "audio", mime: "audio/aac" },
+  caf: { capability: "audio", mime: "audio/x-caf" },
+  flac: { capability: "audio", mime: "audio/flac" },
+  m4a: { capability: "audio", mime: "audio/mp4" },
+  mp3: { capability: "audio", mime: "audio/mpeg" },
+  oga: { capability: "audio", mime: "audio/ogg" },
+  ogg: { capability: "audio", mime: "audio/ogg" },
+  opus: { capability: "audio", mime: "audio/opus" },
+  wav: { capability: "audio", mime: "audio/wav" },
+  avi: { capability: "video", mime: "video/x-msvideo" },
+  m4v: { capability: "video", mime: "video/mp4" },
+  mkv: { capability: "video", mime: "video/x-matroska" },
+  mov: { capability: "video", mime: "video/quicktime" },
+  mp4: { capability: "video", mime: "video/mp4" },
+  mpeg: { capability: "video", mime: "video/mpeg" },
+  mpg: { capability: "video", mime: "video/mpeg" },
+  webm: { capability: "video", mime: "video/webm" },
+};
+
+type PowerPreparedMediaFile = {
+  prepared: boolean;
+  readablePath?: string;
+  warning?: string;
+};
+
+function mediaPreparationWarning(capability: "audio" | "video") {
+  return capability === "audio"
+    ? "音频已上传，但未能生成转写文本。请先配置支持音频转写的媒体理解服务。"
+    : "视频已上传，但未能生成内容描述。请先配置支持视频理解的媒体理解服务。";
+}
 
 function modelTestErrorText(payload: unknown): string | null {
   if (!payload || typeof payload !== "object") {
@@ -106,7 +139,8 @@ async function testTextModel(params: unknown) {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("API Base URL must use http or https");
   }
-  url.pathname = `${url.pathname.replace(/\/+$/, "")}/chat/completions`;
+  const usesNativeOllamaApi = configuredProvider.api === "ollama";
+  url.pathname = `${url.pathname.replace(/\/+$/, "")}/${usesNativeOllamaApi ? "api/chat" : "chat/completions"}`;
 
   const configuredKey =
     typeof configuredProvider.apiKey === "string" ? configuredProvider.apiKey.trim() : "";
@@ -116,13 +150,22 @@ async function testTextModel(params: unknown) {
       "Content-Type": "application/json",
       ...(configuredKey ? { Authorization: `Bearer ${configuredKey}` } : {}),
     },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: "user", content: "Reply with ok." }],
-      max_tokens: 8,
-      temperature: 0,
-      stream: false,
-    }),
+    body: JSON.stringify(
+      usesNativeOllamaApi
+        ? {
+            model,
+            messages: [{ role: "user", content: "Reply with ok." }],
+            options: { num_predict: 8, temperature: 0 },
+            stream: false,
+          }
+        : {
+            model,
+            messages: [{ role: "user", content: "Reply with ok." }],
+            max_tokens: 8,
+            temperature: 0,
+            stream: false,
+          },
+    ),
     signal: AbortSignal.timeout(MODEL_TEST_TIMEOUT_MS),
   });
   const text = await response.text();
@@ -135,8 +178,10 @@ async function testTextModel(params: unknown) {
   if (!response.ok) {
     throw new Error(modelTestErrorText(payload) || text.trim() || `HTTP ${response.status}`);
   }
-  const content = (payload as { choices?: Array<{ message?: { content?: unknown } }> } | null)
-    ?.choices?.[0]?.message?.content;
+  const content = usesNativeOllamaApi
+    ? (payload as { message?: { content?: unknown } } | null)?.message?.content
+    : (payload as { choices?: Array<{ message?: { content?: unknown } }> } | null)?.choices?.[0]
+        ?.message?.content;
   return { content: typeof content === "string" && content.trim() ? content.trim() : "ok" };
 }
 
@@ -775,6 +820,79 @@ export default function register(api: OpenClawPluginApi) {
   );
 
   api.registerGatewayMethod(
+    "power.media.prepareWorkspaceFile",
+    async ({ params, respond }: GatewayRequestHandlerOptions) => {
+      try {
+        const { workspace } = await resolveWorkspaceForAgent(params?.agentId);
+        const requestedPath = typeof params?.path === "string" ? params.path.trim() : "";
+        if (!requestedPath) {
+          respond(false, { error: "path required" });
+          return;
+        }
+        const file = fsService.statWorkspaceFile(workspace, requestedPath);
+        if (file.size > MAX_PREPARED_MEDIA_BYTES) {
+          respond(true, {
+            prepared: false,
+            warning: "音频或视频已上传，但超过 16 MB 的媒体处理上限，未生成可读文本。",
+          } satisfies PowerPreparedMediaFile);
+          return;
+        }
+        const buffer = await fs.readFile(file.path);
+        const detectedMime = await api.runtime.media.detectMime({ buffer, filePath: file.path });
+        const extension = path.extname(file.name).slice(1).toLowerCase();
+        const mediaFallback = POWER_MEDIA_BY_EXTENSION[extension];
+        const detectedKind = api.runtime.media.mediaKindFromMime(detectedMime);
+        const kind =
+          detectedKind === "audio" || detectedKind === "video"
+            ? detectedKind
+            : mediaFallback?.capability;
+        if (kind !== "audio" && kind !== "video") {
+          respond(true, { prepared: false } satisfies PowerPreparedMediaFile);
+          return;
+        }
+        const mime = detectedKind === kind ? detectedMime : mediaFallback?.mime;
+
+        let text = "";
+        try {
+          const result = await api.runtime.mediaUnderstanding.runFile({
+            capability: kind,
+            filePath: file.path,
+            cfg: loadConfig(),
+            mime,
+          });
+          text = result.text?.trim() ?? "";
+        } catch {
+          text = "";
+        }
+        if (!text) {
+          respond(true, {
+            prepared: false,
+            warning: mediaPreparationWarning(kind),
+          } satisfies PowerPreparedMediaFile);
+          return;
+        }
+
+        const sidecarName = `${file.name}.txt`;
+        const sidecar = fsService.writeWorkspaceFile(
+          workspace,
+          path.dirname(file.path),
+          sidecarName,
+          Buffer.from(text, "utf8").toString("base64"),
+        );
+        const canonicalWorkspace = await fs
+          .realpath(workspace)
+          .catch(() => path.resolve(workspace));
+        respond(true, {
+          prepared: true,
+          readablePath: path.relative(canonicalWorkspace, sidecar.path).split(path.sep).join("/"),
+        } satisfies PowerPreparedMediaFile);
+      } catch (error) {
+        sendError(respond, error);
+      }
+    },
+  );
+
+  api.registerGatewayMethod(
     "power.fs.downloadFile",
     async ({ params, respond }: GatewayRequestHandlerOptions) => {
       try {
@@ -971,6 +1089,7 @@ export default function register(api: OpenClawPluginApi) {
   api.logger.info(
     `[power-backend] registered power.fs methods with ${fsService.listRoots().roots.length} allowed roots`,
   );
+  api.logger.info("[power-backend] registered power.media methods");
   if (terminalService.isEnabled()) {
     api.logger.info("[power-backend] registered power.terminal methods");
   }

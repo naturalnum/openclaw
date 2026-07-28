@@ -609,6 +609,7 @@ function createEmptyModelConfig(): WorkbenchModelConfig {
     baseUrl: "",
     apiKey: "",
     model: "",
+    input: ["text"],
   };
 }
 
@@ -798,7 +799,7 @@ function readGlobalModelConfigs(
           {
             baseUrl?: unknown;
             apiKey?: unknown;
-            models?: Array<{ id?: unknown; name?: unknown }>;
+            models?: Array<{ id?: unknown; name?: unknown; input?: unknown }>;
           }
         >;
       };
@@ -831,6 +832,10 @@ function readGlobalModelConfigs(
         baseUrl,
         apiKey,
         model: modelId,
+        input:
+          Array.isArray(modelConfig?.input) && modelConfig.input.includes("image")
+            ? ["text", "image"]
+            : ["text"],
       });
     }
   }
@@ -855,6 +860,10 @@ function buildNextGlobalModelConfig(params: {
   const existingDefaults =
     typeof existingAgents.defaults === "object" && existingAgents.defaults !== null
       ? (existingAgents.defaults as Record<string, unknown>)
+      : {};
+  const existingAllowedModels =
+    typeof existingDefaults.models === "object" && existingDefaults.models !== null
+      ? (existingDefaults.models as Record<string, unknown>)
       : {};
   const existingProviders =
     typeof existingModels.providers === "object" && existingModels.providers !== null
@@ -888,18 +897,42 @@ function buildNextGlobalModelConfig(params: {
             ? existingProvider.api
             : "openai-completions",
         models: [],
-      } as Record<string, unknown> & { models: Array<{ id: string; name: string }> });
+      } as Record<string, unknown> & {
+        models: Array<{ id: string; name: string; input: Array<"text" | "image"> }>;
+      });
 
-    providerEntry.baseUrl = modelConfig.baseUrl.trim();
-    providerEntry.apiKey = isRedactedSentinelValue(modelConfig.apiKey)
+    const normalizedBaseUrl = modelConfig.baseUrl.trim().replace(/\/+$/, "");
+    providerEntry.baseUrl =
+      providerId === "ollama" ? normalizedBaseUrl.replace(/\/v1$/i, "") : normalizedBaseUrl;
+    if (providerId === "ollama") {
+      providerEntry.api = "ollama";
+    }
+    const apiKey = isRedactedSentinelValue(modelConfig.apiKey)
       ? typeof existingProvider.apiKey === "string"
-        ? existingProvider.apiKey
+        ? existingProvider.apiKey.trim()
         : ""
-      : modelConfig.apiKey;
+      : modelConfig.apiKey.trim();
+    if (apiKey) {
+      providerEntry.apiKey = apiKey;
+      providerEntry.auth = "api-key";
+    } else {
+      delete providerEntry.apiKey;
+      if (providerEntry.auth === "api-key") {
+        delete providerEntry.auth;
+      }
+    }
     if (modelId) {
+      const existingModel = Array.isArray(existingProvider.models)
+        ? existingProvider.models.find(
+            (entry) =>
+              entry && typeof entry === "object" && (entry as { id?: unknown }).id === modelId,
+          )
+        : undefined;
       providerEntry.models.push({
+        ...(existingModel && typeof existingModel === "object" ? existingModel : {}),
         id: modelId,
         name: modelConfig.name.trim() || modelId,
+        input: modelConfig.input?.includes("image") ? ["text", "image"] : ["text"],
       });
     }
     nextProviders[providerId] = providerEntry;
@@ -908,25 +941,30 @@ function buildNextGlobalModelConfig(params: {
   const configuredRefs = Object.entries(nextProviders).flatMap(([providerId, providerConfig]) =>
     Array.isArray(providerConfig.models)
       ? providerConfig.models
-          .filter((model): model is { id: string; name: string } =>
-            Boolean(model && typeof model.id === "string" && model.id.trim()),
-          )
+          .filter((model) => Boolean(model && typeof model.id === "string" && model.id.trim()))
           .map((model) => formatModelRef(providerId, model.id))
       : [],
   );
   const normalizedCurrentModelId = params.currentModelId.trim();
   const nextPrimaryModel =
     configuredRefs.find((ref) => ref === normalizedCurrentModelId) ?? configuredRefs[0] ?? "";
+  const nextAllowedModels = { ...existingAllowedModels };
+  for (const modelRef of configuredRefs) {
+    nextAllowedModels[modelRef] ??= {};
+  }
 
   next.models = {
     ...existingModels,
-    mode: "merge",
+    // Power UI owns one global model list for every local-user project. Replace
+    // stale per-agent model credentials whenever the settings page is saved.
+    mode: "replace",
     providers: nextProviders,
   };
   next.agents = {
     ...existingAgents,
     defaults: {
       ...existingDefaults,
+      models: nextAllowedModels,
       model:
         nextPrimaryModel &&
         typeof existingDefaults.model === "object" &&

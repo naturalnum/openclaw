@@ -199,6 +199,51 @@ describe("models-config", () => {
     });
   });
 
+  it("replaces a stale agent models.json apiKey in replace mode", async () => {
+    await withTempHome(async (home) => {
+      const agentDir = path.join(home, "agent-replace");
+      const modelPath = path.join(agentDir, "models.json");
+      const provider = CUSTOM_PROXY_MODELS_CONFIG.models?.providers?.["custom-proxy"];
+      if (!provider) {
+        throw new Error("custom-proxy test provider missing");
+      }
+      await fs.mkdir(agentDir, { recursive: true });
+      await fs.writeFile(
+        modelPath,
+        `${JSON.stringify({
+          providers: {
+            "custom-proxy": {
+              ...provider,
+              apiKey: "STALE_AGENT_KEY", // pragma: allowlist secret
+            },
+          },
+        })}\n`,
+        "utf8",
+      );
+
+      const result = await ensureOpenClawModelsJson(
+        {
+          models: {
+            mode: "replace",
+            providers: {
+              "custom-proxy": {
+                ...provider,
+                apiKey: "CURRENT_CONFIG_KEY", // pragma: allowlist secret
+              },
+            },
+          },
+        },
+        agentDir,
+      );
+      const parsed = JSON.parse(await fs.readFile(modelPath, "utf8")) as {
+        providers: Record<string, ParsedProviderConfig>;
+      };
+
+      expect(result.wrote).toBe(true);
+      expect(parsed.providers["custom-proxy"]?.apiKey).toBe("CURRENT_CONFIG_KEY"); // pragma: allowlist secret
+    });
+  });
+
   it("adds minimax provider when MINIMAX_API_KEY is set", async () => {
     await withTempHome(async () => {
       await runEnvProviderCase({

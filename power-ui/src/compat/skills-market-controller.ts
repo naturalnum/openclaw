@@ -29,8 +29,30 @@ export type SkillMessage = {
 
 export type SkillMessageMap = Record<string, SkillMessage>;
 
+export type SkillsMarketClient = Pick<GatewayBrowserClient, "request">;
+
+export function createScopedSkillsMarketClient(
+  client: SkillsMarketClient | null,
+  userSessionToken: string,
+): SkillsMarketClient | null {
+  if (!client) {
+    return null;
+  }
+  return {
+    request: async <T>(method: string, params?: unknown) => {
+      const scopedParams = method.startsWith("skills.registry.")
+        ? {
+            ...(params && typeof params === "object" ? params : {}),
+            userSessionToken,
+          }
+        : params;
+      return await client.request<T>(method, scopedParams);
+    },
+  };
+}
+
 export type SkillsMarketState = {
-  client: GatewayBrowserClient | null;
+  client: SkillsMarketClient | null;
   connected: boolean;
   skillsLoading: boolean;
   skillsReport: SkillStatusReport | null;
@@ -51,7 +73,6 @@ export type SkillsMarketState = {
 
 type LoadSkillsOptions = {
   clearMessages?: boolean;
-  refreshStatus?: boolean;
 };
 
 const pendingReloads = new WeakMap<SkillsMarketState, Required<LoadSkillsOptions>>();
@@ -78,7 +99,6 @@ function queueReload(state: SkillsMarketState, options?: LoadSkillsOptions) {
   const previous = pendingReloads.get(state);
   pendingReloads.set(state, {
     clearMessages: previous?.clearMessages === true || options?.clearMessages === true,
-    refreshStatus: previous?.refreshStatus === true || options?.refreshStatus === true,
   });
 }
 
@@ -87,17 +107,6 @@ function getErrorMessage(err: unknown): string {
     return err.message;
   }
   return String(err);
-}
-
-function isLocalSkillEnabled(item: SkillsRegistryCatalogItem): boolean {
-  const tags = new Set(item.tags.map((tag) => tag.trim().toLowerCase()));
-  if (tags.has("disabled")) {
-    return false;
-  }
-  if (tags.has("enabled")) {
-    return true;
-  }
-  return true;
 }
 
 function buildRegistryListParams(state: SkillsMarketState) {
@@ -111,136 +120,15 @@ function buildRegistryListParams(state: SkillsMarketState) {
   };
 }
 
-function includesFilterText(item: SkillsRegistryCatalogItem, filter: string): boolean {
-  const needle = filter.trim().toLowerCase();
-  if (!needle) {
-    return true;
-  }
-  const haystack = [item.displayName, item.summary, item.slug, item.author ?? "", ...item.tags]
-    .join(" ")
-    .toLowerCase();
-  return haystack.includes(needle);
-}
-
-function buildLocalCatalogFromStatus(state: SkillsMarketState): SkillsRegistryListResult {
-  const report = state.skillsReport;
-  const allItems: SkillsRegistryCatalogItem[] = (report?.skills ?? []).map((skill) => ({
-    slug: skill.skillKey,
-    displayName: skill.name,
-    summary: skill.description,
-    category: "local",
-    tags: [
-      "local",
-      skill.eligible ? "ready" : "needs-setup",
-      skill.disabled ? "disabled" : "enabled",
-    ],
-    version: null,
-    downloads: 0,
-    installs: 0,
-    stars: 0,
-    updatedAt: null,
-    author: skill.source ?? "local",
-    installState: {
-      installed: true,
-      installedVersion: null,
-      latestVersion: null,
-      managed: true,
-      canUninstall: false,
-      source: "directory",
-    },
-  }));
-
-  let filtered = allItems.filter((item) => includesFilterText(item, state.skillsFilter));
-  if (state.skillsInstallFilter === "not_installed") {
-    filtered = [];
-  }
-  if (state.skillsCategory) {
-    filtered = filtered.filter((item) => item.category === state.skillsCategory);
-  }
-  if (state.skillsSortBy === "updated") {
-    filtered = [...filtered].toSorted((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
-  } else if (state.skillsSortBy === "downloads") {
-    filtered = [...filtered].toSorted((a, b) => b.downloads - a.downloads);
-  } else {
-    filtered = [...filtered].toSorted((a, b) => a.displayName.localeCompare(b.displayName));
-  }
-
-  const page = Math.max(1, state.skillsPagination.page);
-  const limit = Math.max(1, state.skillsPagination.limit);
-  const total = filtered.length;
-  const totalPages = Math.max(1, Math.ceil(total / limit));
-  const safePage = Math.min(page, totalPages);
-  const start = (safePage - 1) * limit;
-  const items = filtered.slice(start, start + limit);
-
-  return {
-    baseUrl: "",
-    categories: [
-      {
-        id: "local",
-        name: "本地技能",
-        icon: "📦",
-      },
-    ],
-    items,
-    pagination: {
-      page: safePage,
-      limit,
-      total,
-      totalPages,
-    },
-  };
-}
-
-function mergeCatalogResults(
-  state: SkillsMarketState,
-  remote: SkillsRegistryListResult | null,
-  local: SkillsRegistryListResult,
-): SkillsRegistryListResult {
-  if (remote && (remote.items.length > 0 || remote.categories.length > 0 || remote.baseUrl)) {
-    return remote;
-  }
-  return local;
-}
-
-async function loadSkillsStatus(state: SkillsMarketState): Promise<void> {
-  if (!state.client || !state.connected) {
-    return;
-  }
-  const res = await state.client.request<SkillStatusReport | undefined>("skills.status", {});
-  if (res) {
-    state.skillsReport = res;
-  }
-}
-
 async function loadSkillsCatalog(state: SkillsMarketState): Promise<void> {
   if (!state.client || !state.connected) {
     return;
   }
   const params = buildRegistryListParams(state);
-  let remoteRes: SkillsRegistryListResult | null = null;
-  try {
-    remoteRes = await state.client.request<SkillsRegistryListResult>(
-      "skills.registry.list",
-      params,
-    );
-  } catch (err) {
-    const message = getErrorMessage(err);
-    if (!/unknown method|not configured|unavailable/i.test(message)) {
-      throw err;
-    }
-    // Backward compatibility for older stacks that exposed a power-prefixed endpoint.
-    try {
-      remoteRes = await state.client.request<SkillsRegistryListResult>(
-        "power.skills.catalog.list",
-        params,
-      );
-    } catch {
-      remoteRes = null;
-    }
-  }
-  const localRes = buildLocalCatalogFromStatus(state);
-  const res = mergeCatalogResults(state, remoteRes, localRes);
+  // The registry endpoint merges the remote catalog with the authenticated
+  // local user's uploaded skills. Falling back to global skills.status here
+  // would leak another user's skills into this page.
+  const res = await state.client.request<SkillsRegistryListResult>("skills.registry.list", params);
   state.skillsCatalog = res.items;
   state.skillsCategories = res.categories;
   state.skillsRegistryBaseUrl = res.baseUrl || state.skillsRegistryBaseUrl;
@@ -261,22 +149,12 @@ export async function loadSkillsMarket(state: SkillsMarketState, options?: LoadS
   state.skillsLoading = true;
   state.skillsError = null;
   try {
-    const results = await Promise.allSettled([
-      options?.refreshStatus === false ? Promise.resolve(undefined) : loadSkillsStatus(state),
-      loadSkillsCatalog(state),
-    ]);
-    const errors = results
-      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
-      .map((result) => getErrorMessage(result.reason))
-      .filter(Boolean);
-    if (errors.length > 0) {
-      state.skillsError = errors.join(" ");
-      if (results[1]?.status === "rejected") {
-        state.skillsCatalog = [];
-        state.skillsCategories = [];
-        state.skillsPagination = { ...DEFAULT_SKILLS_REGISTRY_PAGINATION };
-      }
-    }
+    await loadSkillsCatalog(state);
+  } catch (err) {
+    state.skillsError = getErrorMessage(err);
+    state.skillsCatalog = [];
+    state.skillsCategories = [];
+    state.skillsPagination = { ...DEFAULT_SKILLS_REGISTRY_PAGINATION };
   } finally {
     state.skillsLoading = false;
     const next = pendingReloads.get(state);
@@ -290,7 +168,7 @@ export async function loadSkillsMarket(state: SkillsMarketState, options?: LoadS
 export function setSkillsFilter(state: SkillsMarketState, value: string): Promise<void> {
   state.skillsFilter = value;
   state.skillsPagination = { ...state.skillsPagination, page: 1 };
-  return loadSkillsMarket(state, { refreshStatus: false });
+  return loadSkillsMarket(state);
 }
 
 export function setSkillsCategory(
@@ -299,7 +177,7 @@ export function setSkillsCategory(
 ): Promise<void> {
   state.skillsCategory = category?.trim() ? category.trim() : null;
   state.skillsPagination = { ...state.skillsPagination, page: 1 };
-  return loadSkillsMarket(state, { refreshStatus: false });
+  return loadSkillsMarket(state);
 }
 
 export function setSkillsSortBy(
@@ -308,7 +186,7 @@ export function setSkillsSortBy(
 ): Promise<void> {
   state.skillsSortBy = sortBy;
   state.skillsPagination = { ...state.skillsPagination, page: 1 };
-  return loadSkillsMarket(state, { refreshStatus: false });
+  return loadSkillsMarket(state);
 }
 
 export function setSkillsInstallFilter(
@@ -317,7 +195,14 @@ export function setSkillsInstallFilter(
 ): Promise<void> {
   state.skillsInstallFilter = installFilter;
   state.skillsPagination = { ...state.skillsPagination, page: 1 };
-  return loadSkillsMarket(state, { refreshStatus: false });
+  return loadSkillsMarket(state);
+}
+
+export function showAllSkills(state: SkillsMarketState): Promise<void> {
+  state.skillsCategory = null;
+  state.skillsInstallFilter = "all";
+  state.skillsPagination = { ...state.skillsPagination, page: 1 };
+  return loadSkillsMarket(state);
 }
 
 export function setSkillsPage(state: SkillsMarketState, page: number): Promise<void> {
@@ -325,7 +210,7 @@ export function setSkillsPage(state: SkillsMarketState, page: number): Promise<v
     ...state.skillsPagination,
     page: Math.max(1, Math.floor(page)),
   };
-  return loadSkillsMarket(state, { refreshStatus: false });
+  return loadSkillsMarket(state);
 }
 
 export async function toggleRegistrySkillInstall(
@@ -345,15 +230,7 @@ export async function toggleRegistrySkillInstall(
   try {
     let message = "";
     if (item.installState.installed) {
-      if (item.installState.source === "directory") {
-        const currentlyEnabled = isLocalSkillEnabled(item);
-        const nextEnabled = !currentlyEnabled;
-        await state.client.request("skills.update", {
-          skillKey: item.slug,
-          enabled: nextEnabled,
-        });
-        message = nextEnabled ? "已启用" : "已禁用";
-      } else if (!item.installState.canUninstall) {
+      if (!item.installState.canUninstall) {
         throw new Error(
           "This skill was not installed from the registry and cannot be removed here.",
         );
@@ -376,7 +253,7 @@ export async function toggleRegistrySkillInstall(
       );
       message = result.message || "Installed";
     }
-    await loadSkillsMarket(state, { refreshStatus: true });
+    await loadSkillsMarket(state);
     setSkillMessage(state, skillKey, {
       kind: "success",
       message,
@@ -429,7 +306,7 @@ export async function importRegistrySkillArchive(state: SkillsMarketState, file:
         archiveBase64: encodeUint8ArrayToBase64(bytes),
       },
     );
-    await loadSkillsMarket(state, { refreshStatus: true });
+    await loadSkillsMarket(state);
     setSkillMessage(state, result.slug, {
       kind: "success",
       message: result.message || "已导入安装",

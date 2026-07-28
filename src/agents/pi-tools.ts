@@ -209,6 +209,8 @@ export function createOpenClawCodingTools(options?: {
   memoryFlushWritePath?: string;
   agentDir?: string;
   workspaceDir?: string;
+  /** Extra directories the read tool may access without granting write access. */
+  readOnlyRoots?: readonly string[];
   /**
    * Workspace directory that spawned subagents should inherit.
    * When sandboxing uses a copied workspace (`ro` or `none`), workspaceDir is the
@@ -390,7 +392,14 @@ export function createOpenClawCodingTools(options?: {
         modelContextWindowTokens: options?.modelContextWindowTokens,
         imageSanitization,
       });
-      return [workspaceOnly ? wrapToolWorkspaceRootGuard(wrapped, workspaceRoot) : wrapped];
+      return [
+        workspaceOnly
+          ? wrapToolWorkspaceRootGuardWithOptions(wrapped, workspaceRoot, {
+              additionalRoots: options?.readOnlyRoots,
+              normalizeGuardedPathParams: true,
+            })
+          : wrapped,
+      ];
     }
     if (tool.name === "bash" || tool.name === execToolName) {
       return [];

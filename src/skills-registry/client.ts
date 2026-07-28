@@ -30,7 +30,6 @@ export type SkillsRegistryCatalogItemBase = {
 };
 
 export type SkillsRegistryCatalogResponse = {
-  baseUrl: string;
   categories: SkillsRegistryCategory[];
   items: SkillsRegistryCatalogItemBase[];
 };
@@ -46,6 +45,16 @@ export type SkillsRegistryInstallReport = {
   installs: number;
 };
 
+export type SkillsRegistryInstallAction = "install" | "uninstall";
+
+type SkillsRegistryDownloadRequest = {
+  filePath: string;
+  fileSize: number;
+  fileName: string;
+  sign: string;
+  md5: string;
+};
+
 export type SkillsRegistryClient = {
   listCatalog(params?: {
     q?: string;
@@ -55,6 +64,7 @@ export type SkillsRegistryClient = {
   downloadArtifact(params: { slug: string; version?: string }): Promise<SkillsRegistryArtifact>;
   reportInstall(params: {
     slug: string;
+    action: SkillsRegistryInstallAction;
     version?: string | null;
     source: "openclaw-registry" | "upload";
   }): Promise<SkillsRegistryInstallReport>;
@@ -80,10 +90,14 @@ type RemoteCatalogSkill = {
   stars?: unknown;
   updatedAt?: unknown;
   author?: unknown;
+  filePath?: unknown;
+  fileSize?: unknown;
+  fileName?: unknown;
+  sign?: unknown;
+  md5?: unknown;
 };
 
 type RemoteCatalogPage = {
-  baseUrl?: unknown;
   categories?: unknown;
   skills?: unknown;
   pagination?: {
@@ -153,6 +167,32 @@ function normalizeCatalogItem(raw: RemoteCatalogSkill): SkillsRegistryCatalogIte
   };
 }
 
+function normalizeDownloadRequest(raw: RemoteCatalogSkill): SkillsRegistryDownloadRequest | null {
+  const filePath = toOptionalString(raw.filePath);
+  const fileName = toOptionalString(raw.fileName);
+  const sign = toOptionalString(raw.sign);
+  const md5 = toOptionalString(raw.md5);
+  const fileSize = raw.fileSize;
+  if (
+    !filePath ||
+    !fileName ||
+    !sign ||
+    !md5 ||
+    typeof fileSize !== "number" ||
+    !Number.isFinite(fileSize) ||
+    fileSize < 0
+  ) {
+    return null;
+  }
+  return {
+    filePath,
+    fileSize,
+    fileName,
+    sign,
+    md5,
+  };
+}
+
 function buildCatalogUrl(
   baseUrl: string,
   params: {
@@ -163,7 +203,7 @@ function buildCatalogUrl(
     limit: number;
   },
 ): string {
-  const url = new URL("/api/ui/catalog", `${baseUrl}/`);
+  const url = new URL("/api/open/v1/skillsList", `${baseUrl}/`);
   if (params.q?.trim()) {
     url.searchParams.set("q", params.q.trim());
   }
@@ -242,7 +282,10 @@ function resolveRegistryConfig(cfg: OpenClawConfig): { baseUrl: string; timeoutM
   if (cfg.skills?.registry?.enabled === false) {
     return null;
   }
-  const baseUrl = normalizeBaseUrl(cfg.skills?.registry?.baseUrl ?? "https://clawhub.ai");
+  const baseUrl = normalizeBaseUrl(cfg.skills?.registry?.baseUrl ?? "");
+  if (!baseUrl) {
+    return null;
+  }
   return {
     baseUrl,
     timeoutMs:
@@ -260,6 +303,51 @@ export function createSkillsRegistryClient(cfg: OpenClawConfig): SkillsRegistryC
   }
   const { baseUrl, timeoutMs } = resolved;
 
+  async function resolveDownloadRequest(params: {
+    slug: string;
+    version?: string;
+  }): Promise<SkillsRegistryDownloadRequest> {
+    const limit = 100;
+    let page = 1;
+    let totalPages = 1;
+    do {
+      const payload = await requestJson<RemoteCatalogPage>({
+        url: buildCatalogUrl(baseUrl, {
+          q: params.slug,
+          page,
+          limit,
+        }),
+        baseUrl,
+        timeoutMs,
+        auditContext: "skills-registry-download-resolve",
+      });
+      const match = Array.isArray(payload.skills)
+        ? payload.skills
+            .map((entry) => (entry ?? {}) as RemoteCatalogSkill)
+            .find((entry) => {
+              const slug = toOptionalString(entry.slug);
+              const version = toOptionalString(entry.version);
+              return (
+                slug === params.slug &&
+                (!params.version?.trim() || !version || version === params.version.trim())
+              );
+            })
+        : undefined;
+      if (match) {
+        const downloadRequest = normalizeDownloadRequest(match);
+        if (!downloadRequest) {
+          throw new Error(
+            `skill catalog is missing download fields for ${params.slug}; expected filePath, fileSize, fileName, sign, and md5`,
+          );
+        }
+        return downloadRequest;
+      }
+      totalPages = Math.max(1, toNumber(payload.pagination?.totalPages, 1));
+      page += 1;
+    } while (page <= totalPages);
+    throw new Error(`skill not found in registry catalog: ${params.slug}`);
+  }
+
   return {
     async listCatalog(params) {
       const limit = 100;
@@ -267,7 +355,6 @@ export function createSkillsRegistryClient(cfg: OpenClawConfig): SkillsRegistryC
       let totalPages = 1;
       const categories: SkillsRegistryCategory[] = [];
       const items: SkillsRegistryCatalogItemBase[] = [];
-      let responseBaseUrl = baseUrl;
       do {
         const payload = await requestJson<RemoteCatalogPage>({
           url: buildCatalogUrl(baseUrl, {
@@ -296,31 +383,32 @@ export function createSkillsRegistryClient(cfg: OpenClawConfig): SkillsRegistryC
               .filter((entry): entry is SkillsRegistryCatalogItemBase => Boolean(entry)),
           );
         }
-        responseBaseUrl = toOptionalString(payload.baseUrl) ?? responseBaseUrl;
         const nextTotalPages = toNumber(payload.pagination?.totalPages, 1);
         totalPages = Math.max(1, nextTotalPages);
         page += 1;
       } while (page <= totalPages);
 
       return {
-        baseUrl: responseBaseUrl,
         categories,
         items,
       };
     },
     async downloadArtifact(params) {
+      const downloadRequest = await resolveDownloadRequest(params);
       const url = new URL("/api/v1/download", `${baseUrl}/`);
-      url.searchParams.set("slug", params.slug);
-      if (params.version?.trim()) {
-        url.searchParams.set("version", params.version.trim());
-      }
       const ssrfPolicy = buildRemoteBaseUrlPolicy(baseUrl);
       return await withRemoteHttpResponse({
         url: url.toString(),
-        init:
-          typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+        init: {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify(downloadRequest),
+          ...(typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
             ? { signal: AbortSignal.timeout(timeoutMs) }
-            : undefined,
+            : {}),
+        },
         ssrfPolicy,
         auditContext: "skills-registry-download",
         onResponse: async (response) => {
@@ -330,7 +418,7 @@ export function createSkillsRegistryClient(cfg: OpenClawConfig): SkillsRegistryC
           }
           const filename = sanitizeDownloadedFilename(
             parseFilenameFromDisposition(response.headers.get("content-disposition")) ??
-              `${params.slug}-${params.version ?? "latest"}.zip`,
+              downloadRequest.fileName,
           );
           const bytes = new Uint8Array(await response.arrayBuffer());
           return {
@@ -357,6 +445,7 @@ export function createSkillsRegistryClient(cfg: OpenClawConfig): SkillsRegistryC
             "content-type": "application/json",
           },
           body: JSON.stringify({
+            action: params.action,
             version: params.version?.trim() || null,
             source: params.source,
           }),

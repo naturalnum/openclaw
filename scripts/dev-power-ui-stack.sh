@@ -8,6 +8,8 @@ POWER_BACKEND_DIR="$ROOT_DIR/power-backend"
 ensure_power_backend_plugin_path() {
   OPENCLAW_POWER_BACKEND_DIR="$POWER_BACKEND_DIR" node <<'NODE'
 const fs = require("node:fs");
+const crypto = require("node:crypto");
+const os = require("node:os");
 const path = require("node:path");
 
 const backendPath = process.env.OPENCLAW_POWER_BACKEND_DIR?.trim() ?? "";
@@ -38,6 +40,67 @@ if (!paths.includes(backendPath)) {
   fs.writeFileSync(configPath, `${JSON.stringify(cfg, null, 2)}\n`, "utf8");
   console.log("[dev-stack] added plugins.load.paths:", backendPath);
 }
+
+const gatewayPort = 18789;
+const uiPort = 5174;
+const hosts = new Set(["localhost", "127.0.0.1"]);
+const hostname = os.hostname().trim();
+if (hostname) {
+  hosts.add(hostname);
+}
+for (const entries of Object.values(os.networkInterfaces())) {
+  for (const entry of entries ?? []) {
+    const family = String(entry.family);
+    const address = entry.address?.trim();
+    if (entry.internal || !address || (family !== "IPv4" && family !== "4")) {
+      continue;
+    }
+    hosts.add(address);
+  }
+}
+const formatOriginHost = (host) => (host.includes(":") ? `[${host}]` : host);
+const requiredOrigins = [];
+for (const host of hosts) {
+  for (const port of [gatewayPort, uiPort]) {
+    requiredOrigins.push(`http://${formatOriginHost(host)}:${port}`);
+  }
+}
+
+cfg.gateway ??= {};
+const existingToken = cfg.gateway?.auth?.token ?? cfg.gateway?.token;
+const managedToken =
+  typeof existingToken === "string" && existingToken.trim()
+    ? existingToken.trim()
+    : existingToken && typeof existingToken === "object" && !Array.isArray(existingToken)
+      ? existingToken
+      : crypto.randomBytes(32).toString("hex");
+cfg.gateway.mode = "local";
+cfg.gateway.port = gatewayPort;
+cfg.gateway.bind = "lan";
+cfg.gateway.auth = {
+  mode: "token",
+  token: managedToken,
+};
+cfg.gateway.controlUi = {
+  ...cfg.gateway.controlUi,
+  allowedOrigins: [
+    ...new Set([
+      ...(Array.isArray(cfg.gateway.controlUi?.allowedOrigins)
+        ? cfg.gateway.controlUi.allowedOrigins.filter(
+            (origin) => typeof origin === "string" && origin.trim(),
+          )
+        : []),
+      ...requiredOrigins,
+    ]),
+  ],
+  // nStart is a trusted-LAN developer workflow served over plain HTTP.
+  // Production deployments should prefer HTTPS and device identity.
+  dangerouslyDisableDeviceAuth: true,
+};
+fs.writeFileSync(configPath, `${JSON.stringify(cfg, null, 2)}\n`, { mode: 0o600 });
+console.log(
+  `[dev-stack] configured LAN gateway on port ${gatewayPort}; allowed UI origins: ${requiredOrigins.join(", ")}`,
+);
 NODE
 }
 
@@ -111,11 +174,9 @@ GATEWAY_TOKEN="$(
   "
 )"
 
-echo "[dev-stack] starting power-ui:dev (default React at http://127.0.0.1:5174/, legacy Lit at /lit.html, gateway ws://127.0.0.1:18789) ..."
-if [[ -n "$GATEWAY_TOKEN" ]]; then
-  echo "[dev-stack] one-shot connect URL:"
-  echo "  http://127.0.0.1:5174/?gatewayUrl=ws://127.0.0.1:18789&token=${GATEWAY_TOKEN}#/"
-else
-  echo "[dev-stack] set gateway token in Settings → 连接 (gateway auth mode=token)"
+echo "[dev-stack] starting power-ui:dev (React at http://127.0.0.1:5174/, legacy Lit at /lit.html) ..."
+echo "[dev-stack] remote browsers should open http://<this-machine-ip>:5174/ and sign in with a local user."
+if [[ -z "$GATEWAY_TOKEN" ]]; then
+  echo "[dev-stack] warning: gateway token was not found after LAN configuration." >&2
 fi
 pnpm power-ui:dev

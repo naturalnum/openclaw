@@ -15,6 +15,7 @@ import {
   paginateRegistryCatalogItems,
   readInstalledRegistrySkills,
 } from "../../skills-registry/state.js";
+import { resolveLocalUserSession, resolveLocalUserSkillsDir } from "../../users/local-users.js";
 import {
   ErrorCodes,
   errorShape,
@@ -40,6 +41,20 @@ function buildRegistryUnavailableError() {
   );
 }
 
+async function resolveUserSkillsDir(params: unknown): Promise<string> {
+  const token =
+    params &&
+    typeof params === "object" &&
+    typeof (params as { userSessionToken?: unknown }).userSessionToken === "string"
+      ? (params as { userSessionToken: string }).userSessionToken.trim()
+      : "";
+  const session = token ? await resolveLocalUserSession({ token }) : null;
+  if (!session) {
+    throw new Error("local user session is required");
+  }
+  return resolveLocalUserSkillsDir(session.user.id);
+}
+
 export const skillsRegistryHandlers: GatewayRequestHandlers = {
   "skills.registry.list": async ({ params, respond }) => {
     if (!validateSkillsRegistryListParams(params)) {
@@ -53,15 +68,6 @@ export const skillsRegistryHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    const cfg = loadConfig();
-    const client = createSkillsRegistryClient(cfg);
-    if (!client) {
-      respond(false, undefined, buildRegistryUnavailableError());
-      return;
-    }
-    // Always use the configured baseUrl so the "Open Skills Center" button is shown
-    // regardless of whether the remote registry request succeeds.
-    const configBaseUrl = cfg.skills?.registry?.baseUrl?.trim() ?? "";
     const p = params as {
       q?: string;
       category?: string;
@@ -70,26 +76,66 @@ export const skillsRegistryHandlers: GatewayRequestHandlers = {
       limit?: number;
       installFilter?: SkillsRegistryInstallFilter;
     };
+    let managedSkillsDir: string;
+    try {
+      managedSkillsDir = await resolveUserSkillsDir(params);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, getErrorMessage(err)));
+      return;
+    }
+    const cfg = loadConfig();
+    const client = createSkillsRegistryClient(cfg);
+    // The remote catalog no longer returns baseUrl. Keep the configured URL in
+    // the Gateway response so the UI can still open the skills center.
+    const configBaseUrl = cfg.skills?.registry?.baseUrl?.trim() ?? "";
+    if (!client) {
+      const installed = await readInstalledRegistrySkills({ managedSkillsDir });
+      const localItems = mergeRegistryCatalogItems({ items: [], installed });
+      respond(
+        true,
+        paginateRegistryCatalogItems({
+          baseUrl: "",
+          categories: localItems.length > 0 ? [{ id: "local", name: "本地技能" }] : [],
+          items: filterRegistryCatalogItems({
+            items: localItems,
+            q: p.q,
+            category: p.category,
+            installFilter: p.installFilter,
+          }),
+          page: p.page,
+          limit: p.limit,
+        }),
+        undefined,
+      );
+      return;
+    }
     try {
       const remote = await client.listCatalog({
         q: p.q,
         category: p.category,
         sort: p.sort,
       });
-      const installed = await readInstalledRegistrySkills();
+      const installed = await readInstalledRegistrySkills({ managedSkillsDir });
       const merged = mergeRegistryCatalogItems({
         items: remote.items,
         installed,
       });
       const filtered = filterRegistryCatalogItems({
         items: merged,
+        q: p.q,
+        category: p.category,
         installFilter: p.installFilter,
       });
+      const categories =
+        merged.some((item) => item.category?.trim().toLowerCase() === "local") &&
+        !remote.categories.some((category) => category.id.trim().toLowerCase() === "local")
+          ? [...remote.categories, { id: "local", name: "本地技能" }]
+          : remote.categories;
       respond(
         true,
         paginateRegistryCatalogItems({
-          baseUrl: configBaseUrl || remote.baseUrl,
-          categories: remote.categories,
+          baseUrl: configBaseUrl,
+          categories,
           items: filtered,
           page: p.page,
           limit: p.limit,
@@ -97,14 +143,19 @@ export const skillsRegistryHandlers: GatewayRequestHandlers = {
         undefined,
       );
     } catch (err) {
-      // On fetch failure, still return success with the configured baseUrl and empty catalog
-      // so the "Open Skills Center" button remains visible in the UI.
+      const installed = await readInstalledRegistrySkills({ managedSkillsDir });
+      const localItems = mergeRegistryCatalogItems({ items: [], installed });
       respond(
         true,
         paginateRegistryCatalogItems({
           baseUrl: configBaseUrl,
-          categories: [],
-          items: [],
+          categories: localItems.length > 0 ? [{ id: "local", name: "本地技能" }] : [],
+          items: filterRegistryCatalogItems({
+            items: localItems,
+            q: p.q,
+            category: p.category,
+            installFilter: p.installFilter,
+          }),
           page: p.page,
           limit: p.limit,
         }),
@@ -124,6 +175,13 @@ export const skillsRegistryHandlers: GatewayRequestHandlers = {
       );
       return;
     }
+    let managedSkillsDir: string;
+    try {
+      managedSkillsDir = await resolveUserSkillsDir(params);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, getErrorMessage(err)));
+      return;
+    }
     const cfg = loadConfig();
     const client = createSkillsRegistryClient(cfg);
     if (!client) {
@@ -137,6 +195,7 @@ export const skillsRegistryHandlers: GatewayRequestHandlers = {
         version: p.version,
         cfg,
         client,
+        managedSkillsDir,
       });
       respond(
         true,
@@ -172,6 +231,7 @@ export const skillsRegistryHandlers: GatewayRequestHandlers = {
     }
     const cfg = loadConfig();
     try {
+      const managedSkillsDir = await resolveUserSkillsDir(params);
       const p = params as { fileName: string; archiveBase64: string; overwrite?: boolean };
       const bytes = Buffer.from(p.archiveBase64, "base64");
       const result = await installRegistrySkillArchive({
@@ -179,6 +239,7 @@ export const skillsRegistryHandlers: GatewayRequestHandlers = {
         archiveBytes: new Uint8Array(bytes),
         cfg,
         overwrite: p.overwrite,
+        managedSkillsDir,
       });
       respond(
         true,
@@ -213,13 +274,17 @@ export const skillsRegistryHandlers: GatewayRequestHandlers = {
       return;
     }
     const cfg = loadConfig();
+    const client = createSkillsRegistryClient(cfg);
     try {
+      const managedSkillsDir = await resolveUserSkillsDir(params);
       const p = params as { slug: string };
       const result = await uninstallRegistrySkill({
         slug: p.slug,
         cfg,
+        client,
+        managedSkillsDir,
       });
-      const installed = await readInstalledRegistrySkills();
+      const installed = await readInstalledRegistrySkills({ managedSkillsDir });
       const installState = buildSkillsRegistryInstallState({
         item: {
           slug: p.slug,

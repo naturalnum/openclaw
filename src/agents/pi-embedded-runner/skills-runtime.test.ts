@@ -153,7 +153,40 @@ describe("resolveEmbeddedRunSkillEntries", () => {
     expect(result).toEqual({
       shouldLoadSkillEntries: false,
       skillEntries: [],
+      skillReadOnlyRoots: [],
     });
     expect(loadWorkspaceSkillEntriesSpy).not.toHaveBeenCalled();
+  });
+
+  it("derives read-only roots from resolved snapshot skills", () => {
+    const snapshot: SkillSnapshot = {
+      prompt: "skills prompt",
+      skills: [{ name: "peer-review" }],
+      resolvedSkills: [
+        {
+          name: "peer-review",
+          description: "Review papers",
+          baseDir: "/state/users/admin/skills/peer-review",
+          filePath: "/state/users/admin/skills/peer-review/SKILL.md",
+          source: "openclaw-managed",
+          sourceInfo: {
+            path: "/state/users/admin/skills/peer-review",
+            source: "openclaw-managed",
+            scope: "user",
+            origin: "top-level",
+            baseDir: "/state/users/admin/skills/peer-review",
+          },
+          disableModelInvocation: false,
+        },
+      ],
+    };
+
+    const result = resolveEmbeddedRunSkillEntries({
+      workspaceDir: "/state/users/admin/default/temp/session",
+      config: {},
+      skillsSnapshot: snapshot,
+    });
+
+    expect(result.skillReadOnlyRoots).toEqual(["/state/users/admin/skills/peer-review"]);
   });
 });

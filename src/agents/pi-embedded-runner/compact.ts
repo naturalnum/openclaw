@@ -433,12 +433,13 @@ export async function compactEmbeddedPiSessionDirect(
   let checkpointSnapshot: CapturedCompactionCheckpointSnapshot | null = null;
   let checkpointSnapshotRetained = false;
   try {
-    const { shouldLoadSkillEntries, skillEntries } = resolveEmbeddedRunSkillEntries({
-      workspaceDir: effectiveWorkspace,
-      config: params.config,
-      agentId: effectiveSkillAgentId,
-      skillsSnapshot: params.skillsSnapshot,
-    });
+    const { shouldLoadSkillEntries, skillEntries, skillReadOnlyRoots } =
+      resolveEmbeddedRunSkillEntries({
+        workspaceDir: effectiveWorkspace,
+        config: params.config,
+        agentId: effectiveSkillAgentId,
+        skillsSnapshot: params.skillsSnapshot,
+      });
     restoreSkillEnv = params.skillsSnapshot
       ? applySkillEnvOverridesFromSnapshot({
           snapshot: params.skillsSnapshot,
@@ -516,6 +517,7 @@ export async function compactEmbeddedPiSessionDirect(
       allowGatewaySubagentBinding: params.allowGatewaySubagentBinding,
       agentDir,
       workspaceDir: effectiveWorkspace,
+      readOnlyRoots: skillReadOnlyRoots,
       config: params.config,
       abortSignal: runAbortController.signal,
       modelProvider: model.provider,

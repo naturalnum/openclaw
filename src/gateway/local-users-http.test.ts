@@ -4,16 +4,31 @@ import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { createAuthRateLimiter, type AuthRateLimiter } from "./auth-rate-limit.js";
+import type { ResolvedGatewayAuth } from "./auth.js";
 
 let stateDir = "";
-const writeConfigFileMock = vi.hoisted(() => vi.fn(async () => {}));
+const writeConfigFileMock = vi.hoisted(() => vi.fn(async (_next?: unknown) => {}));
+const configState = vi.hoisted(() => ({
+  current: {} as {
+    gateway?: {
+      controlUi?: { allowedOrigins?: string[] };
+      trustedProxies?: string[];
+      allowRealIpFallback?: boolean;
+    };
+    agents?: {
+      defaults?: { workspace?: string };
+      list?: Array<{ id?: string; workspace?: string }>;
+    };
+  },
+}));
 
 vi.mock("../config/paths.js", () => ({
   resolveStateDir: () => stateDir,
 }));
 
 vi.mock("../config/config.js", () => ({
-  loadConfig: () => ({}),
+  loadConfig: () => configState.current,
   writeConfigFile: writeConfigFileMock,
 }));
 
@@ -29,11 +44,14 @@ const { handleLocalUsersHttpRequest } = await import("./local-users-http.js");
 
 let port = 0;
 let server: ReturnType<typeof createServer> | undefined;
+let gatewayAuth: ResolvedGatewayAuth = { mode: "none", allowTailscale: false };
+let rateLimiter: AuthRateLimiter | undefined;
 
 beforeAll(async () => {
   server = createServer((req, res) => {
     void handleLocalUsersHttpRequest(req, res, {
-      auth: { mode: "none", allowTailscale: false },
+      auth: gatewayAuth,
+      rateLimiter,
     }).then((handled) => {
       if (!handled) {
         res.statusCode = 404;
@@ -63,11 +81,16 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  writeConfigFileMock.mockClear();
+  writeConfigFileMock.mockReset();
+  writeConfigFileMock.mockImplementation(async (_next?: unknown) => {});
+  configState.current = {};
+  gatewayAuth = { mode: "none", allowTailscale: false };
+  rateLimiter = undefined;
   stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-local-users-http-"));
 });
 
 afterEach(async () => {
+  rateLimiter?.dispose();
   await fs.rm(stateDir, { recursive: true, force: true });
 });
 
@@ -77,13 +100,20 @@ function localUsersUrl(pathname: string) {
 
 async function jsonRequest(
   pathname: string,
-  init: { method?: string; body?: unknown; origin?: string; sessionToken?: string } = {},
+  init: {
+    method?: string;
+    body?: unknown;
+    origin?: string;
+    sessionToken?: string;
+    forwardedFor?: string;
+  } = {},
 ) {
   return await fetch(localUsersUrl(pathname), {
     method: init.method ?? "GET",
     headers: {
       ...(init.body !== undefined ? { "content-type": "application/json" } : {}),
       ...(init.origin ? { origin: init.origin } : {}),
+      ...(init.forwardedFor ? { "x-forwarded-for": init.forwardedFor } : {}),
       ...(init.sessionToken ? { "x-openclaw-user-session": init.sessionToken } : {}),
     },
     ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
@@ -99,7 +129,11 @@ async function initAdmin() {
     },
   });
   expect(response.status).toBe(201);
-  return (await response.json()) as { token: string; user: { id: string; role: string } };
+  return (await response.json()) as {
+    token: string;
+    user: { id: string; role: string };
+    gatewayAuth: { mode: string; token?: string };
+  };
 }
 
 describe("local users HTTP", () => {
@@ -127,6 +161,44 @@ describe("local users HTTP", () => {
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
   });
 
+  it("does not treat a remote browser's loopback Origin as a local client", async () => {
+    configState.current = {
+      gateway: {
+        trustedProxies: ["127.0.0.1/32"],
+      },
+    };
+    const response = await jsonRequest("/local-users/status", {
+      method: "OPTIONS",
+      origin: "http://127.0.0.1:5174",
+      forwardedFor: "192.168.20.50",
+    });
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  it("grants CORS only to an exact configured Control UI origin", async () => {
+    configState.current = {
+      gateway: {
+        controlUi: {
+          allowedOrigins: ["https://agent.example.com", "*"],
+        },
+      },
+    };
+
+    const allowed = await jsonRequest("/local-users/status", {
+      method: "OPTIONS",
+      origin: "https://agent.example.com",
+    });
+    expect(allowed.headers.get("access-control-allow-origin")).toBe("https://agent.example.com");
+
+    const wildcardOnly = await jsonRequest("/local-users/status", {
+      method: "OPTIONS",
+      origin: "https://other.example.com",
+    });
+    expect(wildcardOnly.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
   it("reports initialization status and initializes the first admin", async () => {
     const before = await jsonRequest("/local-users/status");
     await expect(before.json()).resolves.toEqual({ ok: true, initialized: false });
@@ -135,6 +207,7 @@ describe("local users HTTP", () => {
     expect(initialized).toMatchObject({
       user: { id: "owner", role: "admin" },
       token: expect.any(String),
+      gatewayAuth: { mode: "none" },
     });
 
     const after = await jsonRequest("/local-users/status");
@@ -175,7 +248,141 @@ describe("local users HTTP", () => {
       ok: true,
       token: expect.any(String),
       user: { id: "owner", role: "admin" },
+      gatewayAuth: { mode: "none" },
     });
+  });
+
+  it("rate-limits repeated local-user login failures", async () => {
+    await initAdmin();
+    rateLimiter = createAuthRateLimiter({
+      maxAttempts: 1,
+      lockoutMs: 60_000,
+      exemptLoopback: false,
+      pruneIntervalMs: 0,
+    });
+
+    const invalid = await jsonRequest("/local-users/login", {
+      method: "POST",
+      body: { id: "owner", password: "wrong password" },
+    });
+    expect(invalid.status).toBe(401);
+
+    const blocked = await jsonRequest("/local-users/login", {
+      method: "POST",
+      body: { id: "owner", password: "owner secure password" },
+    });
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get("retry-after")).toBe("60");
+  });
+
+  it("revokes the local-user session on logout", async () => {
+    const admin = await initAdmin();
+
+    const logout = await jsonRequest("/local-users/logout", {
+      method: "POST",
+      sessionToken: admin.token,
+    });
+    expect(logout.status).toBe(204);
+    expect(logout.headers.get("cache-control")).toBe("no-store");
+
+    const me = await jsonRequest("/local-users/me", {
+      sessionToken: admin.token,
+    });
+    expect(me.status).toBe(401);
+  });
+
+  it("returns token Gateway auth only after valid local-user authentication", async () => {
+    gatewayAuth = {
+      mode: "token",
+      token: "gateway-bridge-token",
+      allowTailscale: false,
+    };
+    const admin = await initAdmin();
+    expect(admin.gatewayAuth).toEqual({
+      mode: "token",
+      token: "gateway-bridge-token",
+    });
+
+    const invalidLogin = await jsonRequest("/local-users/login", {
+      method: "POST",
+      body: { id: "owner", password: "wrong password" },
+    });
+    expect(invalidLogin.status).toBe(401);
+    const invalidPayload = await invalidLogin.json();
+    expect(invalidPayload).not.toHaveProperty("gatewayAuth");
+    expect(JSON.stringify(invalidPayload)).not.toContain("gateway-bridge-token");
+
+    const invalidMe = await jsonRequest("/local-users/me", {
+      sessionToken: "invalid-local-user-session",
+    });
+    expect(invalidMe.status).toBe(401);
+    const invalidMePayload = await invalidMe.json();
+    expect(invalidMePayload).not.toHaveProperty("gatewayAuth");
+    expect(JSON.stringify(invalidMePayload)).not.toContain("gateway-bridge-token");
+
+    const login = await jsonRequest("/local-users/login", {
+      method: "POST",
+      body: { id: "owner", password: "owner secure password" },
+    });
+    await expect(login.json()).resolves.toMatchObject({
+      gatewayAuth: { mode: "token", token: "gateway-bridge-token" },
+    });
+    expect(login.headers.get("cache-control")).toBe("no-store");
+
+    const me = await jsonRequest("/local-users/me", {
+      sessionToken: admin.token,
+    });
+    await expect(me.json()).resolves.toMatchObject({
+      gatewayAuth: { mode: "token", token: "gateway-bridge-token" },
+    });
+    expect(me.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("reports password Gateway mode without exposing its password", async () => {
+    await initAdmin();
+    gatewayAuth = {
+      mode: "password",
+      password: "gateway-password-must-not-leak",
+      allowTailscale: false,
+    };
+
+    const response = await jsonRequest("/local-users/login", {
+      method: "POST",
+      body: { id: "owner", password: "owner secure password" },
+    });
+    const payload = await response.json();
+    expect(payload).toMatchObject({ gatewayAuth: { mode: "password" } });
+    expect(payload.gatewayAuth).not.toHaveProperty("password");
+    expect(JSON.stringify(payload)).not.toContain("gateway-password-must-not-leak");
+  });
+
+  it("repairs a missing default agent when restoring a persisted user session", async () => {
+    const admin = await initAdmin();
+    writeConfigFileMock.mockClear();
+
+    const response = await jsonRequest("/local-users/me", {
+      sessionToken: admin.token,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      user: { id: "owner", role: "admin" },
+      gatewayAuth: { mode: "none" },
+    });
+    expect(writeConfigFileMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agents: expect.objectContaining({
+          list: [
+            expect.objectContaining({
+              id: expect.stringMatching(/^agent-[0-9a-f]{12}$/),
+              name: "默认",
+              workspace: path.join(stateDir, "users", "owner", "default"),
+            }),
+          ],
+        }),
+      }),
+    );
   });
 
   it("lets admins create, list, and disable local users", async () => {
@@ -240,6 +447,39 @@ describe("local users HTTP", () => {
       },
     });
     expect(login.status).toBe(401);
+  });
+
+  it("preserves every default agent during concurrent user creation", async () => {
+    writeConfigFileMock.mockImplementation(async (next?: unknown) => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      configState.current = structuredClone(next) as typeof configState.current;
+    });
+    const admin = await initAdmin();
+
+    const createUser = (id: string) =>
+      jsonRequest("/local-users", {
+        method: "POST",
+        sessionToken: admin.token,
+        body: {
+          id,
+          displayName: id,
+          password: `${id} secure password`,
+        },
+      });
+    const responses = await Promise.all([createUser("alice"), createUser("bob")]);
+
+    expect(responses.map((response) => response.status)).toEqual([201, 201]);
+    const workspaces = configState.current.agents?.list
+      ?.map((entry) => entry.workspace)
+      .filter((workspace): workspace is string => Boolean(workspace));
+    expect(workspaces).toEqual(
+      expect.arrayContaining([
+        path.join(stateDir, "users", "owner", "default"),
+        path.join(stateDir, "users", "alice", "default"),
+        path.join(stateDir, "users", "bob", "default"),
+      ]),
+    );
+    expect(workspaces).toHaveLength(3);
   });
 
   it("gives additional admins their own workspace roots", async () => {

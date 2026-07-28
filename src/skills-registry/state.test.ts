@@ -177,6 +177,13 @@ describe("registry catalog state helpers", () => {
     });
     expect(installedOnly).toHaveLength(3);
 
+    expect(
+      filterRegistryCatalogItems({ items: merged, q: "slides" }).map((item) => item.slug),
+    ).toEqual(["slides"]);
+    expect(
+      filterRegistryCatalogItems({ items: merged, category: "utility" }).map((item) => item.slug),
+    ).toEqual(["legacy-skill", "local-only"]);
+
     const paginated = paginateRegistryCatalogItems({
       baseUrl: "https://skills.example.com",
       categories: [],

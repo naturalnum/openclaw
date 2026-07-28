@@ -441,6 +441,13 @@ function loadSkillEntries(
 
   const managedSkillsDir = opts?.managedSkillsDir ?? path.join(CONFIG_DIR, "skills");
   const workspaceSkillsDir = path.resolve(workspaceDir, "skills");
+  const normalizedWorkspaceDir = path.resolve(workspaceDir);
+  const localUserWorkspaceMatch = normalizedWorkspaceDir.match(
+    /^(.*?)[\\/](?:workspace[\\/])?users[\\/]([^\\/]+)[\\/](?:default|projects[\\/][^\\/]+)(?:[\\/].*)?$/,
+  );
+  const localUserSkillsDir = localUserWorkspaceMatch
+    ? path.join(localUserWorkspaceMatch[1], "users", localUserWorkspaceMatch[2], "skills")
+    : null;
   const bundledSkillsDir = opts?.bundledSkillsDir ?? resolveBundledSkillsDir();
   const extraDirsRaw = opts?.config?.skills?.load?.extraDirs ?? [];
   const extraDirs = extraDirsRaw.map((d) => normalizeOptionalString(d) ?? "").filter(Boolean);
@@ -467,6 +474,9 @@ function loadSkillEntries(
     dir: managedSkillsDir,
     source: "openclaw-managed",
   });
+  const localUserSkills = localUserSkillsDir
+    ? loadSkills({ dir: localUserSkillsDir, source: "openclaw-managed" })
+    : [];
   const osHomeDir = resolveUserHomeDir();
   const personalAgentsSkillsDir = osHomeDir
     ? path.resolve(osHomeDir, ".agents", "skills")
@@ -494,6 +504,9 @@ function loadSkillEntries(
     merged.set(skill.name, skill);
   }
   for (const skill of managedSkills) {
+    merged.set(skill.name, skill);
+  }
+  for (const skill of localUserSkills) {
     merged.set(skill.name, skill);
   }
   for (const skill of personalAgentsSkills) {

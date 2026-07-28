@@ -13,9 +13,14 @@ cd "${PROJECT_ROOT}"
 pnpm build
 
 mkdir -p "${OUTPUT_ROOT}"
-rm -rf "${APP_DIR}"
+if [ -e "${APP_DIR}" ]; then
+  STALE_APP_DIR="${PROJECT_ROOT}/.tmp/agent-package-app-$$"
+  mkdir -p "$(dirname "${STALE_APP_DIR}")"
+  mv "${APP_DIR}" "${STALE_APP_DIR}"
+  rm -rf "${STALE_APP_DIR}" || true
+fi
 mkdir -p "${APP_DIR}"
-for item in dist node_modules skills docs qa package.json openclaw.mjs; do
+for item in dist node_modules docs qa package.json openclaw.mjs; do
   cp -R "${PROJECT_ROOT}/${item}" "${APP_DIR}/${item}"
 done
 cp "${SCRIPT_DIR}/agent-bootstrap-config.mjs" "${APP_DIR}/bootstrap-config.mjs"

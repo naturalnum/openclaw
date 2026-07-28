@@ -143,6 +143,7 @@ function buildApiAttachments(attachments?: ChatAttachment[]) {
             type: "image",
             mimeType: parsed.mimeType,
             content: parsed.content,
+            ...(att.fileName ? { fileName: att.fileName } : {}),
           };
         })
         .filter((a): a is NonNullable<typeof a> => a !== null)

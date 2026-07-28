@@ -625,6 +625,7 @@ export function wrapToolWorkspaceRootGuardWithOptions(
     containerWorkdir?: string;
     pathParamKeys?: readonly string[];
     normalizeGuardedPathParams?: boolean;
+    additionalRoots?: readonly string[];
   },
 ): AnyAgentTool {
   const pathParamKeys =
@@ -644,7 +645,24 @@ export function wrapToolWorkspaceRootGuardWithOptions(
           root,
           containerWorkdir: options?.containerWorkdir,
         });
-        const sandboxResult = await assertSandboxPath({ filePath: sandboxPath, cwd: root, root });
+        const allowedRoots = [root, ...(options?.additionalRoots ?? [])];
+        let sandboxResult: Awaited<ReturnType<typeof assertSandboxPath>> | undefined;
+        let workspaceError: unknown;
+        for (const allowedRoot of allowedRoots) {
+          try {
+            sandboxResult = await assertSandboxPath({
+              filePath: sandboxPath,
+              cwd: root,
+              root: allowedRoot,
+            });
+            break;
+          } catch (error) {
+            workspaceError ??= error;
+          }
+        }
+        if (!sandboxResult) {
+          throw workspaceError;
+        }
         if (options?.normalizeGuardedPathParams && record) {
           normalizedRecord ??= { ...record };
           normalizedRecord[key] = sandboxResult.resolved;

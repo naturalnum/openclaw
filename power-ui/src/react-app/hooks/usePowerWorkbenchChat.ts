@@ -33,6 +33,10 @@ import {
   buildUniqueSessionLabel,
   isPowerQuickSessionKey,
 } from "../../integrations/openclaw/session-keys";
+import {
+  mergeChatMessageImagePreviews,
+  replaceChatMessageDisplayText,
+} from "../lib/chat-message-images";
 import { shouldHideChatMessage } from "../lib/chat-message-visibility";
 import {
   trimCommittedPrefixFromChatMessage,
@@ -403,8 +407,9 @@ export function usePowerWorkbenchChat(
           patchSettings({ sessionKey: key, lastActiveSessionKey: key });
           const rt = getOrCreateRuntime(key);
           rt.sessionKey = key;
-          const snapshotMessages = filterVisibleChatMessages(
-            Array.isArray(snap.chatMessages) ? snap.chatMessages : [],
+          const snapshotMessages = mergeChatMessageImagePreviews(
+            filterVisibleChatMessages(Array.isArray(snap.chatMessages) ? snap.chatMessages : []),
+            rt.chatMessages,
           );
           const runtimeUserCount = rt.chatMessages.filter(
             (message) =>
@@ -828,7 +833,14 @@ export function usePowerWorkbenchChat(
     async (
       text: string,
       attachments?: ChatAttachment[],
-      options?: { displayText?: string },
+      options?: {
+        displayText?: string;
+        prepareText?: (context: {
+          sessionKey: string;
+          projectId: string;
+          quickChat: boolean;
+        }) => Promise<string>;
+      },
     ): Promise<boolean> => {
       if (!adapter || !clientRef.current) {
         return false;
@@ -904,6 +916,14 @@ export function usePowerWorkbenchChat(
         bumpSessionsVersion();
       }
 
+      const quickChat = quickChatDraft || isPowerQuickSessionKey(sessionKey);
+      const preparedText = options?.prepareText
+        ? (await options.prepareText({ sessionKey, projectId, quickChat })).trim()
+        : trimmed;
+      if (!preparedText && !hasAttachments) {
+        return false;
+      }
+
       const rt = getOrCreateRuntime(sessionKey);
       rt.sessionKey = sessionKey;
       rt.client = clientRef.current;
@@ -912,8 +932,12 @@ export function usePowerWorkbenchChat(
       if (modelId.trim()) {
         await adapter.request("sessions.patch", { key: sessionKey, model: modelId.trim() });
       }
-      const sendPromise = sendChatMessage(rt, trimmed, hasAttachments ? attachments : undefined);
-      if (displayText !== trimmed) {
+      const sendPromise = sendChatMessage(
+        rt,
+        preparedText,
+        hasAttachments ? attachments : undefined,
+      );
+      if (displayText !== preparedText) {
         for (let index = rt.chatMessages.length - 1; index >= 0; index -= 1) {
           const message = rt.chatMessages[index];
           if (
@@ -922,10 +946,10 @@ export function usePowerWorkbenchChat(
             typeof (message as { role?: unknown }).role === "string" &&
             (message as { role: string }).role.toLowerCase() === "user"
           ) {
-            rt.chatMessages[index] = {
-              ...(message as Record<string, unknown>),
-              content: displayText,
-            };
+            rt.chatMessages[index] = replaceChatMessageDisplayText(
+              message as Record<string, unknown>,
+              displayText,
+            );
             break;
           }
         }

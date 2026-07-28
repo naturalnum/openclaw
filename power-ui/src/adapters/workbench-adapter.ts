@@ -31,6 +31,10 @@ export type WorkbenchDirectoryEntry = {
 export type WorkbenchFileEntry = {
   name: string;
   path: string;
+  /** Optional extracted text companion for binary documents used as chat context. */
+  readablePath?: string;
+  /** Non-fatal warning when a file was saved but its content could not be prepared for the model. */
+  processingWarning?: string;
   kind: "file" | "directory";
   size?: number;
   updatedAtMs?: number;

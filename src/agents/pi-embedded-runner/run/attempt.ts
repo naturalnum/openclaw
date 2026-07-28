@@ -376,12 +376,13 @@ export async function runEmbeddedAttempt(
 
   let restoreSkillEnv: (() => void) | undefined;
   try {
-    const { shouldLoadSkillEntries, skillEntries } = resolveEmbeddedRunSkillEntries({
-      workspaceDir: effectiveWorkspace,
-      config: params.config,
-      agentId: sessionAgentId,
-      skillsSnapshot: params.skillsSnapshot,
-    });
+    const { shouldLoadSkillEntries, skillEntries, skillReadOnlyRoots } =
+      resolveEmbeddedRunSkillEntries({
+        workspaceDir: effectiveWorkspace,
+        config: params.config,
+        agentId: sessionAgentId,
+        skillsSnapshot: params.skillsSnapshot,
+      });
     restoreSkillEnv = params.skillsSnapshot
       ? applySkillEnvOverridesFromSnapshot({
           snapshot: params.skillsSnapshot,
@@ -506,6 +507,7 @@ export async function runEmbeddedAttempt(
             runId: params.runId,
             agentDir,
             workspaceDir: effectiveWorkspace,
+            readOnlyRoots: skillReadOnlyRoots,
             // When sandboxing uses a copied workspace (`ro` or `none`), effectiveWorkspace points
             // at the sandbox copy. Spawned subagents should inherit the real workspace instead.
             spawnWorkspaceDir: resolveAttemptSpawnWorkspaceDir({

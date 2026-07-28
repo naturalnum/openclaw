@@ -15,6 +15,8 @@ import {
   resolveLocalUserProjectsDir,
   resolveLocalUserProfilePath,
   resolveLocalUserSession,
+  resolveLocalUserSkillsDir,
+  revokeLocalUserSession,
   updateLocalUser,
   validateLocalUserId,
 } from "./local-users.js";
@@ -72,6 +74,57 @@ describe("local users", () => {
     ).rejects.toThrow("admin initialization is only available once");
   });
 
+  it("allows only one concurrent first-admin initialization per state directory", async () => {
+    const attempts = await Promise.allSettled([
+      initializeLocalAdmin({
+        id: "owner",
+        password: "owner secure password",
+        stateDir,
+      }),
+      initializeLocalAdmin({
+        id: "second-admin",
+        password: "second secure password",
+        stateDir,
+      }),
+    ]);
+
+    const fulfilled = attempts.filter((result) => result.status === "fulfilled");
+    const rejected = attempts.filter((result) => result.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]).toMatchObject({
+      reason: expect.objectContaining({
+        message: expect.stringContaining("admin initialization is only available once"),
+      }),
+    });
+    await expect(listLocalUsers({ stateDir })).resolves.toEqual([
+      expect.objectContaining({ role: "admin" }),
+    ]);
+  });
+
+  it("keeps first-admin initialization independent across state directories", async () => {
+    const otherStateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-local-users-other-"));
+    try {
+      const [first, second] = await Promise.all([
+        initializeLocalAdmin({
+          id: "owner",
+          password: "owner secure password",
+          stateDir,
+        }),
+        initializeLocalAdmin({
+          id: "owner",
+          password: "owner secure password",
+          stateDir: otherStateDir,
+        }),
+      ]);
+
+      expect(first).toMatchObject({ id: "owner", role: "admin" });
+      expect(second).toMatchObject({ id: "owner", role: "admin" });
+    } finally {
+      await fs.rm(otherStateDir, { recursive: true, force: true });
+    }
+  });
+
   it("creates users and keeps private password hashes out of public listings", async () => {
     await createLocalUser({
       id: "alice",
@@ -98,6 +151,7 @@ describe("local users", () => {
     );
     await expect(fs.stat(path.join(stateDir, "users", "alice", "default"))).resolves.toBeDefined();
     await expect(fs.stat(path.join(stateDir, "users", "alice", "projects"))).resolves.toBeDefined();
+    await expect(fs.stat(resolveLocalUserSkillsDir("alice", stateDir))).resolves.toBeDefined();
   });
 
   it("migrates legacy user profiles and sessions into auth without deleting user workspaces", async () => {
@@ -252,6 +306,66 @@ describe("local users", () => {
         now: new Date("2026-03-01T00:00:02.000Z"),
       }),
     ).resolves.toBeNull();
+  });
+
+  it("preserves every session created concurrently in one state directory", async () => {
+    await createLocalUser({
+      id: "alice",
+      password: "alice secure password",
+      stateDir,
+    });
+    const now = new Date("2026-03-01T00:00:00.000Z");
+    const sessions = await Promise.all(
+      Array.from({ length: 12 }, () =>
+        createLocalUserSession({
+          userId: "alice",
+          stateDir,
+          now,
+        }),
+      ),
+    );
+
+    const persisted = JSON.parse(
+      await fs.readFile(path.join(stateDir, "auth", "sessions.json"), "utf8"),
+    ) as { sessions: unknown[] };
+    expect(persisted.sessions).toHaveLength(sessions.length);
+    await expect(
+      Promise.all(
+        sessions.map(({ token }) =>
+          resolveLocalUserSession({
+            token,
+            stateDir,
+            now: new Date("2026-03-01T00:00:01.000Z"),
+          }),
+        ),
+      ),
+    ).resolves.toEqual(
+      sessions.map(() =>
+        expect.objectContaining({
+          user: expect.objectContaining({ id: "alice" }),
+          session: expect.objectContaining({ userId: "alice" }),
+        }),
+      ),
+    );
+  });
+
+  it("revokes only the selected local-user session", async () => {
+    await createLocalUser({
+      id: "alice",
+      password: "alice secure password",
+      stateDir,
+    });
+    const first = await createLocalUserSession({ userId: "alice", stateDir });
+    const second = await createLocalUserSession({ userId: "alice", stateDir });
+
+    await expect(revokeLocalUserSession({ token: first.token, stateDir })).resolves.toBe(true);
+    await expect(resolveLocalUserSession({ token: first.token, stateDir })).resolves.toBeNull();
+    await expect(resolveLocalUserSession({ token: second.token, stateDir })).resolves.toMatchObject(
+      {
+        user: { id: "alice" },
+      },
+    );
+    await expect(revokeLocalUserSession({ token: first.token, stateDir })).resolves.toBe(false);
   });
 
   it("rejects unsafe user ids", () => {

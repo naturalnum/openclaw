@@ -10,7 +10,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useSearchParams } from "react-router-dom";
 import {
   CHAT_ATTACHMENT_ACCEPT,
-  isSupportedChatAttachmentMimeType,
+  isSupportedChatAttachmentFile,
+  resolveSupportedChatAttachmentMimeType,
 } from "../../../../ui/src/ui/chat/attachment-support";
 import { parseAgentSessionKey } from "../../../../ui/src/ui/session-key";
 import type { ChatAttachment } from "../../../../ui/src/ui/ui-types";
@@ -32,6 +33,14 @@ import { useWorkbenchChat } from "../context/WorkbenchChatContext";
 import { useWorkspaceRail } from "../context/WorkspaceRailContext";
 import { useGatewayWorkbenchAdapter } from "../hooks/useGatewayWorkbenchAdapter";
 import { usePowerUiSettings } from "../hooks/usePowerUiSettings";
+import {
+  CHAT_WORKSPACE_FILE_ACCEPT,
+  chatFileExtension,
+  isSupportedWorkspaceChatFile,
+  maxWorkspaceChatFileBytes,
+  unsupportedWorkspaceChatFileReason,
+} from "../lib/chat-file-support";
+import { extractChatMessageImages, type ChatMessageImage } from "../lib/chat-message-images";
 import { shouldHideChatMessage } from "../lib/chat-message-visibility";
 import { dedupeCumulativeStreamSegments, streamTextAfterPrefix } from "../lib/chat-stream-segments";
 import { resolveChatModelPool, resolveEffectiveChatModelRef } from "../lib/configured-chat-models";
@@ -57,12 +66,14 @@ function isRenderableChatMessage(msg: unknown): msg is Record<string, unknown> {
   return msg != null && typeof msg === "object";
 }
 
-function messageHasVisibleText(msg: unknown): boolean {
+function messageHasVisibleContent(msg: unknown): boolean {
   if (!isRenderableChatMessage(msg) || shouldHideChatMessage(msg, { showToolCalls: false })) {
     return false;
   }
   const raw = extractDisplayText(msg);
-  return typeof raw === "string" && raw.trim().length > 0;
+  return (
+    (typeof raw === "string" && raw.trim().length > 0) || extractChatMessageImages(msg).length > 0
+  );
 }
 
 function messageRole(msg: unknown): string {
@@ -74,7 +85,7 @@ function messageRole(msg: unknown): string {
 
 function findLastUserMessageIndex(messages: unknown[]): number {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
-    if (messageRole(messages[i]) === "user" && messageHasVisibleText(messages[i])) {
+    if (messageRole(messages[i]) === "user" && messageHasVisibleContent(messages[i])) {
       return i;
     }
   }
@@ -120,7 +131,7 @@ function splitMessagesForTurnLayout(messages: unknown[], pinToolStepsBeforeAssis
   }
   const tailAssistantMessages = messages
     .slice(lastUserIdx + 1)
-    .filter((msg) => messageRole(msg) === "assistant" && messageHasVisibleText(msg));
+    .filter((msg) => messageRole(msg) === "assistant" && messageHasVisibleContent(msg));
   if (tailAssistantMessages.length === 0) {
     return { leadMessages: messages, tailAssistantMessages: [] as unknown[] };
   }
@@ -183,15 +194,65 @@ function renderChatMediaAttachments(
   );
 }
 
+function renderChatInlineImages(
+  images: ChatMessageImage[],
+  hasText: boolean,
+  onPreview?: (image: ChatMessageImage) => void,
+) {
+  if (images.length === 0) {
+    return null;
+  }
+  const multiple = images.length > 1;
+  return (
+    <div className={cn(hasText && "mt-2", "grid max-w-full gap-2", multiple && "grid-cols-2")}>
+      {images.map((image, index) => (
+        <div key={`${image.url?.slice(0, 80) ?? `omitted-${image.bytes ?? 0}`}-${index}`}>
+          {image.url ? (
+            <button
+              type="button"
+              aria-label={`预览${image.alt || `聊天图片 ${index + 1}`}`}
+              title="点击查看大图"
+              className="block max-w-full cursor-zoom-in rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/70"
+              onClick={() => onPreview?.(image)}
+            >
+              <img
+                src={image.url}
+                alt={image.alt || `聊天图片 ${index + 1}`}
+                className={cn(
+                  "block rounded-xl border border-neutral-200 bg-neutral-50 object-contain transition hover:border-neutral-300 hover:shadow-md",
+                  multiple ? "aspect-square h-full w-full max-w-44" : "max-h-72 max-w-full",
+                )}
+              />
+            </button>
+          ) : (
+            <div
+              role="img"
+              aria-label="已发送图片，历史预览未保留"
+              className="flex min-h-24 min-w-40 flex-col items-center justify-center rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-center text-xs text-slate-500"
+            >
+              <span className="text-xl" aria-hidden>
+                🖼️
+              </span>
+              <span className="mt-1 font-medium text-slate-700">图片已发送</span>
+              <span>历史预览未保留</span>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function renderChatMessageBubble(
   msg: unknown,
   key: string,
   options?: {
     mediaAgentId?: string | null;
     onDownloadMedia?: (attachment: ChatMediaAttachment) => void;
+    onPreviewImage?: (image: ChatMessageImage) => void;
   },
 ) {
-  if (!isRenderableChatMessage(msg) || !messageHasVisibleText(msg)) {
+  if (!isRenderableChatMessage(msg) || !messageHasVisibleContent(msg)) {
     return null;
   }
   const role = messageRole(msg);
@@ -200,25 +261,39 @@ function renderChatMessageBubble(
   const isAssistant = role === "assistant";
   const displayText = isAssistant ? sanitizeChatDisplayText(text) : text;
   const mediaAttachments = isAssistant ? extractMediaAttachments(text) : [];
-  if (!displayText && mediaAttachments.length === 0) {
+  const inlineImages = extractChatMessageImages(msg);
+  if (!displayText && mediaAttachments.length === 0 && inlineImages.length === 0) {
     return null;
   }
+  if (isUser) {
+    return (
+      <div key={key} className="flex w-full justify-end">
+        <div className="flex max-w-[min(100%,42rem)] flex-col items-end gap-2">
+          {displayText ? (
+            <div
+              aria-label="用户消息"
+              className="rounded-2xl rounded-br-md bg-[#fbfbfa] px-3 py-2 text-sm leading-snug text-slate-900 ring-1 ring-neutral-300/80"
+            >
+              <span className="whitespace-pre-wrap break-words">{displayText}</span>
+            </div>
+          ) : null}
+          {inlineImages.length > 0 ? (
+            <div aria-label="用户发送的图片" className="max-w-full">
+              {renderChatInlineImages(inlineImages, false, options?.onPreviewImage)}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
   return (
-    <div key={key} className={cn("flex w-full", isUser ? "justify-end" : "justify-start")}>
+    <div key={key} className="flex w-full justify-start">
       <div
-        aria-label={isUser ? "用户消息" : "助手消息"}
-        className={cn(
-          "max-w-[min(100%,42rem)] rounded-2xl px-3 py-2 text-sm leading-snug",
-          isUser
-            ? "rounded-br-md bg-[#fbfbfa] text-slate-900 ring-1 ring-neutral-300/80"
-            : "rounded-bl-md bg-white text-slate-800 ring-1 ring-neutral-300/75",
-        )}
+        aria-label="助手消息"
+        className="max-w-[min(100%,42rem)] rounded-2xl rounded-bl-md bg-white px-3 py-2 text-sm leading-snug text-slate-800 ring-1 ring-neutral-300/75"
       >
-        {isAssistant && displayText ? (
-          <ChatMarkdownBody source={displayText} />
-        ) : !isAssistant ? (
-          <span className="whitespace-pre-wrap break-words">{displayText}</span>
-        ) : null}
+        {isAssistant && displayText ? <ChatMarkdownBody source={displayText} /> : null}
+        {renderChatInlineImages(inlineImages, Boolean(displayText), options?.onPreviewImage)}
         {isAssistant
           ? renderChatMediaAttachments(mediaAttachments, {
               agentId: options?.mediaAgentId,
@@ -232,36 +307,7 @@ function renderChatMessageBubble(
 
 const MAX_CHAT_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MAX_CHAT_ATTACHMENT_COUNT = 6;
-const MAX_CHAT_WORKSPACE_FILE_BYTES = 100 * 1024 * 1024;
 const MAX_CHAT_WORKSPACE_FILE_COUNT = 8;
-const CHAT_UPLOADS_ROOT = ".chat-uploads";
-const CHAT_WORKSPACE_FILE_ACCEPT = [
-  ".pdf",
-  ".doc",
-  ".docx",
-  ".xls",
-  ".xlsx",
-  ".csv",
-  ".ppt",
-  ".pptx",
-  ".txt",
-  ".md",
-  ".json",
-  ".jsonl",
-  ".html",
-  ".htm",
-  ".xml",
-  ".yaml",
-  ".yml",
-  ".mp3",
-  ".m4a",
-  ".wav",
-  ".mp4",
-  ".mov",
-  ".avi",
-  ".mkv",
-  ".webm",
-].join(",");
 const CHAT_FILE_ACCEPT = `${CHAT_ATTACHMENT_ACCEPT},${CHAT_WORKSPACE_FILE_ACCEPT}`;
 /** 距底部小于此值视为「在底部」，新消息/流式输出会自动跟随 */
 const SCROLL_BOTTOM_THRESHOLD_PX = 80;
@@ -272,47 +318,6 @@ type PendingWorkspaceChatFile = {
   name: string;
   size: number;
 };
-
-function buildChatUploadFolder(sessionKey: string) {
-  const normalized = sessionKey.trim() || `draft-${crypto.randomUUID()}`;
-  const safe = normalized.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
-  return `${CHAT_UPLOADS_ROOT}/${safe || `draft-${crypto.randomUUID()}`}`;
-}
-
-const SUPPORTED_WORKSPACE_FILE_EXTENSIONS = new Set(
-  CHAT_WORKSPACE_FILE_ACCEPT.split(",").map((ext) => ext.slice(1)),
-);
-
-const SUPPORTED_WORKSPACE_FILE_MIME_PREFIXES = [
-  "audio/",
-  "video/",
-  "text/",
-  "application/pdf",
-  "application/json",
-  "application/xml",
-  "application/msword",
-  "application/vnd.ms-",
-  "application/vnd.openxmlformats-officedocument",
-  "application/x-yaml",
-  "application/yaml",
-];
-
-function fileExtension(name: string): string {
-  const normalized = name.trim().toLowerCase();
-  const index = normalized.lastIndexOf(".");
-  return index >= 0 ? normalized.slice(index + 1) : "";
-}
-
-function isSupportedWorkspaceChatFile(file: File): boolean {
-  const mimeType = file.type.trim().toLowerCase();
-  if (
-    mimeType &&
-    SUPPORTED_WORKSPACE_FILE_MIME_PREFIXES.some((prefix) => mimeType.startsWith(prefix))
-  ) {
-    return true;
-  }
-  return SUPPORTED_WORKSPACE_FILE_EXTENSIONS.has(fileExtension(file.name));
-}
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) {
@@ -330,13 +335,23 @@ function formatBytes(bytes: number): string {
 
 function appendUploadedFilesToMessage(
   text: string,
-  entries: Array<{ name: string; path: string }>,
+  entries: Array<{
+    name: string;
+    path: string;
+    readablePath?: string;
+    processingWarning?: string;
+  }>,
 ) {
   if (entries.length === 0) {
     return text;
   }
   const body = text.trim();
-  const fileList = entries.map((entry) => `- ${entry.name}: ${entry.path}`).join("\n");
+  const fileList = entries
+    .map(
+      (entry) =>
+        `- ${entry.name}: ${entry.path}${entry.readablePath ? `\n  已提取可读文本: ${entry.readablePath}` : ""}${entry.processingWarning ? `\n  处理提示: ${entry.processingWarning}` : ""}`,
+    )
+    .join("\n");
   const prefix = body || "请阅读以下附件并回答。";
   return `${prefix}\n\n本轮对话附件：\n${fileList}\n\n请把这些文件作为本轮对话上下文；需要内容时请直接读取对应路径。`;
 }
@@ -429,7 +444,8 @@ function sanitizeChatDisplayText(text: string): string {
 
 function fileToChatAttachment(file: File): Promise<ChatAttachment | null> {
   return new Promise((resolve) => {
-    if (!isSupportedChatAttachmentMimeType(file.type)) {
+    const mimeType = resolveSupportedChatAttachmentMimeType(file);
+    if (!mimeType) {
       resolve(null);
       return;
     }
@@ -442,11 +458,12 @@ function fileToChatAttachment(file: File): Promise<ChatAttachment | null> {
       resolve({
         id: crypto.randomUUID(),
         dataUrl: reader.result as string,
-        mimeType: file.type,
+        mimeType,
+        fileName: file.name || undefined,
       });
     });
     reader.addEventListener("error", () => resolve(null));
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(file.type === mimeType ? file : new Blob([file], { type: mimeType }));
   });
 }
 
@@ -679,6 +696,7 @@ export function ChatPage() {
 
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [previewImage, setPreviewImage] = useState<ChatMessageImage | null>(null);
   const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
   const [pendingWorkspaceFiles, setPendingWorkspaceFiles] = useState<PendingWorkspaceChatFile[]>(
     [],
@@ -692,6 +710,19 @@ export function ChatPage() {
   const messagesColumnRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!previewImage) {
+      return undefined;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setPreviewImage(null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [previewImage]);
 
   const agents = snapshot?.agentsList?.agents ?? [];
   const defaultAgentId = snapshot?.agentsList?.defaultId ?? null;
@@ -1037,16 +1068,27 @@ export function ChatPage() {
       const picked: ChatAttachment[] = [];
       const workspacePicked: PendingWorkspaceChatFile[] = [];
       let unsupported = 0;
+      const unsupportedReasons: string[] = [];
       let oversizedImages = 0;
-      let oversizedFiles = 0;
+      let oversizedDocuments = 0;
+      let oversizedMedia = 0;
       for (const file of list) {
-        if (!isSupportedChatAttachmentMimeType(file.type)) {
+        if (!isSupportedChatAttachmentFile(file)) {
           if (!isSupportedWorkspaceChatFile(file)) {
             unsupported += 1;
+            const reason = unsupportedWorkspaceChatFileReason(file);
+            if (reason) {
+              unsupportedReasons.push(reason);
+            }
             continue;
           }
-          if (file.size > MAX_CHAT_WORKSPACE_FILE_BYTES) {
-            oversizedFiles += 1;
+          const maxBytes = maxWorkspaceChatFileBytes(file);
+          if (file.size > maxBytes) {
+            if (maxBytes <= 16 * 1024 * 1024) {
+              oversizedMedia += 1;
+            } else {
+              oversizedDocuments += 1;
+            }
             continue;
           }
           workspacePicked.push({
@@ -1066,16 +1108,17 @@ export function ChatPage() {
           picked.push(att);
         }
       }
+      const rejectionMessages = [
+        ...unsupportedReasons,
+        ...(unsupported > unsupportedReasons.length ? ["部分文件格式暂不支持，已跳过。"] : []),
+        ...(oversizedImages > 0 ? ["图片附件不能超过 8 MB，超限文件已跳过。"] : []),
+        ...(oversizedMedia > 0 ? ["音频或视频附件不能超过 16 MB，超限文件已跳过。"] : []),
+        ...(oversizedDocuments > 0 ? ["文档附件不能超过 100 MB，超限文件已跳过。"] : []),
+      ];
+      if (rejectionMessages.length > 0) {
+        message.warning([...new Set(rejectionMessages)].join("\n"));
+      }
       if (!picked.length && workspacePicked.length === 0) {
-        if (unsupported > 0 || oversizedImages > 0 || oversizedFiles > 0) {
-          message.warning(
-            unsupported > 0
-              ? "当前支持图片、文档、表格、演示、文本、音频和视频文件。"
-              : oversizedImages > 0
-                ? "图片附件不能超过 8 MB。"
-                : "工作区文件不能超过 100 MB。",
-          );
-        }
         return;
       }
       if (picked.length > 0) {
@@ -1150,8 +1193,10 @@ export function ChatPage() {
   );
 
   const hasConfiguredModel = Boolean(effectiveModelRef.trim());
+  const imageInputBlocked = pendingAttachments.length > 0 && catalogImageSupport === "no";
   const canSend =
     hasConfiguredModel &&
+    !imageInputBlocked &&
     (Boolean(draft.trim()) || pendingAttachments.length > 0 || pendingWorkspaceFiles.length > 0);
 
   const handleSend = async () => {
@@ -1181,42 +1226,42 @@ export function ChatPage() {
       scrollViewportToBottom("smooth");
     });
     try {
-      const uploadAgentId =
-        workspaceAgentId ||
-        (selectedSessionKey.trim()
-          ? (parseAgentSessionKey(selectedSessionKey)?.agentId ?? "")
-          : "") ||
-        defaultAgentId ||
-        agents[0]?.id ||
-        "";
-      let messageText = outgoingDraft;
-      if (outgoingWorkspaceFiles.length > 0) {
-        if (!adapter || !uploadAgentId) {
-          throw new Error("请先选择或配置项目后再上传文件。");
-        }
-        const chatUploadPath = buildChatUploadFolder(selectedSessionKey);
-        const chatUploadFolderName = chatUploadPath.slice(`${CHAT_UPLOADS_ROOT}/`.length);
-        await adapter.createProjectFolder(uploadAgentId, null, CHAT_UPLOADS_ROOT).catch(() => {});
-        await adapter
-          .createProjectFolder(uploadAgentId, CHAT_UPLOADS_ROOT, chatUploadFolderName)
-          .catch(() => {});
-        const uploaded = await adapter.uploadProjectFiles(
-          uploadAgentId,
-          chatUploadPath,
-          outgoingWorkspaceFiles.map(
-            (entry): WorkbenchUploadedFile => ({
-              name: entry.name,
-              file: entry.file,
-            }),
-          ),
-        );
-        messageText = appendUploadedFilesToMessage(messageText, uploaded);
-        setWorkspaceFilesReloadToken((n) => n + 1);
-      }
+      const messageText =
+        outgoingDraft.trim() ||
+        (outgoingWorkspaceFiles.length > 0 ? DEFAULT_ATTACHMENT_PROMPT : outgoingDraft);
       const sent = await sendUserMessage(
         messageText,
         outgoingAttachments.length > 0 ? outgoingAttachments : undefined,
-        { displayText },
+        {
+          displayText,
+          prepareText: async ({ sessionKey, projectId, quickChat }) => {
+            if (outgoingWorkspaceFiles.length === 0) {
+              return messageText;
+            }
+            if (!adapter) {
+              throw new Error("文件服务尚未准备好，请稍后再试。");
+            }
+            const uploaded = await adapter.uploadChatFiles(
+              projectId,
+              sessionKey,
+              outgoingWorkspaceFiles.map(
+                (entry): WorkbenchUploadedFile => ({
+                  name: entry.name,
+                  file: entry.file,
+                }),
+              ),
+              { quickChat },
+            );
+            const processingWarnings = uploaded
+              .map((entry) => entry.processingWarning?.trim())
+              .filter((warning): warning is string => Boolean(warning));
+            if (processingWarnings.length > 0) {
+              message.warning([...new Set(processingWarnings)].join("\n"));
+            }
+            setWorkspaceFilesReloadToken((n) => n + 1);
+            return appendUploadedFilesToMessage(messageText, uploaded);
+          },
+        },
       );
       if (!sent) {
         message.warning("网关或项目还没准备好，请稍后再试。");
@@ -1327,6 +1372,7 @@ export function ChatPage() {
                         {
                           mediaAgentId: chatMediaAgentId,
                           onDownloadMedia: handleDownloadMediaAttachment,
+                          onPreviewImage: setPreviewImage,
                         },
                       ),
                     )}
@@ -1403,6 +1449,7 @@ export function ChatPage() {
                         {
                           mediaAgentId: chatMediaAgentId,
                           onDownloadMedia: handleDownloadMediaAttachment,
+                          onPreviewImage: setPreviewImage,
                         },
                       ),
                     )}
@@ -1438,11 +1485,11 @@ export function ChatPage() {
               <div className="mx-auto w-full max-w-[760px]">
                 {catalogImageSupport === "no" && pendingAttachments.length > 0 ? (
                   <div
-                    role="status"
+                    role="alert"
                     className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-snug text-amber-950"
                   >
                     当前模型在网关中标记为<strong className="font-semibold">不支持图片输入</strong>
-                    ，附件可能被丢弃。请改用目录中带「image」能力的模型后再发图。
+                    ，已阻止发送以避免提供商请求失败。请切换到带「image」能力的模型后再发图。
                   </div>
                 ) : null}
                 {catalogImageSupport === "unknown" && pendingAttachments.length > 0 ? (
@@ -1466,7 +1513,16 @@ export function ChatPage() {
                         key={att.id}
                         className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-slate-50 shadow-sm"
                       >
-                        <img src={att.dataUrl} alt="" className="h-full w-full object-cover" />
+                        <button
+                          type="button"
+                          aria-label="预览待发送图片"
+                          className="h-full w-full cursor-zoom-in"
+                          onClick={() =>
+                            setPreviewImage({ url: att.dataUrl, alt: att.fileName || "待发送图片" })
+                          }
+                        >
+                          <img src={att.dataUrl} alt="" className="h-full w-full object-cover" />
+                        </button>
                         <button
                           type="button"
                           aria-label="移除图片"
@@ -1490,7 +1546,7 @@ export function ChatPage() {
                         title={`${file.name} · ${formatBytes(file.size)}`}
                       >
                         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-white text-[11px] font-semibold uppercase text-slate-500 ring-1 ring-slate-200">
-                          {fileExtension(file.name).slice(0, 4) || "file"}
+                          {chatFileExtension(file.name).slice(0, 4) || "file"}
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="block truncate font-medium text-slate-800">
@@ -1664,6 +1720,30 @@ export function ChatPage() {
           ) : null}
         </div>
       </main>
+      {previewImage?.url ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="图片大图预览"
+          className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm sm:p-8"
+          onClick={() => setPreviewImage(null)}
+        >
+          <button
+            type="button"
+            aria-label="关闭图片预览"
+            className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-2xl text-white transition hover:bg-black/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+            onClick={() => setPreviewImage(null)}
+          >
+            ×
+          </button>
+          <img
+            src={previewImage.url}
+            alt={previewImage.alt || "聊天图片大图"}
+            className="max-h-full max-w-full rounded-lg bg-white object-contain shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

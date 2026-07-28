@@ -136,6 +136,7 @@ async function authorizePowerFsRequest(params: {
 }) {
   const token = params.token?.trim() || undefined;
   const password = params.password?.trim() || token;
+  const cfg = (await readConfigFileSnapshot()).config;
   const authResult = await authorizeHttpGatewayConnect({
     auth: params.auth,
     connectAuth: token || password ? { token, password } : null,
@@ -147,6 +148,7 @@ async function authorizePowerFsRequest(params: {
       origin: Array.isArray(params.req.headers.origin)
         ? params.req.headers.origin[0]
         : params.req.headers.origin,
+      allowedOrigins: cfg.gateway?.controlUi?.allowedOrigins,
       allowHostHeaderOriginFallback: true,
     },
   });
@@ -157,23 +159,25 @@ async function authorizePowerFsRequest(params: {
   return true;
 }
 
-function resolveAllowedUploadOrigin(req: IncomingMessage): string | null {
+async function resolveAllowedUploadOrigin(req: IncomingMessage): Promise<string | null> {
   const origin = (req.headers.origin ?? "").trim();
   if (!origin || origin === "null") {
     return null;
   }
+  const cfg = (await readConfigFileSnapshot()).config;
   const clientIp = resolveRequestClientIp(req, [], false);
   const check = checkBrowserOrigin({
     requestHost: Array.isArray(req.headers.host) ? req.headers.host[0] : req.headers.host,
     origin,
+    allowedOrigins: cfg.gateway?.controlUi?.allowedOrigins,
     allowHostHeaderOriginFallback: true,
     isLocalClient: isLoopbackAddress(clientIp),
   });
   return check.ok ? origin : null;
 }
 
-function applyUploadCorsHeaders(req: IncomingMessage, res: ServerResponse) {
-  const origin = resolveAllowedUploadOrigin(req);
+async function applyUploadCorsHeaders(req: IncomingMessage, res: ServerResponse) {
+  const origin = await resolveAllowedUploadOrigin(req);
   if (!origin) {
     return;
   }
@@ -225,7 +229,7 @@ export function createPowerFsHttpHandler(params: {
     const url = new URL(req.url ?? "/", "http://localhost");
 
     if (url.pathname === POWER_FS_UPLOAD_HTTP_PATH) {
-      applyUploadCorsHeaders(req, res);
+      await applyUploadCorsHeaders(req, res);
       const method = (req.method ?? "GET").toUpperCase();
       if (method === "OPTIONS") {
         res.statusCode = 204;

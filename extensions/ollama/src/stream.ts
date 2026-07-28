@@ -512,6 +512,16 @@ function extractOllamaTools(tools: Tool[] | undefined): OllamaTool[] {
   return result;
 }
 
+function latestUserMessageHasImages(messages: OllamaChatMessage[]): boolean {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role === "user") {
+      return Boolean(message.images?.length);
+    }
+  }
+  return false;
+}
+
 export function buildAssistantMessage(
   response: OllamaChatResponse,
   modelInfo: StreamModelDescriptor,
@@ -616,7 +626,11 @@ export function createOllamaStreamFn(
           context.messages ?? [],
           context.systemPrompt,
         );
-        const ollamaTools = extractOllamaTools(context.tools);
+        // Compact local vision models can mistake a native image attachment for a request to
+        // locate the image with a tool. Let the model consume the attached image directly.
+        const ollamaTools = latestUserMessageHasImages(ollamaMessages)
+          ? []
+          : extractOllamaTools(context.tools);
 
         const ollamaOptions: Record<string, unknown> = { num_ctx: model.contextWindow ?? 65536 };
         if (typeof options?.temperature === "number") {

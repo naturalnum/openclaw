@@ -1,13 +1,76 @@
 #!/usr/bin/env node
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
-const [dataDir, appDir] = process.argv.slice(2);
-if (!dataDir || !appDir) {
-  throw new Error("usage: agent-bootstrap-config.mjs <data-dir> <app-dir>");
+const [dataDir, appDir, gatewayPortRaw] = process.argv.slice(2);
+if (!dataDir || !appDir || !gatewayPortRaw) {
+  throw new Error("usage: agent-bootstrap-config.mjs <data-dir> <app-dir> <gateway-port>");
+}
+
+const gatewayPort = Number(gatewayPortRaw);
+if (!Number.isInteger(gatewayPort) || gatewayPort < 1 || gatewayPort > 65_535) {
+  throw new Error(`invalid gateway port: ${gatewayPortRaw}`);
+}
+
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function formatOriginHost(host) {
+  const normalized = host.trim();
+  if (!normalized.includes(":")) {
+    return normalized;
+  }
+  return `[${normalized.replaceAll("%", "%25")}]`;
+}
+
+function buildManagedControlUiOrigins(existingOrigins) {
+  const origins = new Set(
+    Array.isArray(existingOrigins)
+      ? existingOrigins.filter((origin) => typeof origin === "string" && origin.trim())
+      : [],
+  );
+  const hosts = new Set(["localhost", "127.0.0.1"]);
+  const hostname = os.hostname().trim();
+  if (hostname) {
+    hosts.add(hostname);
+  }
+  for (const entries of Object.values(os.networkInterfaces())) {
+    for (const entry of entries ?? []) {
+      const family = entry.family;
+      const address = entry.address?.trim();
+      if (entry.internal || !address || family !== "IPv4") {
+        continue;
+      }
+      hosts.add(address);
+    }
+  }
+  for (const host of [...hosts].toSorted()) {
+    origins.add(`http://${formatOriginHost(host)}:${gatewayPort}`);
+  }
+  return [...origins];
+}
+
+function resolvePersistentGatewayToken(auth) {
+  if (typeof auth.token === "string" && auth.token.trim()) {
+    return auth.token.trim();
+  }
+  if (isRecord(auth.token)) {
+    return auth.token;
+  }
+  return crypto.randomBytes(32).toString("hex");
+}
+
+async function writeManagedConfig(configPath, config) {
+  await fs.mkdir(path.dirname(configPath), { recursive: true });
+  await fs.writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+  await fs.chmod(configPath, 0o600);
 }
 
 const configPath = path.join(dataDir, "openclaw.json");
+const skillCenterBaseUrl = process.env.POWER_AGENT_SKILL_CENTER_URL?.trim();
 let existingConfig;
 try {
   existingConfig = JSON.parse(await fs.readFile(configPath, "utf8"));
@@ -19,14 +82,33 @@ try {
 
 if (!existingConfig) {
   const usersDir = path.join(dataDir, "users");
+  const token = resolvePersistentGatewayToken({});
   const config = {
     gateway: {
       mode: "local",
-      bind: "loopback",
-      auth: { mode: "none" },
-      controlUi: { root: path.join(appDir, "dist", "power-ui") },
+      port: gatewayPort,
+      bind: "lan",
+      auth: { mode: "token", token },
+      controlUi: {
+        root: path.join(appDir, "dist", "power-ui"),
+        allowedOrigins: buildManagedControlUiOrigins(),
+        // Power Agent is an appliance-style trusted-LAN deployment. Plain HTTP
+        // is not a browser secure context, so device identity is unavailable.
+        dangerouslyDisableDeviceAuth: true,
+      },
     },
     logging: { file: path.join(dataDir, "logs", "openclaw.log") },
+    ...(skillCenterBaseUrl
+      ? {
+          skills: {
+            registry: {
+              enabled: true,
+              baseUrl: skillCenterBaseUrl,
+              timeoutMs: 10_000,
+            },
+          },
+        }
+      : {}),
     plugins: {
       allow: ["power-backend"],
       entries: {
@@ -46,15 +128,41 @@ if (!existingConfig) {
       installs: {},
     },
   };
-  await fs.mkdir(path.dirname(configPath), { recursive: true });
-  await fs.writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+  await writeManagedConfig(configPath, config);
 } else {
-  // Power Agent has its own local-user login and only exposes the Gateway on loopback.
-  // Remove the redundant shared-token gate so a normal UI launch can connect after login.
-  existingConfig.gateway ??= {};
-  const auth = existingConfig.gateway.auth;
-  if (auth?.mode !== "none" || auth.token !== undefined || auth.password !== undefined) {
-    existingConfig.gateway.auth = { mode: "none" };
-    await fs.writeFile(configPath, `${JSON.stringify(existingConfig, null, 2)}\n`, { mode: 0o600 });
+  const existingGateway = isRecord(existingConfig.gateway) ? existingConfig.gateway : {};
+  const existingAuth = isRecord(existingGateway.auth) ? existingGateway.auth : {};
+  const existingControlUi = isRecord(existingGateway.controlUi) ? existingGateway.controlUi : {};
+  const { password: _password, ...authWithoutPassword } = existingAuth;
+  existingConfig.gateway = {
+    ...existingGateway,
+    mode: "local",
+    port: gatewayPort,
+    bind: "lan",
+    auth: {
+      ...authWithoutPassword,
+      mode: "token",
+      token: resolvePersistentGatewayToken(existingAuth),
+    },
+    controlUi: {
+      ...existingControlUi,
+      root: path.join(appDir, "dist", "power-ui"),
+      allowedOrigins: buildManagedControlUiOrigins(existingControlUi.allowedOrigins),
+      dangerouslyDisableDeviceAuth: existingControlUi.dangerouslyDisableDeviceAuth ?? true,
+    },
+  };
+  if (skillCenterBaseUrl) {
+    const existingSkills = isRecord(existingConfig.skills) ? existingConfig.skills : {};
+    const existingRegistry = isRecord(existingSkills.registry) ? existingSkills.registry : {};
+    existingConfig.skills = {
+      ...existingSkills,
+      registry: {
+        ...existingRegistry,
+        enabled: true,
+        baseUrl: skillCenterBaseUrl,
+        timeoutMs: existingRegistry.timeoutMs ?? 10_000,
+      },
+    };
   }
+  await writeManagedConfig(configPath, existingConfig);
 }

@@ -18,11 +18,23 @@ export type LocalUserSession = {
   expiresAt: string;
 };
 
+export type LocalUsersGatewayAuth =
+  | { mode: "token"; token?: string }
+  | { mode: "none" | "password" | "trusted-proxy" };
+
 export type LocalUserAuthResult = {
   ok: true;
   token: string;
   session: LocalUserSession;
   user: LocalUserProfile;
+  gatewayAuth: LocalUsersGatewayAuth;
+};
+
+export type LocalUserMeResult = {
+  ok: true;
+  session: LocalUserSession;
+  user: LocalUserProfile;
+  gatewayAuth: LocalUsersGatewayAuth;
 };
 
 export type LocalUsersStatus = {
@@ -45,6 +57,16 @@ type LocalUsersRequestOptions = {
   body?: unknown;
   sessionToken?: string | null;
 };
+
+export class LocalUsersHttpError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "LocalUsersHttpError";
+    this.status = status;
+  }
+}
 
 export function buildLocalUsersHttpUrl(gatewayUrlRaw: string, pathname: string): string {
   const gatewayUrl = new URL(gatewayUrlRaw);
@@ -73,7 +95,7 @@ async function readLocalUsersJson<T>(response: Response): Promise<T> {
       typeof payload.error.message === "string"
         ? payload.error.message
         : `HTTP ${response.status}`;
-    throw new Error(message);
+    throw new LocalUsersHttpError(message, response.status);
   }
   return payload;
 }

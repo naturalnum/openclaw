@@ -62,6 +62,7 @@ export const SkillsRegistryPaginationSchema = Type.Object(
 
 export const SkillsRegistryListParamsSchema = Type.Object(
   {
+    userSessionToken: NonEmptyString,
     q: Type.Optional(Type.String()),
     category: Type.Optional(Type.String()),
     sort: Type.Optional(
@@ -92,6 +93,7 @@ export const SkillsRegistryListResultSchema = Type.Object(
 
 export const SkillsRegistryInstallParamsSchema = Type.Object(
   {
+    userSessionToken: NonEmptyString,
     slug: NonEmptyString,
     version: Type.Optional(Type.String()),
   },
@@ -112,6 +114,7 @@ export const SkillsRegistryInstallResultSchema = Type.Object(
 
 export const SkillsRegistryInstallArchiveParamsSchema = Type.Object(
   {
+    userSessionToken: NonEmptyString,
     fileName: NonEmptyString,
     archiveBase64: NonEmptyString,
     overwrite: Type.Optional(Type.Boolean()),
@@ -133,6 +136,7 @@ export const SkillsRegistryInstallArchiveResultSchema = Type.Object(
 
 export const SkillsRegistryUninstallParamsSchema = Type.Object(
   {
+    userSessionToken: NonEmptyString,
     slug: NonEmptyString,
   },
   { additionalProperties: false },

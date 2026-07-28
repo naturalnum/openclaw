@@ -1,4 +1,5 @@
 import {
+  DeleteOutlined,
   DownloadOutlined,
   InboxOutlined,
   ReloadOutlined,
@@ -11,10 +12,10 @@ import {
   Button,
   Input,
   Pagination,
+  Popconfirm,
   Select,
   Space,
   Spin,
-  Switch,
   Typography,
 } from "antd";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
@@ -23,6 +24,7 @@ import {
   DEFAULT_SKILLS_INSTALL_FILTER,
   DEFAULT_SKILLS_REGISTRY_PAGINATION,
   DEFAULT_SKILLS_SORT_BY,
+  createScopedSkillsMarketClient,
   importRegistrySkillArchive,
   loadSkillsMarket,
   setSkillsCategory,
@@ -30,6 +32,7 @@ import {
   setSkillsInstallFilter,
   setSkillsPage,
   setSkillsSortBy,
+  showAllSkills,
   toggleRegistrySkillInstall,
   type SkillMessage,
   type SkillsMarketState,
@@ -41,6 +44,7 @@ import type {
 } from "../../compat/types";
 import { PageScaffold } from "../components/ui/PageScaffold";
 import { StatusPill } from "../components/ui/StatusPill";
+import { useLocalUsers } from "../context/LocalUsersContext";
 import { useGatewayWorkbenchAdapter } from "../hooks/useGatewayWorkbenchAdapter";
 import { usePowerUiSettings } from "../hooks/usePowerUiSettings";
 import { ROUTES } from "../router/paths";
@@ -81,13 +85,6 @@ function isLocalDirectoryInstall(item: SkillsRegistryCatalogItem): boolean {
   return item.installState.installed && item.installState.source === "directory";
 }
 
-function isLocalSkillEnabled(item: SkillsRegistryCatalogItem): boolean {
-  if (!isLocalDirectoryInstall(item)) {
-    return item.installState.installed;
-  }
-  return !item.tags.some((tag) => tag.trim().toLowerCase() === "disabled");
-}
-
 function isLocalSkillsCategory(category: SkillsRegistryCategory): boolean {
   const id = category.id.trim().toLowerCase();
   const name = category.name.trim();
@@ -96,14 +93,10 @@ function isLocalSkillsCategory(category: SkillsRegistryCategory): boolean {
 
 function createInitialSkillsState(
   adapter: ReturnType<typeof useGatewayWorkbenchAdapter>,
+  userSessionToken: string,
 ): SkillsMarketState {
   return {
-    client: adapter
-      ? {
-          request: async <T,>(method: string, params?: unknown) =>
-            adapter.request<T>(method, params),
-        }
-      : null,
+    client: createScopedSkillsMarketClient(adapter, userSessionToken),
     connected: Boolean(adapter),
     skillsLoading: false,
     skillsReport: null,
@@ -123,14 +116,17 @@ function createInitialSkillsState(
   };
 }
 
-function useSkillsMarket(adapter: ReturnType<typeof useGatewayWorkbenchAdapter>) {
+function useSkillsMarket(
+  adapter: ReturnType<typeof useGatewayWorkbenchAdapter>,
+  userSessionToken: string,
+) {
   const [, bump] = useState(0);
-  const stateRef = useRef(createInitialSkillsState(adapter));
+  const stateRef = useRef(createInitialSkillsState(adapter, userSessionToken));
 
   useEffect(() => {
     const previous = stateRef.current;
     stateRef.current = {
-      ...createInitialSkillsState(adapter),
+      ...createInitialSkillsState(adapter, userSessionToken),
       skillsFilter: previous.skillsFilter,
       skillsCategory: previous.skillsCategory,
       skillsSortBy: previous.skillsSortBy,
@@ -141,7 +137,7 @@ function useSkillsMarket(adapter: ReturnType<typeof useGatewayWorkbenchAdapter>)
       },
     };
     bump((n) => n + 1);
-  }, [adapter]);
+  }, [adapter, userSessionToken]);
 
   const run = useCallback(async (action: Promise<unknown>) => {
     bump((n) => n + 1);
@@ -156,8 +152,8 @@ function useSkillsMarket(adapter: ReturnType<typeof useGatewayWorkbenchAdapter>)
     if (!adapter) {
       return;
     }
-    void run(loadSkillsMarket(stateRef.current, { clearMessages: true, refreshStatus: true }));
-  }, [adapter, run]);
+    void run(loadSkillsMarket(stateRef.current, { clearMessages: true }));
+  }, [adapter, run, userSessionToken]);
 
   return { state: stateRef.current, run };
 }
@@ -166,7 +162,8 @@ export function SkillsPage() {
   const { message } = App.useApp();
   const { settings } = usePowerUiSettings();
   const adapter = useGatewayWorkbenchAdapter(settings);
-  const { state, run } = useSkillsMarket(adapter);
+  const localUsers = useLocalUsers();
+  const { state, run } = useSkillsMarket(adapter, localUsers.sessionToken);
   const importInputRef = useRef<HTMLInputElement>(null);
   const localSkillsCategory = state.skillsCategories.find(isLocalSkillsCategory) ?? null;
   const visibleSkillCategories = state.skillsCategories.filter(
@@ -259,7 +256,6 @@ export function SkillsPage() {
                 void run(
                   loadSkillsMarket(state, {
                     clearMessages: true,
-                    refreshStatus: true,
                   }),
                 )
               }
@@ -303,6 +299,12 @@ export function SkillsPage() {
 
             {visibleSkillCategories.length > 0 ? (
               <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+                <InstallFilterButton
+                  selected={state.skillsCategory === null}
+                  onClick={() => void run(setSkillsCategory(state, null))}
+                >
+                  全部
+                </InstallFilterButton>
                 {visibleSkillCategories.map((category) => (
                   <CategoryButton
                     key={category.id}
@@ -327,7 +329,7 @@ export function SkillsPage() {
                   state.skillsInstallFilter === "all" &&
                   (!localSkillsCategory || state.skillsCategory !== localSkillsCategory.id)
                 }
-                onClick={() => void run(setSkillsInstallFilter(state, "all"))}
+                onClick={() => void run(showAllSkills(state))}
               >
                 全部
               </InstallFilterButton>
@@ -464,6 +466,7 @@ function CategoryButton({
   selected: boolean;
   onClick: () => void;
 }) {
+  const icon = category.icon?.trim();
   return (
     <button
       type="button"
@@ -475,7 +478,7 @@ function CategoryButton({
           : "border-slate-200/90 bg-white text-slate-600 hover:border-slate-300 hover:bg-[#f7f7f5] hover:text-slate-900",
       )}
     >
-      {category.icon ? <span className="mr-1">{category.icon}</span> : null}
+      {icon ? <span className="mr-1">{icon}</span> : null}
       {category.name}
     </button>
   );
@@ -505,16 +508,7 @@ function SkillMarketCard({
   onToggle: () => void;
 }) {
   const localInstall = isLocalDirectoryInstall(skill);
-  const toggledOn = localInstall ? isLocalSkillEnabled(skill) : skill.installState.installed;
-  const disabled =
-    busy || (skill.installState.installed && !skill.installState.canUninstall && !localInstall);
-  const label = localInstall
-    ? toggledOn
-      ? "已启用"
-      : "已禁用"
-    : skill.installState.installed
-      ? "已安装"
-      : "安装";
+  const canUninstall = skill.installState.installed && skill.installState.canUninstall;
   const tags = [...skill.tags];
   if (localInstall && !tags.some((tag) => tag.toLowerCase() === "local")) {
     tags.unshift("local");
@@ -535,18 +529,30 @@ function SkillMarketCard({
           >
             {skill.displayName}
           </h2>
-          <div className="flex shrink-0 flex-col items-end gap-1">
-            <Text type="secondary" className="text-[11px] leading-none">
-              {busy ? "处理中" : label}
-            </Text>
-            <Switch
-              size="small"
-              checked={toggledOn}
-              disabled={disabled}
-              loading={busy}
-              onChange={onToggle}
-            />
-          </div>
+          {skill.installState.installed ? (
+            canUninstall ? (
+              <Popconfirm
+                title="卸载技能"
+                description={`确定删除 ${skill.displayName} 吗？`}
+                okText="卸载"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+                onConfirm={onToggle}
+              >
+                <Button danger size="small" icon={<DeleteOutlined />} loading={busy}>
+                  卸载
+                </Button>
+              </Popconfirm>
+            ) : (
+              <Button size="small" disabled>
+                已安装
+              </Button>
+            )
+          ) : (
+            <Button type="primary" size="small" loading={busy} onClick={onToggle}>
+              安装
+            </Button>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">

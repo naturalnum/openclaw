@@ -11,6 +11,7 @@ import {
   resolveLocalUserDefaultAgentId,
   resolveLocalUserDefaultWorkspace,
   resolveLocalUserSession,
+  revokeLocalUserSession,
   updateLocalUser,
   type LocalUserRole,
   type LocalUserStatus,
@@ -25,11 +26,14 @@ import {
   sendMethodNotAllowed,
 } from "./http-common.js";
 import { getHeader, authorizeGatewayHttpRequestOrReply } from "./http-utils.js";
-import { isLoopbackHost } from "./net.js";
+import { isLoopbackAddress, resolveRequestClientIp } from "./net.js";
+import { checkBrowserOrigin } from "./origin-check.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
 const LOCAL_USER_SESSION_HEADER = "x-openclaw-user-session";
-const LOCAL_USERS_RESERVED_PATHS = new Set(["status", "init-admin", "login", "me"]);
+const LOCAL_USER_LOGIN_RATE_LIMIT_SCOPE = "local-user-login";
+const LOCAL_USERS_RESERVED_PATHS = new Set(["status", "init-admin", "login", "logout", "me"]);
+let localUserAgentConfigTail: Promise<void> = Promise.resolve();
 
 type LocalUserCredentialsBody = {
   id?: unknown;
@@ -68,12 +72,33 @@ function getLocalUserSessionToken(req: IncomingMessage): string | undefined {
   return trimmed || undefined;
 }
 
+function resolveLocalUsersClientIp(req: IncomingMessage): string | undefined {
+  const cfg = loadConfig();
+  return resolveRequestClientIp(
+    req,
+    cfg.gateway?.trustedProxies,
+    cfg.gateway?.allowRealIpFallback === true,
+  );
+}
+
 function isLocalUserRole(value: unknown): value is LocalUserRole {
   return value === "admin" || value === "user";
 }
 
 function isLocalUserStatus(value: unknown): value is LocalUserStatus {
   return value === "active" || value === "disabled";
+}
+
+type LocalUsersGatewayAuth =
+  | { mode: "token"; token?: string }
+  | { mode: Exclude<ResolvedGatewayAuth["mode"], "token"> };
+
+function buildLocalUsersGatewayAuth(auth: ResolvedGatewayAuth): LocalUsersGatewayAuth {
+  if (auth.mode !== "token") {
+    return { mode: auth.mode };
+  }
+  const token = auth.token?.trim();
+  return token ? { mode: "token", token } : { mode: "token" };
 }
 
 function resolveAllowedLocalUsersCorsOrigin(req: IncomingMessage): string | null {
@@ -83,7 +108,18 @@ function resolveAllowedLocalUsersCorsOrigin(req: IncomingMessage): string | null
   }
   try {
     const parsed = new URL(origin);
-    return isLoopbackHost(parsed.hostname) ? parsed.origin : null;
+    const cfg = loadConfig();
+    const clientIp = resolveLocalUsersClientIp(req);
+    const allowedOrigins = (cfg.gateway?.controlUi?.allowedOrigins ?? []).filter(
+      (allowedOrigin) => allowedOrigin.trim() !== "*",
+    );
+    const check = checkBrowserOrigin({
+      requestHost: getHeader(req, "host"),
+      origin: parsed.origin,
+      allowedOrigins,
+      isLocalClient: isLoopbackAddress(clientIp),
+    });
+    return check.ok ? parsed.origin : null;
   } catch {
     return null;
   }
@@ -101,6 +137,11 @@ function applyLocalUsersCorsHeaders(req: IncomingMessage, res: ServerResponse): 
     "Access-Control-Allow-Headers",
     "authorization, content-type, x-openclaw-user-session",
   );
+}
+
+function applyLocalUsersSensitiveResponseHeaders(res: ServerResponse): void {
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Pragma", "no-cache");
 }
 
 function parseUserIdFromPath(pathname: string): string | null {
@@ -165,6 +206,14 @@ function sendCredentialsError(res: ServerResponse): void {
 }
 
 async function ensureLocalUserDefaultAgent(user: PublicLocalUserProfile): Promise<void> {
+  const operation = localUserAgentConfigTail.then(async () => {
+    await ensureLocalUserDefaultAgentUnlocked(user);
+  });
+  localUserAgentConfigTail = operation.catch(() => undefined);
+  await operation;
+}
+
+async function ensureLocalUserDefaultAgentUnlocked(user: PublicLocalUserProfile): Promise<void> {
   const cfg = loadConfig();
   const workspace = resolveLocalUserDefaultWorkspace(user.id);
   const agentId = resolveLocalUserDefaultAgentId(user.id);
@@ -172,13 +221,26 @@ async function ensureLocalUserDefaultAgent(user: PublicLocalUserProfile): Promis
   const existingIndex = currentList.findIndex(
     (entry) => entry?.id === agentId || entry?.workspace === workspace,
   );
+  const existingEntry = existingIndex >= 0 ? currentList[existingIndex] : undefined;
+  const hasDefault = currentList.some((item) => item?.default === true);
+  const needsEntryUpdate =
+    !existingEntry ||
+    existingEntry.id !== agentId ||
+    existingEntry.name !== "默认" ||
+    existingEntry.workspace !== workspace ||
+    existingEntry.identity?.name !== "默认" ||
+    (!hasDefault && existingEntry.default !== true);
+  const needsDefaultWorkspace = !cfg.agents?.defaults?.workspace;
+  if (!needsEntryUpdate && !needsDefaultWorkspace) {
+    return;
+  }
   const entry = {
-    ...(existingIndex >= 0 ? currentList[existingIndex] : {}),
+    ...existingEntry,
     id: agentId,
     name: "默认",
     workspace,
     identity: {
-      ...(existingIndex >= 0 ? currentList[existingIndex]?.identity : {}),
+      ...existingEntry?.identity,
       name: "默认",
     },
   };
@@ -188,7 +250,6 @@ async function ensureLocalUserDefaultAgent(user: PublicLocalUserProfile): Promis
   } else {
     list.push(entry);
   }
-  const hasDefault = list.some((item) => item?.default === true);
   if (!hasDefault) {
     const ownIndex = list.findIndex((item) => item?.id === agentId);
     if (ownIndex >= 0) {
@@ -234,6 +295,7 @@ export function isLocalUsersHttpPath(pathname: string): boolean {
     pathname === "/local-users/status" ||
     pathname === "/local-users/init-admin" ||
     pathname === "/local-users/login" ||
+    pathname === "/local-users/logout" ||
     pathname === "/local-users/me" ||
     parseUserIdFromPath(pathname) !== null
   );
@@ -294,7 +356,30 @@ export async function handleLocalUsersHttpRequest(
       });
       return true;
     }
-    sendJson(res, 200, { ok: true, ...resolved });
+    // A persisted browser session can outlive older configs that do not yet have the
+    // user's hidden default agent. Repair it before the UI starts a quick conversation.
+    await ensureLocalUserDefaultAgent(resolved.user);
+    applyLocalUsersSensitiveResponseHeaders(res);
+    sendJson(res, 200, {
+      ok: true,
+      ...resolved,
+      gatewayAuth: buildLocalUsersGatewayAuth(opts.auth),
+    });
+    return true;
+  }
+
+  if (pathname === "/local-users/logout") {
+    if (req.method !== "POST") {
+      sendMethodNotAllowed(res, "POST");
+      return true;
+    }
+    const token = getLocalUserSessionToken(req);
+    if (token) {
+      await revokeLocalUserSession({ token });
+    }
+    applyLocalUsersSensitiveResponseHeaders(res);
+    res.statusCode = 204;
+    res.end();
     return true;
   }
 
@@ -395,6 +480,22 @@ export async function handleLocalUsersHttpRequest(
     return true;
   }
 
+  const loginClientIp = pathname === "/local-users/login" ? resolveLocalUsersClientIp(req) : null;
+  if (pathname === "/local-users/login" && opts.rateLimiter) {
+    const rateLimit = opts.rateLimiter.check(
+      loginClientIp ?? undefined,
+      LOCAL_USER_LOGIN_RATE_LIMIT_SCOPE,
+    );
+    if (!rateLimit.allowed) {
+      res.setHeader("Retry-After", String(Math.max(1, Math.ceil(rateLimit.retryAfterMs / 1000))));
+      sendJson(res, 429, {
+        ok: false,
+        error: { type: "rate_limited", message: "登录失败次数过多，请稍后再试。" },
+      });
+      return true;
+    }
+  }
+
   const body = await readCredentialsBody(req, res);
   if (!body) {
     return true;
@@ -408,7 +509,13 @@ export async function handleLocalUsersHttpRequest(
       const user = await initializeLocalAdmin({ id, password, displayName });
       await ensureLocalUserDefaultAgent(user);
       const session = await createLocalUserSession({ userId: user.id });
-      sendJson(res, 201, { ok: true, user, ...session });
+      applyLocalUsersSensitiveResponseHeaders(res);
+      sendJson(res, 201, {
+        ok: true,
+        user,
+        ...session,
+        gatewayAuth: buildLocalUsersGatewayAuth(opts.auth),
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       sendJson(res, 400, {
@@ -445,14 +552,22 @@ export async function handleLocalUsersHttpRequest(
 
   const authResult = await authenticateLocalUser({ id, password });
   if (!authResult.ok) {
+    opts.rateLimiter?.recordFailure(loginClientIp ?? undefined, LOCAL_USER_LOGIN_RATE_LIMIT_SCOPE);
     sendJson(res, 401, {
       ok: false,
       error: { type: "unauthorized", code: authResult.error, message: "账号或密码不正确。" },
     });
     return true;
   }
+  opts.rateLimiter?.reset(loginClientIp ?? undefined, LOCAL_USER_LOGIN_RATE_LIMIT_SCOPE);
   await ensureLocalUserDefaultAgent(authResult.user);
   const session = await createLocalUserSession({ userId: authResult.user.id });
-  sendJson(res, 200, { ok: true, user: authResult.user, ...session });
+  applyLocalUsersSensitiveResponseHeaders(res);
+  sendJson(res, 200, {
+    ok: true,
+    user: authResult.user,
+    ...session,
+    gatewayAuth: buildLocalUsersGatewayAuth(opts.auth),
+  });
   return true;
 }

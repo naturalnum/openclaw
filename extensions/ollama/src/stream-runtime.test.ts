@@ -451,6 +451,10 @@ function createControlledNdjsonFetch(): {
 async function createOllamaTestStream(params: {
   baseUrl: string;
   defaultHeaders?: Record<string, string>;
+  context?: {
+    messages: Array<{ role: string; content: unknown }>;
+    tools?: Array<{ name: string; description: string; parameters: Record<string, unknown> }>;
+  };
   options?: {
     apiKey?: string;
     maxTokens?: number;
@@ -466,9 +470,9 @@ async function createOllamaTestStream(params: {
       provider: "custom-ollama",
       contextWindow: 131072,
     } as unknown as Parameters<typeof streamFn>[0],
-    {
+    (params.context ?? {
       messages: [{ role: "user", content: "hello" }],
-    } as unknown as Parameters<typeof streamFn>[1],
+    }) as unknown as Parameters<typeof streamFn>[1],
     (params.options ?? {}) as unknown as Parameters<typeof streamFn>[2],
   );
 }
@@ -696,6 +700,53 @@ describe("createOllamaStreamFn streaming events", () => {
 });
 
 describe("createOllamaStreamFn", () => {
+  it("omits tools when the latest user message contains a native image", async () => {
+    await withMockNdjsonFetch(
+      [
+        '{"model":"m","created_at":"t","message":{"role":"assistant","content":"文字"},"done":false}',
+        '{"model":"m","created_at":"t","message":{"role":"assistant","content":""},"done":true,"prompt_eval_count":1,"eval_count":1}',
+      ],
+      async (fetchMock) => {
+        const stream = await createOllamaTestStream({
+          baseUrl: "http://ollama-host:11434",
+          context: {
+            messages: [
+              {
+                role: "user",
+                content: [
+                  { type: "text", text: "识别图片中的文字" },
+                  { type: "image", data: "base64data" },
+                ],
+              },
+            ],
+            tools: [
+              {
+                name: "image",
+                description: "Analyze an image from a file path.",
+                parameters: { type: "object" },
+              },
+            ],
+          },
+        });
+
+        await collectStreamEvents(stream);
+        const [, requestInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+        if (typeof requestInit.body !== "string") {
+          throw new Error("Expected string request body");
+        }
+        const requestBody = JSON.parse(requestInit.body) as Record<string, unknown>;
+        expect(requestBody).not.toHaveProperty("tools");
+        expect(requestBody.messages).toEqual([
+          {
+            role: "user",
+            content: "识别图片中的文字",
+            images: ["base64data"],
+          },
+        ]);
+      },
+    );
+  });
+
   it("normalizes /v1 baseUrl and maps maxTokens + signal", async () => {
     await withMockNdjsonFetch(
       [

@@ -14,7 +14,9 @@ type MutableProviderConfig = Record<string, unknown> & {
   baseUrl?: string;
   apiKey?: string;
   api?: string;
-  models: Array<{ id: string; name: string }>;
+  models: Array<
+    Record<string, unknown> & { id: string; name: string; input: Array<"text" | "image"> }
+  >;
 };
 
 function createLocalId(): string {
@@ -36,6 +38,7 @@ export function createEmptyModelConfig(): WorkbenchModelConfig {
     baseUrl: "",
     apiKey: "",
     model: "",
+    input: ["text"],
   };
 }
 
@@ -73,6 +76,11 @@ function replaceInvalidPathChars(value: string): string {
     const code = char.charCodeAt(0);
     return code < 32 || /[\\/:*?"<>|]/.test(char) ? "-" : char;
   }).join("");
+}
+
+function normalizeProviderBaseUrl(providerId: string, baseUrl: string): string {
+  const normalized = baseUrl.trim().replace(/\/+$/, "");
+  return providerId === "ollama" ? normalized.replace(/\/v1$/i, "") : normalized;
 }
 
 /** 侧栏「新建项目」用的子目录名：保留中文等可读名称，只替换文件系统非法字符。 */
@@ -142,11 +150,41 @@ export function resolveTemporaryChatWorkspacePath(
   config: Record<string, unknown> | null | undefined,
   userFolder: string | null | undefined,
   sessionKey: string,
+  agentId?: string | null,
 ): string {
-  const base = resolveStateRootFromDefaultWorkspace(config);
   const user = slugifyProjectFolderName(userFolder?.trim() || "default");
   const session = slugifySessionFolderName(sessionKey);
+  const agentWorkspace = readAgentWorkspace(config, agentId);
+  if (agentWorkspace) {
+    return `${agentWorkspace.replaceAll("\\", "/").replace(/\/+$/, "")}/temp/${session}`;
+  }
+  const base = resolveStateRootFromDefaultWorkspace(config);
   return `${base}/users/${user}/default/temp/${session}`;
+}
+
+export function readAgentWorkspace(
+  config: Record<string, unknown> | null | undefined,
+  agentId?: string | null,
+): string | null {
+  const normalizedAgentId = agentId?.trim();
+  if (!normalizedAgentId) {
+    return null;
+  }
+  const agents = (
+    config as {
+      agents?: {
+        defaults?: { workspace?: unknown };
+        list?: Array<{ id?: unknown; workspace?: unknown }>;
+      };
+    } | null
+  )?.agents;
+  const configured = agents?.list?.find(
+    (entry) => typeof entry?.id === "string" && entry.id.trim() === normalizedAgentId,
+  )?.workspace;
+  if (typeof configured === "string" && configured.trim()) {
+    return configured.trim();
+  }
+  return readDefaultAgentWorkspace(config);
 }
 
 export function readDefaultAgentWorkspace(
@@ -193,7 +231,7 @@ export function readGlobalModelConfigs(
           {
             baseUrl?: unknown;
             apiKey?: unknown;
-            models?: Array<{ id?: unknown; name?: unknown }>;
+            models?: Array<{ id?: unknown; name?: unknown; input?: unknown }>;
           }
         >;
       };
@@ -226,6 +264,10 @@ export function readGlobalModelConfigs(
         baseUrl,
         apiKey,
         model: modelId,
+        input:
+          Array.isArray(modelConfig?.input) && modelConfig.input.includes("image")
+            ? ["text", "image"]
+            : ["text"],
       });
     }
   }
@@ -269,6 +311,10 @@ export function buildNextGlobalModelConfig(params: {
     typeof existingAgents.defaults === "object" && existingAgents.defaults !== null
       ? (existingAgents.defaults as Record<string, unknown>)
       : {};
+  const existingAllowedModels =
+    typeof existingDefaults.models === "object" && existingDefaults.models !== null
+      ? (existingDefaults.models as Record<string, unknown>)
+      : {};
   const existingProviders =
     typeof existingModels.providers === "object" && existingModels.providers !== null
       ? (existingModels.providers as Record<string, Record<string, unknown>>)
@@ -308,7 +354,10 @@ export function buildNextGlobalModelConfig(params: {
         models: [],
       } satisfies MutableProviderConfig);
 
-    providerEntry.baseUrl = baseUrl;
+    providerEntry.baseUrl = normalizeProviderBaseUrl(providerId, baseUrl);
+    if (providerId === "ollama") {
+      providerEntry.api = "ollama";
+    }
     const apiKey = isRedactedSentinelValue(modelConfig.apiKey)
       ? typeof existingProvider.apiKey === "string"
         ? existingProvider.apiKey.trim()
@@ -316,13 +365,27 @@ export function buildNextGlobalModelConfig(params: {
       : modelConfig.apiKey.trim();
     if (apiKey) {
       providerEntry.apiKey = apiKey;
+      // A key entered in Power UI is an explicit user choice. Mark it as such
+      // so inherited per-agent auth profiles cannot override the saved value.
+      providerEntry.auth = "api-key";
     } else {
       delete providerEntry.apiKey;
+      if (providerEntry.auth === "api-key") {
+        delete providerEntry.auth;
+      }
     }
     if (modelId) {
+      const existingModel = Array.isArray(existingProvider.models)
+        ? existingProvider.models.find(
+            (entry) =>
+              entry && typeof entry === "object" && (entry as { id?: unknown }).id === modelId,
+          )
+        : undefined;
       providerEntry.models.push({
+        ...(existingModel && typeof existingModel === "object" ? existingModel : {}),
         id: modelId,
         name: modelConfig.name.trim() || modelId,
+        input: modelConfig.input?.includes("image") ? ["text", "image"] : ["text"],
       });
     }
     nextProviders[providerId] = providerEntry;
@@ -331,25 +394,31 @@ export function buildNextGlobalModelConfig(params: {
   const configuredRefs = Object.entries(nextProviders).flatMap(([providerId, providerConfig]) =>
     Array.isArray(providerConfig.models)
       ? providerConfig.models
-          .filter((model): model is { id: string; name: string } =>
-            Boolean(model && typeof model.id === "string" && model.id.trim()),
-          )
+          .filter((model) => Boolean(model && typeof model.id === "string" && model.id.trim()))
           .map((model) => formatModelRef(providerId, model.id))
       : [],
   );
   const normalizedCurrentModelId = params.currentModelId.trim();
   const nextPrimaryModel =
     configuredRefs.find((ref) => ref === normalizedCurrentModelId) ?? configuredRefs[0] ?? "";
+  const nextAllowedModels = { ...existingAllowedModels };
+  for (const modelRef of configuredRefs) {
+    nextAllowedModels[modelRef] ??= {};
+  }
 
   next.models = {
     ...existingModels,
-    mode: "merge",
+    // Power UI owns one global model list for every local-user project. In merge
+    // mode OpenClaw intentionally preserves an existing agent/models.json key,
+    // which leaves projects using stale credentials after a settings save.
+    mode: "replace",
     providers: nextProviders,
   };
   next.agents = {
     ...existingAgents,
     defaults: {
       ...existingDefaults,
+      models: nextAllowedModels,
       model:
         nextPrimaryModel &&
         typeof existingDefaults.model === "object" &&

@@ -53,17 +53,20 @@ function renderCategoryChip(
   selected: boolean,
   onSelect: (next: string | null) => void,
 ) {
+  const icon = category.icon?.trim();
+  const bgColor = category.bgColor?.trim();
+  const textColor = category.textColor?.trim();
   const background = selected
-    ? (category.bgColor ?? "rgba(22, 163, 74, 0.12)")
+    ? bgColor || "rgba(22, 163, 74, 0.12)"
     : "var(--surface-elevated, rgba(15, 23, 42, 0.04))";
-  const color = selected ? (category.textColor ?? "#166534") : "var(--text-color, #111827)";
+  const color = selected ? textColor || "#166534" : "var(--text-color, #111827)";
   return html`
     <button
       class="btn"
       style=${`border-radius: 999px; background: ${background}; color: ${color}; border: 1px solid rgba(15, 23, 42, 0.08);`}
       @click=${() => onSelect(selected ? null : category.id)}
     >
-      ${category.icon ? `${category.icon} ` : ""}${category.name}
+      ${icon ? `${icon} ` : ""}${category.name}
     </button>
   `;
 }
@@ -313,6 +316,9 @@ function renderDismissibleCallout(params: {
 function renderCard(props: SkillsProps, item: SkillsRegistryCatalogItem) {
   const message = props.messages[item.slug] ?? null;
   const category = props.categories.find((entry) => entry.id === item.category) ?? null;
+  const categoryIcon = category?.icon?.trim();
+  const categoryBgColor = category?.bgColor?.trim();
+  const categoryTextColor = category?.textColor?.trim();
   const authorLabel = item.author ? `by ${item.author}` : "Registry skill";
   const updatedLabel = item.updatedAt
     ? `Updated ${formatRelativeTimestamp(item.updatedAt)}`
@@ -332,10 +338,10 @@ function renderCard(props: SkillsProps, item: SkillsRegistryCatalogItem) {
                 <div
                   class="muted"
                   style=${`display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: ${
-                    category.bgColor ?? "rgba(37, 99, 235, 0.08)"
-                  }; color: ${category.textColor ?? "#1d4ed8"}; margin-bottom: 10px;`}
+                    categoryBgColor || "rgba(37, 99, 235, 0.08)"
+                  }; color: ${categoryTextColor || "#1d4ed8"}; margin-bottom: 10px;`}
                 >
-                  ${category.icon ? `${category.icon} ` : ""}${category.name}
+                  ${categoryIcon ? `${categoryIcon} ` : ""}${category.name}
                 </div>
               `
             : nothing}

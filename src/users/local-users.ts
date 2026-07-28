@@ -77,6 +77,41 @@ type LocalUserSessionsFile = {
   sessions: LocalUserSession[];
 };
 
+const localUserStateTails = new Map<string, Promise<void>>();
+
+function resolveLocalUserStateLockKey(stateDir: string | undefined): string {
+  return path.resolve(stateDir ?? resolveStateDir());
+}
+
+/**
+ * Serializes filesystem operations that share a local-user state directory.
+ * The queued tail is independent from the operation result so a rejected
+ * mutation never poisons later work for the same state directory.
+ */
+async function withLocalUserStateLock<T>(
+  stateDir: string | undefined,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const key = resolveLocalUserStateLockKey(stateDir);
+  const previous = localUserStateTails.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = previous.then(() => current);
+  localUserStateTails.set(key, tail);
+
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (localUserStateTails.get(key) === tail) {
+      localUserStateTails.delete(key);
+    }
+  }
+}
+
 export function normalizeLocalUserId(id: string): string {
   return id.trim().toLowerCase();
 }
@@ -156,6 +191,13 @@ export function resolveLocalUserProjectsDir(
   return path.join(resolveLocalUserWorkspaceRoot(userId, stateDir), "projects");
 }
 
+export function resolveLocalUserSkillsDir(
+  userId: string,
+  stateDir: string = resolveStateDir(),
+): string {
+  return path.join(resolveLocalUserWorkspaceRoot(userId, stateDir), "skills");
+}
+
 export async function ensureLocalUserWorkspaces(
   userId: string,
   stateDir: string = resolveStateDir(),
@@ -163,6 +205,7 @@ export async function ensureLocalUserWorkspaces(
   await Promise.all([
     fs.mkdir(resolveLocalUserDefaultWorkspace(userId, stateDir), { recursive: true }),
     fs.mkdir(resolveLocalUserProjectsDir(userId, stateDir), { recursive: true }),
+    fs.mkdir(resolveLocalUserSkillsDir(userId, stateDir), { recursive: true }),
   ]);
 }
 
@@ -272,7 +315,7 @@ async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
   await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
-export async function readLocalUser(
+async function readLocalUserUnlocked(
   id: string,
   opts: { stateDir?: string } = {},
 ): Promise<LocalUserProfile | null> {
@@ -291,6 +334,13 @@ export async function readLocalUser(
   return legacy;
 }
 
+export async function readLocalUser(
+  id: string,
+  opts: { stateDir?: string } = {},
+): Promise<LocalUserProfile | null> {
+  return await withLocalUserStateLock(opts.stateDir, async () => readLocalUserUnlocked(id, opts));
+}
+
 async function readDirectoryEntries(dir: string): Promise<string[]> {
   try {
     return await fs.readdir(dir);
@@ -302,7 +352,7 @@ async function readDirectoryEntries(dir: string): Promise<string[]> {
   }
 }
 
-export async function listLocalUsers(
+async function listLocalUsersUnlocked(
   opts: { stateDir?: string } = {},
 ): Promise<PublicLocalUserProfile[]> {
   const entries = [
@@ -314,7 +364,7 @@ export async function listLocalUsers(
   const profiles = await Promise.all(
     entries.map(async (entry) => {
       try {
-        return await readLocalUser(entry, opts);
+        return await readLocalUserUnlocked(entry, opts);
       } catch {
         return null;
       }
@@ -326,15 +376,25 @@ export async function listLocalUsers(
     .toSorted((a, b) => a.id.localeCompare(b.id));
 }
 
-export async function hasAnyLocalUsers(opts: { stateDir?: string } = {}): Promise<boolean> {
-  return (await listLocalUsers(opts)).length > 0;
+export async function listLocalUsers(
+  opts: { stateDir?: string } = {},
+): Promise<PublicLocalUserProfile[]> {
+  return await withLocalUserStateLock(opts.stateDir, async () => listLocalUsersUnlocked(opts));
 }
 
-export async function createLocalUser(
+async function hasAnyLocalUsersUnlocked(opts: { stateDir?: string } = {}): Promise<boolean> {
+  return (await listLocalUsersUnlocked(opts)).length > 0;
+}
+
+export async function hasAnyLocalUsers(opts: { stateDir?: string } = {}): Promise<boolean> {
+  return await withLocalUserStateLock(opts.stateDir, async () => hasAnyLocalUsersUnlocked(opts));
+}
+
+async function createLocalUserUnlocked(
   input: CreateLocalUserInput,
 ): Promise<PublicLocalUserProfile> {
   const id = validateLocalUserId(input.id);
-  const existing = await readLocalUser(id, { stateDir: input.stateDir });
+  const existing = await readLocalUserUnlocked(id, { stateDir: input.stateDir });
   if (existing) {
     throw new Error(`Local user already exists: ${id}`);
   }
@@ -353,11 +413,17 @@ export async function createLocalUser(
   return publicLocalUserProfile(profile);
 }
 
-export async function updateLocalUser(
+export async function createLocalUser(
+  input: CreateLocalUserInput,
+): Promise<PublicLocalUserProfile> {
+  return await withLocalUserStateLock(input.stateDir, async () => createLocalUserUnlocked(input));
+}
+
+async function updateLocalUserUnlocked(
   input: UpdateLocalUserInput,
 ): Promise<PublicLocalUserProfile> {
   const id = validateLocalUserId(input.id);
-  const existing = await readLocalUser(id, { stateDir: input.stateDir });
+  const existing = await readLocalUserUnlocked(id, { stateDir: input.stateDir });
   if (!existing) {
     throw new Error(`Local user not found: ${id}`);
   }
@@ -376,13 +442,21 @@ export async function updateLocalUser(
   return publicLocalUserProfile(updated);
 }
 
+export async function updateLocalUser(
+  input: UpdateLocalUserInput,
+): Promise<PublicLocalUserProfile> {
+  return await withLocalUserStateLock(input.stateDir, async () => updateLocalUserUnlocked(input));
+}
+
 export async function initializeLocalAdmin(
   input: Omit<CreateLocalUserInput, "role">,
 ): Promise<PublicLocalUserProfile> {
-  if (await hasAnyLocalUsers({ stateDir: input.stateDir })) {
-    throw new Error("Local users already exist; admin initialization is only available once.");
-  }
-  return createLocalUser({ ...input, role: "admin" });
+  return await withLocalUserStateLock(input.stateDir, async () => {
+    if (await hasAnyLocalUsersUnlocked({ stateDir: input.stateDir })) {
+      throw new Error("Local users already exist; admin initialization is only available once.");
+    }
+    return await createLocalUserUnlocked({ ...input, role: "admin" });
+  });
 }
 
 export async function authenticateLocalUser(input: {
@@ -391,31 +465,33 @@ export async function authenticateLocalUser(input: {
   stateDir?: string;
   now?: Date;
 }): Promise<AuthenticateLocalUserResult> {
-  let id: string;
-  try {
-    id = validateLocalUserId(input.id);
-  } catch {
-    return { ok: false, error: "invalid-id" };
-  }
-  const profile = await readLocalUser(id, { stateDir: input.stateDir });
-  if (!profile) {
-    return { ok: false, error: "not-found" };
-  }
-  if (profile.status !== "active") {
-    return { ok: false, error: "disabled" };
-  }
-  const ok = await verifyLocalUserPassword(input.password, profile.passwordHash);
-  if (!ok) {
-    return { ok: false, error: "invalid-password" };
-  }
-  const now = (input.now ?? new Date()).toISOString();
-  const updated: LocalUserProfile = {
-    ...profile,
-    lastLoginAt: now,
-    updatedAt: now,
-  };
-  await writeJsonFile(resolveLocalUserProfilePath(id, input.stateDir), updated);
-  return { ok: true, user: publicLocalUserProfile(updated) };
+  return await withLocalUserStateLock(input.stateDir, async () => {
+    let id: string;
+    try {
+      id = validateLocalUserId(input.id);
+    } catch {
+      return { ok: false, error: "invalid-id" };
+    }
+    const profile = await readLocalUserUnlocked(id, { stateDir: input.stateDir });
+    if (!profile) {
+      return { ok: false, error: "not-found" };
+    }
+    if (profile.status !== "active") {
+      return { ok: false, error: "disabled" };
+    }
+    const ok = await verifyLocalUserPassword(input.password, profile.passwordHash);
+    if (!ok) {
+      return { ok: false, error: "invalid-password" };
+    }
+    const now = (input.now ?? new Date()).toISOString();
+    const updated: LocalUserProfile = {
+      ...profile,
+      lastLoginAt: now,
+      updatedAt: now,
+    };
+    await writeJsonFile(resolveLocalUserProfilePath(id, input.stateDir), updated);
+    return { ok: true, user: publicLocalUserProfile(updated) };
+  });
 }
 
 function hashSessionToken(token: string): string {
@@ -451,29 +527,47 @@ export async function createLocalUserSession(input: {
   now?: Date;
   ttlMs?: number;
 }): Promise<CreateLocalUserSessionResult> {
-  const userId = validateLocalUserId(input.userId);
-  const user = await readLocalUser(userId, { stateDir: input.stateDir });
-  if (!user || user.status !== "active") {
-    throw new Error(`Active local user not found: ${userId}`);
-  }
-  const now = input.now ?? new Date();
-  const ttlMs = input.ttlMs ?? DEFAULT_SESSION_TTL_MS;
-  const token = randomBytes(SESSION_TOKEN_BYTES).toString("base64url");
-  const session: LocalUserSession = {
-    id: randomBytes(16).toString("base64url"),
-    userId,
-    tokenHash: hashSessionToken(token),
-    createdAt: now.toISOString(),
-    expiresAt: new Date(now.getTime() + ttlMs).toISOString(),
-  };
-  const sessionsFile = await readLocalUserSessions(input.stateDir);
-  const activeSessions = sessionsFile.sessions.filter(
-    (existing) => new Date(existing.expiresAt).getTime() > now.getTime(),
-  );
-  activeSessions.push(session);
-  await writeLocalUserSessions(input.stateDir, { sessions: activeSessions });
-  const { tokenHash: _tokenHash, ...publicSession } = session;
-  return { token, session: publicSession };
+  return await withLocalUserStateLock(input.stateDir, async () => {
+    const userId = validateLocalUserId(input.userId);
+    const user = await readLocalUserUnlocked(userId, { stateDir: input.stateDir });
+    if (!user || user.status !== "active") {
+      throw new Error(`Active local user not found: ${userId}`);
+    }
+    const now = input.now ?? new Date();
+    const ttlMs = input.ttlMs ?? DEFAULT_SESSION_TTL_MS;
+    const token = randomBytes(SESSION_TOKEN_BYTES).toString("base64url");
+    const session: LocalUserSession = {
+      id: randomBytes(16).toString("base64url"),
+      userId,
+      tokenHash: hashSessionToken(token),
+      createdAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + ttlMs).toISOString(),
+    };
+    const sessionsFile = await readLocalUserSessions(input.stateDir);
+    const activeSessions = sessionsFile.sessions.filter(
+      (existing) => new Date(existing.expiresAt).getTime() > now.getTime(),
+    );
+    activeSessions.push(session);
+    await writeLocalUserSessions(input.stateDir, { sessions: activeSessions });
+    const { tokenHash: _tokenHash, ...publicSession } = session;
+    return { token, session: publicSession };
+  });
+}
+
+export async function revokeLocalUserSession(input: {
+  token: string;
+  stateDir?: string;
+}): Promise<boolean> {
+  return await withLocalUserStateLock(input.stateDir, async () => {
+    const tokenHash = hashSessionToken(input.token);
+    const sessionsFile = await readLocalUserSessions(input.stateDir);
+    const remaining = sessionsFile.sessions.filter((session) => session.tokenHash !== tokenHash);
+    if (remaining.length === sessionsFile.sessions.length) {
+      return false;
+    }
+    await writeLocalUserSessions(input.stateDir, { sessions: remaining });
+    return true;
+  });
 }
 
 export async function resolveLocalUserSession(input: {
@@ -481,20 +575,23 @@ export async function resolveLocalUserSession(input: {
   stateDir?: string;
   now?: Date;
 }): Promise<{ session: Omit<LocalUserSession, "tokenHash">; user: PublicLocalUserProfile } | null> {
-  const tokenHash = hashSessionToken(input.token);
-  const now = input.now ?? new Date();
-  const sessionsFile = await readLocalUserSessions(input.stateDir);
-  const session = sessionsFile.sessions.find(
-    (candidate) =>
-      candidate.tokenHash === tokenHash && new Date(candidate.expiresAt).getTime() > now.getTime(),
-  );
-  if (!session) {
-    return null;
-  }
-  const user = await readLocalUser(session.userId, { stateDir: input.stateDir });
-  if (!user || user.status !== "active") {
-    return null;
-  }
-  const { tokenHash: _tokenHash, ...publicSession } = session;
-  return { session: publicSession, user: publicLocalUserProfile(user) };
+  return await withLocalUserStateLock(input.stateDir, async () => {
+    const tokenHash = hashSessionToken(input.token);
+    const now = input.now ?? new Date();
+    const sessionsFile = await readLocalUserSessions(input.stateDir);
+    const session = sessionsFile.sessions.find(
+      (candidate) =>
+        candidate.tokenHash === tokenHash &&
+        new Date(candidate.expiresAt).getTime() > now.getTime(),
+    );
+    if (!session) {
+      return null;
+    }
+    const user = await readLocalUserUnlocked(session.userId, { stateDir: input.stateDir });
+    if (!user || user.status !== "active") {
+      return null;
+    }
+    const { tokenHash: _tokenHash, ...publicSession } = session;
+    return { session: publicSession, user: publicLocalUserProfile(user) };
+  });
 }

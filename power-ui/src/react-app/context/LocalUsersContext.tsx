@@ -11,8 +11,11 @@ import {
 import { usePowerUiSettings } from "../hooks/usePowerUiSettings";
 import {
   localUsersRequest,
+  LocalUsersHttpError,
   type LocalUserAuthResult,
+  type LocalUserMeResult,
   type LocalUserProfile,
+  type LocalUsersGatewayAuth,
   type LocalUsersStatus,
 } from "../lib/local-users-client";
 
@@ -55,6 +58,10 @@ function storeSessionToken(token: string): void {
   } catch {
     // Best-effort local session persistence.
   }
+}
+
+function resolveGatewayToken(gatewayAuth: LocalUsersGatewayAuth): string {
+  return gatewayAuth.mode === "token" ? (gatewayAuth.token?.trim() ?? "") : "";
 }
 
 function LocalUserAuthShell({
@@ -108,9 +115,26 @@ function LocalUserAuthShell({
   );
 }
 
+function LocalUsersUnavailableShell({ error }: { error: string }) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-[#f7f7f5] px-4">
+      <div className="w-full max-w-sm rounded-2xl border border-red-200 bg-white p-5 shadow-sm">
+        <h1 className="text-lg font-semibold text-slate-900">服务暂时不可用</h1>
+        <p className="mt-2 text-sm leading-relaxed text-slate-600">
+          无法验证本地登录状态，已阻止进入应用。请确认 Agent 已正常启动后重试。
+        </p>
+        <p className="mt-2 break-words text-xs text-red-600">{error}</p>
+        <Button className="mt-4" type="primary" onClick={() => window.location.reload()} block>
+          重新连接
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function LocalUsersProvider({ children }: { children: ReactNode }) {
   const { message } = App.useApp();
-  const { settings } = usePowerUiSettings();
+  const { settings, patchSettings } = usePowerUiSettings();
   const [checking, setChecking] = useState(true);
   const [enabled, setEnabled] = useState(false);
   const [initialized, setInitialized] = useState(false);
@@ -124,12 +148,20 @@ export function LocalUsersProvider({ children }: { children: ReactNode }) {
     [settings.gatewayUrl, settings.token],
   );
 
-  const setActiveSession = useCallback((token: string, nextUser: LocalUserProfile | null) => {
-    const normalized = token.trim();
-    setSessionToken(normalized);
-    storeSessionToken(normalized);
-    setUser(nextUser);
-  }, []);
+  const setActiveSession = useCallback(
+    (token: string, nextUser: LocalUserProfile | null, gatewayAuth?: LocalUsersGatewayAuth) => {
+      const normalized = token.trim();
+      setSessionToken(normalized);
+      storeSessionToken(normalized);
+      setUser(nextUser);
+      if (gatewayAuth) {
+        patchSettings({ token: resolveGatewayToken(gatewayAuth) });
+      } else if (!normalized) {
+        patchSettings({ token: "" });
+      }
+    },
+    [patchSettings],
+  );
 
   const refreshMe = useCallback(async () => {
     const token = loadStoredSessionToken() || sessionToken;
@@ -137,17 +169,22 @@ export function LocalUsersProvider({ children }: { children: ReactNode }) {
       setUser(null);
       return;
     }
-    const result = await localUsersRequest<{ ok: true; user: LocalUserProfile }>(
-      requestSettings,
-      "/local-users/me",
-      { sessionToken: token },
-    );
-    setActiveSession(token, result.user);
+    const result = await localUsersRequest<LocalUserMeResult>(requestSettings, "/local-users/me", {
+      sessionToken: token,
+    });
+    setActiveSession(token, result.user, result.gatewayAuth);
   }, [requestSettings, sessionToken, setActiveSession]);
 
   const logout = useCallback(() => {
+    const token = loadStoredSessionToken() || sessionToken;
+    if (token) {
+      void localUsersRequest(requestSettings, "/local-users/logout", {
+        method: "POST",
+        sessionToken: token,
+      }).catch(() => undefined);
+    }
     setActiveSession("", null);
-  }, [setActiveSession]);
+  }, [requestSettings, sessionToken, setActiveSession]);
 
   useEffect(() => {
     let cancelled = false;
@@ -172,10 +209,17 @@ export function LocalUsersProvider({ children }: { children: ReactNode }) {
       })
       .catch((err) => {
         if (!cancelled) {
-          setEnabled(false);
+          const unsupported = err instanceof LocalUsersHttpError && err.status === 404;
+          setEnabled(!unsupported);
           setInitialized(false);
-          setStatusError(err instanceof Error ? err.message : "无法连接本地用户接口");
-          setUser(null);
+          setStatusError(
+            unsupported ? "" : err instanceof Error ? err.message : "无法连接本地用户接口",
+          );
+          if (unsupported) {
+            setUser(null);
+          } else {
+            setActiveSession("", null);
+          }
         }
       })
       .finally(() => {
@@ -208,7 +252,7 @@ export function LocalUsersProvider({ children }: { children: ReactNode }) {
           },
         );
         setInitialized(true);
-        setActiveSession(result.token, result.user);
+        setActiveSession(result.token, result.user, result.gatewayAuth);
         message.success(initialized ? "已登录" : "管理员已创建");
       } catch (err) {
         const errText = err instanceof Error ? err.message : "操作失败";
@@ -243,6 +287,10 @@ export function LocalUsersProvider({ children }: { children: ReactNode }) {
         <Spin />
       </div>
     );
+  }
+
+  if (statusError) {
+    return <LocalUsersUnavailableShell error={statusError} />;
   }
 
   if (enabled && (!initialized || !user)) {

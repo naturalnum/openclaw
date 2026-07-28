@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
@@ -14,28 +13,6 @@ const rootPackageJson = JSON.parse(
 const powerUiPackageJson = JSON.parse(
   fs.readFileSync(path.resolve(here, "./package.json"), "utf8"),
 ) as { version?: string };
-
-function readLocalDevGatewayAuth(): { gatewayUrl: string; token: string } {
-  const home = process.env.OPENCLAW_HOME?.trim() || path.join(os.homedir(), ".openclaw");
-  const configPath = path.join(home, "openclaw.json");
-  const fallbackUrl = "ws://127.0.0.1:18789";
-  try {
-    const cfg = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
-      gateway?: { port?: number | string; auth?: { token?: string }; token?: string };
-    };
-    const token = (cfg.gateway?.auth?.token ?? cfg.gateway?.token ?? "").trim();
-    const portRaw = cfg.gateway?.port;
-    const port =
-      typeof portRaw === "number" && Number.isFinite(portRaw)
-        ? String(portRaw)
-        : typeof portRaw === "string" && portRaw.trim()
-          ? portRaw.trim()
-          : "18789";
-    return { gatewayUrl: `ws://127.0.0.1:${port}`, token };
-  } catch {
-    return { gatewayUrl: fallbackUrl, token: "" };
-  }
-}
 
 function normalizeBase(input: string): string {
   const trimmed = input.trim();
@@ -121,10 +98,6 @@ export default defineConfig(() => {
                 assistantAgentId: "",
               }),
             );
-          });
-          server.middlewares.use("/__openclaw/dev-gateway.json", (_req, res) => {
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify(readLocalDevGatewayAuth()));
           });
         },
       },

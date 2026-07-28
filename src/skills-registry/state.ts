@@ -103,26 +103,65 @@ export function mergeRegistryCatalogItems(params: {
   items: SkillsRegistryCatalogItemBase[];
   installed: Map<string, InstalledRegistrySkill>;
 }): SkillsRegistryCatalogItem[] {
-  return params.items.map((item) => ({
+  const merged = params.items.map((item) => ({
     ...item,
     installState: buildSkillsRegistryInstallState({
       item,
       installed: params.installed,
     }),
   }));
+  const knownSlugs = new Set(merged.map((item) => item.slug));
+  for (const installed of params.installed.values()) {
+    if (knownSlugs.has(installed.slug)) {
+      continue;
+    }
+    const item: SkillsRegistryCatalogItemBase = {
+      slug: installed.slug,
+      displayName: installed.slug,
+      summary: "本地上传技能",
+      category: "local",
+      tags: ["local"],
+      version: installed.origin?.installedVersion ?? null,
+      downloads: 0,
+      installs: 0,
+      stars: 0,
+      updatedAt: installed.origin?.installedAt ?? null,
+      author: null,
+    };
+    merged.push({
+      ...item,
+      installState: buildSkillsRegistryInstallState({ item, installed: params.installed }),
+    });
+  }
+  return merged;
 }
 
 export function filterRegistryCatalogItems(params: {
   items: SkillsRegistryCatalogItem[];
+  q?: string;
+  category?: string | null;
   installFilter?: SkillsRegistryInstallFilter;
 }): SkillsRegistryCatalogItem[] {
+  const query = params.q?.trim().toLowerCase() ?? "";
+  const category = params.category?.trim().toLowerCase() ?? "";
+  const items = params.items.filter((item) => {
+    if (category && item.category?.trim().toLowerCase() !== category) {
+      return false;
+    }
+    if (!query) {
+      return true;
+    }
+    return [item.slug, item.displayName, item.summary, item.author ?? "", ...item.tags].some(
+      (value) => value.toLowerCase().includes(query),
+    );
+  });
   switch (params.installFilter) {
     case "installed":
-      return params.items.filter((item) => item.installState.installed);
+      return items.filter((item) => item.installState.installed);
     case "not_installed":
-      return params.items.filter((item) => !item.installState.installed);
+      return items.filter((item) => !item.installState.installed);
     default:
-      return params.items;
+      return items;
   }
 }
 

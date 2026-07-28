@@ -2,9 +2,9 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import type { OpenClawConfig } from "../config/config.js";
 import "./test-helpers/fast-coding-tools.js";
 import "./test-helpers/fast-openclaw-tools.js";
-import type { OpenClawConfig } from "../config/config.js";
 import { createOpenClawCodingTools } from "./pi-tools.js";
 import { createHostSandboxFsBridge } from "./test-helpers/host-sandbox-fs-bridge.js";
 import { expectReadWriteEditTools, getTextContent } from "./test-helpers/pi-tools-fs-helpers.js";
@@ -175,6 +175,57 @@ describe("workspace path resolution", () => {
       const outsideAbsolute = path.resolve(path.parse(workspaceDir).root, "outside-openclaw.txt");
       await expect(
         readTool.execute("ws-read-at-prefix", { path: `@${outsideAbsolute}` }),
+      ).rejects.toThrow(/Path escapes sandbox root/i);
+    });
+  });
+
+  it("allows configured read-only skill roots without granting sibling or write access", async () => {
+    await withTempDir("openclaw-read-roots-", async (rootDir) => {
+      const workspaceDir = path.join(rootDir, "workspace");
+      const skillDir = path.join(rootDir, "users", "admin", "skills", "peer-review");
+      const siblingDir = path.join(rootDir, "users", "other", "skills", "private");
+      await fs.mkdir(workspaceDir, { recursive: true });
+      await fs.mkdir(skillDir, { recursive: true });
+      await fs.mkdir(siblingDir, { recursive: true });
+      await fs.writeFile(path.join(skillDir, "SKILL.md"), "# Peer Review", "utf8");
+      await fs.writeFile(path.join(siblingDir, "SKILL.md"), "# Private", "utf8");
+
+      const cfg: OpenClawConfig = { tools: { fs: { workspaceOnly: true } } };
+      const tools = createOpenClawCodingTools({
+        workspaceDir,
+        config: cfg,
+        readOnlyRoots: [skillDir],
+      });
+      const { readTool, writeTool } = expectReadWriteEditTools(tools);
+
+      const result = await readTool.execute("skill-read", {
+        path: path.join(skillDir, "SKILL.md"),
+      });
+      expect(getTextContent(result)).toContain("Peer Review");
+      const homedirSpy = vi.spyOn(os, "homedir").mockReturnValue(rootDir);
+      try {
+        const homePathResult = await readTool.execute("skill-home-read", {
+          path: "~/users/admin/skills/peer-review/SKILL.md",
+        });
+        expect(getTextContent(homePathResult)).toContain("Peer Review");
+      } finally {
+        homedirSpy.mockRestore();
+      }
+      await expect(
+        readTool.execute("sibling-read", { path: path.join(siblingDir, "SKILL.md") }),
+      ).rejects.toThrow(/Path escapes sandbox root/i);
+      if (process.platform !== "win32") {
+        const escapedPath = path.join(skillDir, "escaped.md");
+        await fs.symlink(path.join(siblingDir, "SKILL.md"), escapedPath);
+        await expect(readTool.execute("skill-symlink-read", { path: escapedPath })).rejects.toThrow(
+          /sandbox|symbolic link/i,
+        );
+      }
+      await expect(
+        writeTool.execute("skill-write", {
+          path: path.join(skillDir, "SKILL.md"),
+          content: "changed",
+        }),
       ).rejects.toThrow(/Path escapes sandbox root/i);
     });
   });

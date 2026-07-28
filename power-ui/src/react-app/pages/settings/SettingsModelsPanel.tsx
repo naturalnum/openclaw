@@ -442,6 +442,26 @@ export function SettingsModelsPanel({ adapter, canUseGateway, onSaved }: Props) 
                 />
               </Form.Item>
               <Form.Item
+                label="输入能力"
+                extra="仅在模型及其 API 确实支持图片输入时启用。"
+                className="!mb-3 md:col-span-2"
+              >
+                <Space size={10}>
+                  <Switch checked disabled size="small" />
+                  <Text>文本</Text>
+                  <Switch
+                    size="small"
+                    checked={editingModel.input?.includes("image") ?? false}
+                    onChange={(checked) =>
+                      updateRow(editingModel.id, {
+                        input: checked ? ["text", "image"] : ["text"],
+                      })
+                    }
+                  />
+                  <Text>图片</Text>
+                </Space>
+              </Form.Item>
+              <Form.Item
                 label="API Key（留空保留原值）"
                 extra={
                   editingModel.apiKey.trim() === REDACTED_SENTINEL

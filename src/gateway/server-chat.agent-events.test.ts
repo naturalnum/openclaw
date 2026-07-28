@@ -1326,6 +1326,40 @@ describe("agent event handler", () => {
     expect(agentRunSeq.has("run-chat-send")).toBe(false);
   });
 
+  it("emits a delayed lifecycle chat error when chat.send settles during retry grace", () => {
+    vi.useFakeTimers();
+    let chatSendActive = true;
+    const { broadcast, clearAgentRunContext, agentRunSeq, handler } = createHarness({
+      resolveSessionKeyForRun: () => "session-chat-send-settled",
+      lifecycleErrorRetryGraceMs: 100,
+      isChatSendRunActive: () => chatSendActive,
+    });
+    registerAgentRunContext("run-chat-send-settled", {
+      sessionKey: "session-chat-send-settled",
+    });
+
+    handler({
+      runId: "run-chat-send-settled",
+      seq: 1,
+      stream: "lifecycle",
+      ts: Date.now(),
+      data: { phase: "error", error: "provider authentication failed" },
+    });
+    chatSendActive = false;
+
+    vi.advanceTimersByTime(100);
+
+    const payload = chatBroadcastCalls(broadcast).at(-1)?.[1];
+    expect(payload).toMatchObject({
+      runId: "run-chat-send-settled",
+      sessionKey: "session-chat-send-settled",
+      state: "error",
+      errorMessage: "provider authentication failed",
+    });
+    expect(clearAgentRunContext).toHaveBeenCalledWith("run-chat-send-settled");
+    expect(agentRunSeq.has("run-chat-send-settled")).toBe(false);
+  });
+
   it("suppresses chat and node session events for non-control-UI-visible runs", () => {
     const { broadcast, nodeSendToSession, handler } = createHarness({
       resolveSessionKeyForRun: () => "session-hidden",

@@ -56,6 +56,7 @@ export type WorkbenchModelConfig = {
   baseUrl: string;
   apiKey: string;
   model: string;
+  input?: Array<"text" | "image">;
 };
 
 export type WorkbenchCodeModelSettings = {

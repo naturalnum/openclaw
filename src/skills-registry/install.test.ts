@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import JSZip from "jszip";
+import * as tar from "tar";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { withTempDir } from "../infra/install-source-utils.js";
 
@@ -80,9 +81,50 @@ describe("skills registry install flow", () => {
       });
       expect(reportInstall).toHaveBeenCalledWith({
         slug: "slides",
+        action: "install",
         version: "1.0.0",
         source: "openclaw-registry",
       });
+    });
+  });
+
+  it("does not increment the install count again when updating an installed skill", async () => {
+    await withTempDir("openclaw-skills-registry-update-", async (stateDir) => {
+      vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+      vi.stubEnv("OPENCLAW_TEST_FAST", "1");
+      vi.resetModules();
+
+      const bytes = await createSkillArchiveBytes();
+      const { installRegistrySkill } = await import("./install.js");
+      const reportInstall = vi.fn().mockResolvedValue({ installs: 1 });
+      const client = {
+        listCatalog: async () => {
+          throw new Error("not used in install test");
+        },
+        downloadArtifact: async () => ({
+          filename: "slides-1.0.0.zip",
+          version: "1.0.0",
+          contentType: "application/zip",
+          bytes,
+        }),
+        reportInstall,
+      };
+      const cfg = {
+        skills: {
+          registry: {
+            enabled: true,
+            baseUrl: "https://skills.example.com",
+          },
+        },
+      };
+
+      await installRegistrySkill({ slug: "slides", cfg, client });
+      await installRegistrySkill({ slug: "slides", cfg, client });
+
+      expect(reportInstall).toHaveBeenCalledTimes(1);
+      expect(reportInstall).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "install", slug: "slides" }),
+      );
     });
   });
 
@@ -130,6 +172,51 @@ describe("skills registry install flow", () => {
     });
   });
 
+  it("installs a downloaded tar.gz artifact using its original filename", async () => {
+    await withTempDir("openclaw-skills-registry-tar-install-", async (stateDir) => {
+      vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+      vi.stubEnv("OPENCLAW_TEST_FAST", "1");
+      vi.resetModules();
+
+      const sourceDir = path.join(stateDir, "source");
+      const packageDir = path.join(sourceDir, "package");
+      const archivePath = path.join(stateDir, "slides-1.0.0.tar.gz");
+      await fs.mkdir(packageDir, { recursive: true });
+      await fs.writeFile(path.join(packageDir, "SKILL.md"), "# Slides\n\nTarball helper.", "utf8");
+      await tar.c({ cwd: sourceDir, file: archivePath, gzip: true }, ["package"]);
+      const bytes = new Uint8Array(await fs.readFile(archivePath));
+      const { installRegistrySkill } = await import("./install.js");
+
+      const result = await installRegistrySkill({
+        slug: "slides",
+        cfg: {
+          skills: {
+            registry: {
+              enabled: true,
+              baseUrl: "https://skills.example.com",
+            },
+          },
+        },
+        client: {
+          listCatalog: async () => {
+            throw new Error("not used in install test");
+          },
+          downloadArtifact: async () => ({
+            filename: "slides-1.0.0.tar.gz",
+            version: "1.0.0",
+            contentType: "application/gzip",
+            bytes,
+          }),
+          reportInstall: async () => ({ installs: 1 }),
+        },
+      });
+
+      await expect(fs.readFile(path.join(result.targetDir, "SKILL.md"), "utf8")).resolves.toContain(
+        "Tarball helper",
+      );
+    });
+  });
+
   it("uninstalls a registry-managed skill", async () => {
     await withTempDir("openclaw-skills-registry-uninstall-", async (stateDir) => {
       vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
@@ -141,6 +228,7 @@ describe("skills registry install flow", () => {
 
       const { writeRegistryOrigin } = await import("./origin.js");
       const { uninstallRegistrySkill } = await import("./install.js");
+      const reportInstall = vi.fn().mockResolvedValue({ installs: 0 });
 
       await writeRegistryOrigin(managedDir, {
         version: 1,
@@ -154,6 +242,15 @@ describe("skills registry install flow", () => {
       const result = await uninstallRegistrySkill({
         slug: "slides",
         cfg: {},
+        client: {
+          listCatalog: async () => {
+            throw new Error("not used in uninstall test");
+          },
+          downloadArtifact: async () => {
+            throw new Error("not used in uninstall test");
+          },
+          reportInstall,
+        },
       });
 
       expect(result).toMatchObject({
@@ -162,6 +259,12 @@ describe("skills registry install flow", () => {
       });
       await expect(fs.stat(managedDir)).rejects.toMatchObject({
         code: "ENOENT",
+      });
+      expect(reportInstall).toHaveBeenCalledWith({
+        slug: "slides",
+        action: "uninstall",
+        version: "1.0.0",
+        source: "openclaw-registry",
       });
     });
   });

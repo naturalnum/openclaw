@@ -158,9 +158,10 @@ export async function installRegistrySkill(params: {
   version?: string;
   cfg: OpenClawConfig;
   client: SkillsRegistryClient;
+  managedSkillsDir?: string;
 }): Promise<InstallRegistrySkillResult> {
   const slug = assertSafeRegistrySlug(params.slug);
-  const managedSkillsDir = resolveManagedSkillsDir();
+  const managedSkillsDir = resolveManagedSkillsDir(params.managedSkillsDir);
   await fs.mkdir(managedSkillsDir, { recursive: true });
   const installed = await readInstalledRegistrySkills({ managedSkillsDir });
   const existing = installed.get(slug) ?? null;
@@ -174,10 +175,9 @@ export async function installRegistrySkill(params: {
   });
 
   return await withTempDir("openclaw-skills-registry-", async (tmpDir) => {
-    const archivePath = path.join(
-      tmpDir,
-      `${sanitizeFileSegment(slug)}-${sanitizeFileSegment(artifact.version ?? "latest")}.zip`,
-    );
+    // Preserve the registry artifact extension so the shared extractor can
+    // dispatch ZIP, TAR, and TGZ packages correctly.
+    const archivePath = path.join(tmpDir, sanitizeFileSegment(artifact.filename));
     await fs.writeFile(archivePath, artifact.bytes);
 
     const extracted = await withExtractedArchiveRoot({
@@ -205,14 +205,17 @@ export async function installRegistrySkill(params: {
       reason: "manual",
       changedPath: extracted.targetDir,
     });
-    try {
-      await params.client.reportInstall({
-        slug,
-        version: extracted.version,
-        source: "openclaw-registry",
-      });
-    } catch (error) {
-      console.warn(`[skills-registry] install event report failed for ${slug}: ${String(error)}`);
+    if (!existing) {
+      try {
+        await params.client.reportInstall({
+          slug,
+          action: "install",
+          version: extracted.version,
+          source: "openclaw-registry",
+        });
+      } catch (error) {
+        console.warn(`[skills-registry] install event report failed for ${slug}: ${String(error)}`);
+      }
     }
     return {
       slug: extracted.slug,
@@ -228,9 +231,10 @@ export async function installSkillArchive(params: {
   archiveBytes: Uint8Array;
   cfg: OpenClawConfig;
   overwrite?: boolean;
+  managedSkillsDir?: string;
 }): Promise<InstallRegistrySkillResult> {
   const fileName = assertZipArchiveFilename(params.fileName);
-  const managedSkillsDir = resolveManagedSkillsDir();
+  const managedSkillsDir = resolveManagedSkillsDir(params.managedSkillsDir);
   await fs.mkdir(managedSkillsDir, { recursive: true });
 
   return await withTempDir("openclaw-skills-archive-", async (tmpDir) => {
@@ -279,9 +283,11 @@ export async function installSkillArchive(params: {
 export async function uninstallRegistrySkill(params: {
   slug: string;
   cfg: OpenClawConfig;
+  client?: SkillsRegistryClient | null;
+  managedSkillsDir?: string;
 }): Promise<UninstallRegistrySkillResult> {
   const slug = assertSafeRegistrySlug(params.slug);
-  const managedSkillsDir = resolveManagedSkillsDir();
+  const managedSkillsDir = resolveManagedSkillsDir(params.managedSkillsDir);
   const installed = await readInstalledRegistrySkills({ managedSkillsDir });
   const hit = installed.get(slug) ?? null;
   const targetDir = path.join(managedSkillsDir, slug);
@@ -306,6 +312,18 @@ export async function uninstallRegistrySkill(params: {
     reason: "manual",
     changedPath: resolvedTarget,
   });
+  if (hit.source === "openclaw-registry" && params.client) {
+    try {
+      await params.client.reportInstall({
+        slug,
+        action: "uninstall",
+        version: hit.origin?.installedVersion ?? null,
+        source: "openclaw-registry",
+      });
+    } catch (error) {
+      console.warn(`[skills-registry] uninstall event report failed for ${slug}: ${String(error)}`);
+    }
+  }
   return {
     slug,
     removed: true,

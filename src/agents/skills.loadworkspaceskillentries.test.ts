@@ -81,6 +81,56 @@ async function setupWorkspaceWithDiffsPlugin() {
 }
 
 describe("loadWorkspaceSkillEntries", () => {
+  it("loads only the skills owned by the workspace local user", async () => {
+    const stateDir = await createTempWorkspaceDir();
+    const aliceWorkspace = path.join(stateDir, "users", "alice", "default");
+    const bobWorkspace = path.join(stateDir, "users", "bob", "projects", "demo");
+    await fs.mkdir(aliceWorkspace, { recursive: true });
+    await fs.mkdir(bobWorkspace, { recursive: true });
+    await writeSkill({
+      dir: path.join(stateDir, "users", "alice", "skills", "alice-skill"),
+      name: "alice-skill",
+      description: "Alice only",
+    });
+    await writeSkill({
+      dir: path.join(stateDir, "users", "bob", "skills", "bob-skill"),
+      name: "bob-skill",
+      description: "Bob only",
+    });
+
+    const aliceEntries = loadWorkspaceSkillEntries(aliceWorkspace, {
+      managedSkillsDir: path.join(stateDir, ".managed"),
+      bundledSkillsDir: path.join(stateDir, ".bundled"),
+    });
+    const bobEntries = loadWorkspaceSkillEntries(bobWorkspace, {
+      managedSkillsDir: path.join(stateDir, ".managed"),
+      bundledSkillsDir: path.join(stateDir, ".bundled"),
+    });
+
+    expect(aliceEntries.map((entry) => entry.skill.name)).toContain("alice-skill");
+    expect(aliceEntries.map((entry) => entry.skill.name)).not.toContain("bob-skill");
+    expect(bobEntries.map((entry) => entry.skill.name)).toContain("bob-skill");
+    expect(bobEntries.map((entry) => entry.skill.name)).not.toContain("alice-skill");
+  });
+
+  it("loads user skills when legacy development workspaces live below workspace/users", async () => {
+    const stateDir = await createTempWorkspaceDir();
+    const workspaceDir = path.join(stateDir, "workspace", "users", "alice", "projects", "demo");
+    await fs.mkdir(workspaceDir, { recursive: true });
+    await writeSkill({
+      dir: path.join(stateDir, "users", "alice", "skills", "venue-templates"),
+      name: "venue-templates",
+      description: "Venue templates",
+    });
+
+    const entries = loadWorkspaceSkillEntries(workspaceDir, {
+      managedSkillsDir: path.join(stateDir, ".managed"),
+      bundledSkillsDir: path.join(stateDir, ".bundled"),
+    });
+
+    expect(entries.map((entry) => entry.skill.name)).toContain("venue-templates");
+  });
+
   it("handles an empty managed skills dir without throwing", async () => {
     const workspaceDir = await createTempWorkspaceDir();
     const managedDir = path.join(workspaceDir, ".managed");

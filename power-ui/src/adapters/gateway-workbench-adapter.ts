@@ -19,10 +19,13 @@ import {
   buildSessionLabelFromPrompt,
   isPowerQuickSessionKey,
 } from "../integrations/openclaw/session-keys.ts";
+import { resolveChatWorkspaceFileKind } from "../react-app/lib/chat-file-support.ts";
 import {
+  readAgentWorkspace,
   readDefaultAgentWorkspace,
   resolveTemporaryChatWorkspacePath,
 } from "../react-app/lib/global-model-config.ts";
+import { buildReadableChatFileSidecars } from "./chat-file-sidecars.ts";
 import type { WorkbenchSnapshot } from "./mock-workbench-adapter.ts";
 import type {
   WorkbenchDirectoryCreateResult,
@@ -50,6 +53,12 @@ type GatewayAdapterOptions = {
 
 type ModelsListResult = {
   models?: ModelCatalogEntry[];
+};
+
+type PreparedMediaFileResult = {
+  prepared?: boolean;
+  readablePath?: string;
+  warning?: string;
 };
 
 const EMPTY_SKILLS_REPORT: SkillStatusReport = {
@@ -219,6 +228,24 @@ function fileToBase64(file: File): Promise<string> {
     reader.addEventListener("error", () => reject(reader.error ?? new Error("read file failed")));
     reader.readAsDataURL(file);
   });
+}
+
+function workspaceRelativePath(workspace: string, target: string): string | null {
+  const normalizedWorkspace = workspace.trim().replaceAll("\\", "/").replace(/\/+$/, "");
+  const normalizedTarget = target.trim().replaceAll("\\", "/").replace(/\/+$/, "");
+  if (!normalizedWorkspace || !normalizedTarget) {
+    return null;
+  }
+  const caseInsensitive = /^[A-Za-z]:\//.test(normalizedWorkspace);
+  const workspaceForCompare = caseInsensitive
+    ? normalizedWorkspace.toLowerCase()
+    : normalizedWorkspace;
+  const targetForCompare = caseInsensitive ? normalizedTarget.toLowerCase() : normalizedTarget;
+  const prefix = `${workspaceForCompare}/`;
+  if (!targetForCompare.startsWith(prefix)) {
+    return null;
+  }
+  return normalizedTarget.slice(normalizedWorkspace.length + 1);
 }
 
 export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
@@ -513,6 +540,125 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
     return uploaded;
   }
 
+  async uploadChatFiles(
+    agentId: string,
+    sessionKey: string,
+    files: WorkbenchUploadedFile[],
+    options?: { quickChat?: boolean },
+  ): Promise<WorkbenchFileEntry[]> {
+    const normalizedSessionKey = sessionKey.trim();
+    if (!normalizedSessionKey) {
+      throw new Error("会话尚未创建，无法上传附件");
+    }
+    const prepared = await buildReadableChatFileSidecars(files);
+    const sourceNames = new Set(files.map((entry) => entry.name));
+    const decorateEntries = async (
+      entries: WorkbenchFileEntry[],
+      toPromptPath: (path: string) => string,
+    ) => {
+      const entryByName = new Map(entries.map((entry) => [entry.name, entry]));
+      const mediaPreparationByName = new Map<string, PreparedMediaFileResult>();
+      await Promise.all(
+        entries
+          .filter((entry) => {
+            if (!sourceNames.has(entry.name) || prepared.sidecarByFileName.has(entry.name)) {
+              return false;
+            }
+            const kind = resolveChatWorkspaceFileKind(entry);
+            return kind === "audio" || kind === "video";
+          })
+          .map(async (entry) => {
+            try {
+              const result = await this.gateway.request<PreparedMediaFileResult>(
+                "power.media.prepareWorkspaceFile",
+                { agentId, path: entry.path },
+              );
+              mediaPreparationByName.set(entry.name, result);
+            } catch {
+              const kind = resolveChatWorkspaceFileKind(entry);
+              mediaPreparationByName.set(entry.name, {
+                prepared: false,
+                warning:
+                  kind === "audio"
+                    ? "音频已上传，但媒体转写服务暂不可用。"
+                    : "视频已上传，但媒体理解服务暂不可用。",
+              });
+            }
+          }),
+      );
+      return entries
+        .filter((entry) => sourceNames.has(entry.name))
+        .map((entry) => {
+          const sidecarName = prepared.sidecarByFileName.get(entry.name);
+          const sidecar = sidecarName ? entryByName.get(sidecarName) : undefined;
+          const mediaPreparation = mediaPreparationByName.get(entry.name);
+          const readablePath = sidecar?.path ?? mediaPreparation?.readablePath;
+          const processingWarning =
+            prepared.warningByFileName.get(entry.name) ?? mediaPreparation?.warning;
+          return {
+            ...entry,
+            path: toPromptPath(entry.path),
+            ...(readablePath ? { readablePath: toPromptPath(readablePath) } : {}),
+            ...(processingWarning ? { processingWarning } : {}),
+          };
+        });
+    };
+
+    if (!options?.quickChat) {
+      const config = this.configSnapshot ?? (await this.loadConfigSnapshot());
+      const agentWorkspace = readAgentWorkspace(config, agentId);
+      if (agentWorkspace) {
+        this.workspaceRootByAgentId.set(agentId, agentWorkspace);
+      }
+      const uploadPath = `.chat-uploads/${normalizedSessionKey
+        .replace(/[^A-Za-z0-9._-]+/g, "-")
+        .replace(/^-+|-+$/g, "")}`;
+      const folderName = uploadPath.slice(".chat-uploads/".length);
+      await this.createProjectFolder(agentId, null, ".chat-uploads").catch(() => {});
+      await this.createProjectFolder(agentId, ".chat-uploads", folderName).catch(() => {});
+      const uploaded = await this.uploadProjectFiles(agentId, uploadPath, prepared.files);
+      return await decorateEntries(uploaded, (path) => this.toWorkspaceRelativePath(agentId, path));
+    }
+
+    const userFolder = this.getUserScope().trim().replace(/^u-/, "") || null;
+    const config = this.configSnapshot ?? (await this.loadConfigSnapshot());
+    const agentWorkspace = readAgentWorkspace(config, agentId);
+    if (!agentWorkspace) {
+      throw new Error("无法定位当前用户的默认工作目录");
+    }
+    this.workspaceRootByAgentId.set(agentId, agentWorkspace);
+    const sessionWorkspace = resolveTemporaryChatWorkspacePath(
+      config,
+      userFolder,
+      normalizedSessionKey,
+      agentId,
+    );
+    const relativeSessionWorkspace = workspaceRelativePath(agentWorkspace, sessionWorkspace);
+    if (!relativeSessionWorkspace) {
+      throw new Error("临时会话目录不在当前用户工作目录内，已阻止上传");
+    }
+
+    await this.gateway.request("sessions.patch", {
+      key: normalizedSessionKey,
+      workspaceDir: sessionWorkspace,
+    });
+    let parentPath: string | null = null;
+    for (const segment of relativeSessionWorkspace.split("/").filter(Boolean)) {
+      await this.createProjectFolder(agentId, parentPath, segment).catch(() => {});
+      parentPath = parentPath ? `${parentPath}/${segment}` : segment;
+    }
+    await this.createProjectFolder(agentId, relativeSessionWorkspace, ".chat-uploads").catch(
+      () => {},
+    );
+    const workspaceUploadPath = `${relativeSessionWorkspace}/.chat-uploads`;
+    const uploaded = await this.uploadProjectFiles(agentId, workspaceUploadPath, prepared.files);
+    const prefix = `${relativeSessionWorkspace}/`;
+    return await decorateEntries(uploaded, (path) => {
+      const relativePath = this.toWorkspaceRelativePath(agentId, path);
+      return relativePath.startsWith(prefix) ? relativePath.slice(prefix.length) : relativePath;
+    });
+  }
+
   async installSkillArchive(file: File): Promise<void> {
     await this.gateway.uploadHttpFile({
       routePath: "/api/power/skills/import",
@@ -760,7 +906,7 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
     if (options?.quickChat) {
       const userFolder = userScope.trim().replace(/^u-/, "") || null;
       const config = this.configSnapshot ?? (await this.loadConfigSnapshot());
-      workspaceDir = resolveTemporaryChatWorkspacePath(config, userFolder, sessionKey);
+      workspaceDir = resolveTemporaryChatWorkspacePath(config, userFolder, sessionKey, projectId);
     }
     const created = await safeRequest(
       this.gateway.request<{ key?: string }>("sessions.create", {

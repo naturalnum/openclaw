@@ -141,6 +141,38 @@ describe("wrapToolWorkspaceRootGuardWithOptions", () => {
     });
   });
 
+  it("allows home-relative paths through an additional read-only root", async () => {
+    const { tool } = createToolHarness();
+    const skillRoot = "/home/alice/.openclaw/users/admin/skills/peer-review";
+    mocks.assertSandboxPath.mockImplementation(async (params) => {
+      if (params.root === root) {
+        throw new Error("outside workspace");
+      }
+      return {
+        resolved: `${skillRoot}/SKILL.md`,
+        relative: "SKILL.md",
+      };
+    });
+    const wrapped = wrapToolWorkspaceRootGuardWithOptions(tool, root, {
+      additionalRoots: [skillRoot],
+    });
+
+    await wrapped.execute("tc-skill-home", {
+      path: "~/.openclaw/users/admin/skills/peer-review/SKILL.md",
+    });
+
+    expect(mocks.assertSandboxPath).toHaveBeenNthCalledWith(1, {
+      filePath: "~/.openclaw/users/admin/skills/peer-review/SKILL.md",
+      cwd: root,
+      root,
+    });
+    expect(mocks.assertSandboxPath).toHaveBeenNthCalledWith(2, {
+      filePath: "~/.openclaw/users/admin/skills/peer-review/SKILL.md",
+      cwd: root,
+      root: skillRoot,
+    });
+  });
+
   it("does not guard outPath by default", async () => {
     const { tool } = createToolHarness();
     const wrapped = wrapToolWorkspaceRootGuardWithOptions(tool, root, {
