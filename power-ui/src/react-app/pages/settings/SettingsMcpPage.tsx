@@ -25,7 +25,7 @@ import { useLocation } from "react-router-dom";
 import { cloneConfigObject, serializeConfigForm } from "../../../compat/controllers";
 import type { ConfigSnapshot } from "../../../compat/types";
 import { PageHeader } from "../../components/ui/PageHeader";
-import { useGatewayWorkbenchAdapter } from "../../hooks/useGatewayWorkbenchAdapter";
+import { useSharedGatewayWorkbenchAdapter } from "../../context/GatewayWorkbenchAdapterContext";
 import { usePowerUiSettings } from "../../hooks/usePowerUiSettings";
 
 type McpServerRow = {
@@ -46,6 +46,8 @@ type McpDraft = {
   headersJson: string;
   extraJson: string;
 };
+
+const DEFAULT_MCP_CONNECTION_TIMEOUT_MS = 5_000;
 
 function rowsFromServers(servers: Record<string, unknown>): McpServerRow[] {
   return Object.entries(servers).map(([key, value]) => ({
@@ -155,29 +157,48 @@ async function probeHttpMcpServer(config: Record<string, unknown>): Promise<void
     config.headers && typeof config.headers === "object" && !Array.isArray(config.headers)
       ? (config.headers as Record<string, unknown>)
       : {};
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      Accept: "application/json, text/event-stream",
-      "Content-Type": "application/json",
-      ...Object.fromEntries(
-        Object.entries(headers).filter((entry): entry is [string, string] => {
-          const [key, value] = entry;
-          return key.trim().length > 0 && typeof value === "string";
-        }),
-      ),
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "initialize",
-      params: {
-        protocolVersion: "2025-03-26",
-        capabilities: {},
-        clientInfo: { name: "OpenClaw Power UI", version: "dev" },
+  const timeoutMs =
+    typeof config.connectionTimeoutMs === "number" &&
+    Number.isFinite(config.connectionTimeoutMs) &&
+    config.connectionTimeoutMs > 0
+      ? config.connectionTimeoutMs
+      : DEFAULT_MCP_CONNECTION_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        ...Object.fromEntries(
+          Object.entries(headers).filter((entry): entry is [string, string] => {
+            const [key, value] = entry;
+            return key.trim().length > 0 && typeof value === "string";
+          }),
+        ),
       },
-    }),
-  });
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-03-26",
+          capabilities: {},
+          clientInfo: { name: "OpenClaw Power UI", version: "dev" },
+        },
+      }),
+    });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`连接超时（${timeoutMs}ms）`, { cause: error });
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
   const text = extractMcpProbeText(await response.text().catch(() => ""));
   if (!response.ok) {
     throw new Error(text || `HTTP ${response.status}`);
@@ -260,7 +281,7 @@ export function SettingsMcpPage() {
   const location = useLocation();
   const { message } = App.useApp();
   const { settings } = usePowerUiSettings();
-  const adapter = useGatewayWorkbenchAdapter(settings);
+  const adapter = useSharedGatewayWorkbenchAdapter();
   const canUseGateway = Boolean(settings.gatewayUrl.trim());
 
   const [mcpRows, setMcpRows] = useState<McpServerRow[]>([]);

@@ -17,6 +17,12 @@
     "registry": {
       "enabled": true,
       "baseUrl": "http://127.0.0.1:3000",
+      "boxBaseUrl": "http://127.0.0.1:3100",
+      "oauth": {
+        "clientId": "agent-client",
+        "clientSecret": "${POWER_AGENT_SKILL_CENTER_CLIENT_SECRET}",
+        "scope": "read write"
+      },
       "timeoutMs": 10000
     }
   }
@@ -26,15 +32,39 @@
 说明：
 
 - `enabled` 为 `false` 时关闭远程技能中心。
-- `baseUrl` 为空时仅展示当前用户已经安装或本地上传的技能。
+- `baseUrl` 是技能中心地址，仅用于查询技能列表；为空时仅展示当前用户已经安装或本地上传的技能。
+- `boxBaseUrl` 是盒子端地址，用于下载解密以及安装、卸载数量上报；未配置时兼容旧版本，回退使用 `baseUrl`。
+- `oauth` 为可选的 OAuth2 Client Credentials 配置；启用后只保护技能列表请求，不会把 Token 发送给盒子端。
+- `oauth.tokenUrl` 可选，默认使用 `{baseUrl}/api/system/oauth2/token`；`clientSecret` 支持明文或 OpenClaw SecretRef。
 - `timeoutMs` 未配置时默认使用 `10000` 毫秒，最小值为 `1000` 毫秒。
 
 ## 2. Agent 调用技能中心的 HTTP 接口
 
-### 2.1 查询技能目录
+### 2.1 获取访问 Token
+
+启用 `skills.registry.oauth` 时，Agent 先调用：
 
 ```http
-GET /api/ui/catalog
+POST /api/system/oauth2/token
+Content-Type: application/json
+```
+
+```json
+{
+  "grantType": "client_credentials",
+  "clientId": "agent-client",
+  "clientSecret": "<由技能中心分配>",
+  "scope": "read write"
+}
+```
+
+Agent 从响应 `data.access_token` 取得 Token，并根据 `data.expires_in` 缓存和提前刷新。Client Secret 和 Access Token 不写入日志。
+
+### 2.2 查询技能目录
+
+```http
+GET /api/open/v1/skillsList
+Authorization: Bearer {access_token}
 ```
 
 请求参数：
@@ -94,23 +124,28 @@ Agent 侧处理逻辑：
 5. 再按 Power UI 当前分页大小返回，默认每页 `12` 条。
 6. 远程技能中心不可用时，仍返回当前用户的本地技能，并同时返回远程请求错误。
 
-### 2.2 下载技能包
+### 2.3 下载技能包
 
 ```http
-GET /api/v1/download?slug={slug}&version={version}
+POST /api/v1/download
+Content-Type: application/json
 ```
 
-请求参数：
+请求体：
 
-| 参数      | 类型   | 必填 | 说明                                           |
-| --------- | ------ | ---- | ---------------------------------------------- |
-| `slug`    | string | 是   | 技能唯一标识。                                 |
-| `version` | string | 否   | 指定版本；未传时由技能中心返回默认或最新版本。 |
+```json
+{
+  "skillId": "peer-review"
+}
+```
+
+`skillId` 为技能唯一标识，其值来自技能列表的 `slug` 字段。Agent 不再从技能列表读取或向下载接口传递文件地址、大小、文件名、签名和 MD5；盒子根据 `skillId` 定位密文、完成校验及解密。
 
 响应要求：
 
-- 响应体为 ZIP 二进制数据。
-- 建议返回正确的 `Content-Type`。
+- 响应体为单个技能包，支持 ZIP、TAR 或 TGZ；包内只能有一个技能根目录。
+- `Content-Type` 和 `Content-Disposition` 文件名应与实际压缩格式一致。
+- `Content-Length` 只能返回一次。
 - 建议通过 `Content-Disposition` 返回文件名，例如：
 
 ```http
@@ -124,7 +159,7 @@ Agent 会优先读取 `Content-Disposition` 中的文件名；未提供时使用
 {slug}-{version|latest}.zip
 ```
 
-### 2.3 上报安装事件
+### 2.4 上报安装事件
 
 ```http
 POST /api/v1/skills/{slug}/install-event
@@ -135,6 +170,7 @@ Content-Type: application/json
 
 ```json
 {
+  "action": "install",
   "version": "1.0.0",
   "source": "openclaw-registry"
 }
@@ -153,6 +189,7 @@ Content-Type: application/json
 - 从技能中心下载安装时，`source` 为 `openclaw-registry`。
 - 客户端类型还预留了 `upload`，但当前本地 ZIP 导入流程不会调用此接口。
 - 技能包安装成功后才上报安装事件。
+- 技能卸载成功后以 `action: "uninstall"` 上报。
 - 安装事件上报失败不会回滚或阻止已经完成的本地安装。
 
 ## 3. Power UI 调用 Agent Gateway 的 RPC
@@ -282,7 +319,7 @@ skills.registry.uninstall
 说明：
 
 - 只删除当前登录用户目录下对应的技能。
-- 当前不会向技能中心上报卸载事件。
+- 卸载成功后会向技能中心上报 `action: "uninstall"`。
 - 不会影响其他用户安装的同名技能。
 
 ## 4. 用户隔离与数据目录

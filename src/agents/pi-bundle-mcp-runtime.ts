@@ -30,6 +30,17 @@ type BundleMcpSession = {
 
 type LoadedMcpConfig = ReturnType<typeof loadEmbeddedPiMcpConfig>;
 type ListedTool = Awaited<ReturnType<Client["listTools"]>>["tools"][number];
+type PreparedMcpServer = {
+  serverName: string;
+  safeServerName: string;
+  cooldownKey: string;
+  resolved: NonNullable<ReturnType<typeof resolveMcpTransport>>;
+  session: BundleMcpSession;
+};
+
+type ConnectedMcpServer = PreparedMcpServer & {
+  listedTools: ListedTool[];
+};
 
 const SESSION_MCP_RUNTIME_MANAGER_KEY = Symbol.for("openclaw.sessionMcpRuntimeManager");
 const DEFAULT_FAILED_SERVER_COOLDOWN_MS = 60_000;
@@ -227,6 +238,7 @@ export function createSessionMcpRuntime(params: {
       const usedServerNames = new Set<string>();
 
       try {
+        const preparedServers: PreparedMcpServer[] = [];
         for (const [serverName, rawServer] of Object.entries(loaded.mcpServers)) {
           failIfDisposed();
           const cooldownKey = createServerCooldownKey({
@@ -267,50 +279,76 @@ export function createSessionMcpRuntime(params: {
             detachStderr: resolved.detachStderr,
           };
           sessions.set(serverName, session);
+          preparedServers.push({
+            serverName,
+            safeServerName,
+            cooldownKey,
+            resolved,
+            session,
+          });
+        }
 
-          try {
-            failIfDisposed();
-            await connectWithTimeout(client, resolved.transport, resolved.connectionTimeoutMs);
-            failIfDisposed();
-            const listedTools = await listAllTools(client);
-            failIfDisposed();
-            clearServerCooldown(cooldownKey);
-            servers[serverName] = {
-              serverName,
-              launchSummary: resolved.description,
-              toolCount: listedTools.length,
-            };
-            for (const tool of listedTools) {
-              const toolName = tool.name.trim();
-              if (!toolName) {
-                continue;
+        // MCP servers are independent. Connect them concurrently so one slow or
+        // unreachable endpoint does not serially delay every other configured server.
+        const connectedServers = await Promise.all(
+          preparedServers.map(async (prepared): Promise<ConnectedMcpServer | null> => {
+            const { serverName, cooldownKey, resolved, session } = prepared;
+            const { client } = session;
+            try {
+              failIfDisposed();
+              await connectWithTimeout(client, resolved.transport, resolved.connectionTimeoutMs);
+              failIfDisposed();
+              const listedTools = await listAllTools(client);
+              failIfDisposed();
+              clearServerCooldown(cooldownKey);
+              return { ...prepared, listedTools };
+            } catch (error) {
+              if (!disposed) {
+                const redactedError = redactErrorUrls(error);
+                const cooldown = recordServerFailure({
+                  key: cooldownKey,
+                  serverName,
+                  description: resolved.description,
+                  error: redactedError,
+                });
+                logWarn(
+                  `bundle-mcp: failed to start server "${serverName}" (${resolved.description}): ${redactedError}; temporarily disabled until ${new Date(cooldown.retryAfter).toISOString()}.`,
+                );
               }
-              tools.push({
-                serverName,
-                safeServerName,
-                toolName,
-                title: tool.title,
-                description: normalizeOptionalString(tool.description),
-                inputSchema: tool.inputSchema,
-                fallbackDescription: `Provided by bundle MCP server "${serverName}" (${resolved.description}).`,
-              });
+              await disposeSession(session);
+              sessions.delete(serverName);
+              failIfDisposed();
+              return null;
             }
-          } catch (error) {
-            if (!disposed) {
-              const redactedError = redactErrorUrls(error);
-              const cooldown = recordServerFailure({
-                key: cooldownKey,
-                serverName,
-                description: resolved.description,
-                error: redactedError,
-              });
-              logWarn(
-                `bundle-mcp: failed to start server "${serverName}" (${resolved.description}): ${redactedError}; temporarily disabled until ${new Date(cooldown.retryAfter).toISOString()}.`,
-              );
+          }),
+        );
+
+        // Merge in configuration order to keep catalog/tool ordering deterministic
+        // even though the underlying connections complete in arbitrary order.
+        for (const connected of connectedServers) {
+          if (!connected) {
+            continue;
+          }
+          const { serverName, safeServerName, resolved, listedTools } = connected;
+          servers[serverName] = {
+            serverName,
+            launchSummary: resolved.description,
+            toolCount: listedTools.length,
+          };
+          for (const tool of listedTools) {
+            const toolName = tool.name.trim();
+            if (!toolName) {
+              continue;
             }
-            await disposeSession(session);
-            sessions.delete(serverName);
-            failIfDisposed();
+            tools.push({
+              serverName,
+              safeServerName,
+              toolName,
+              title: tool.title,
+              description: normalizeOptionalString(tool.description),
+              inputSchema: tool.inputSchema,
+              fallbackDescription: `Provided by bundle MCP server "${serverName}" (${resolved.description}).`,
+            });
           }
         }
 

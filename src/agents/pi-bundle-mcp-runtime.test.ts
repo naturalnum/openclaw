@@ -299,6 +299,49 @@ describe("session MCP runtime", () => {
     ]);
   });
 
+  it("connects independent MCP servers concurrently while preserving catalog order", async () => {
+    vi.useRealTimers();
+    const workspaceDir = await makeTempDir("openclaw-bundle-mcp-concurrent-");
+    const firstServerPath = path.join(workspaceDir, "servers", "first.mjs");
+    const secondServerPath = path.join(workspaceDir, "servers", "second.mjs");
+    await Promise.all([
+      writeBundleProbeMcpServer(firstServerPath, { startupDelayMs: 500 }),
+      writeBundleProbeMcpServer(secondServerPath, { startupDelayMs: 500 }),
+    ]);
+
+    const runtime = await getOrCreateSessionMcpRuntime({
+      sessionId: "session-concurrent",
+      sessionKey: "agent:test:session-concurrent",
+      workspaceDir,
+      cfg: {
+        mcp: {
+          servers: {
+            firstProbe: {
+              command: "node",
+              args: [firstServerPath],
+              env: { BUNDLE_PROBE_TEXT: "FIRST" },
+            },
+            secondProbe: {
+              command: "node",
+              args: [secondServerPath],
+              env: { BUNDLE_PROBE_TEXT: "SECOND" },
+            },
+          },
+        },
+      },
+    });
+
+    const startedAt = Date.now();
+    const materialized = await materializeBundleMcpToolsForRun({ runtime });
+    const elapsedMs = Date.now() - startedAt;
+
+    expect(materialized.tools.map((tool) => tool.name)).toEqual([
+      "firstProbe__bundle_probe",
+      "secondProbe__bundle_probe",
+    ]);
+    expect(elapsedMs).toBeLessThan(900);
+  });
+
   it("disposes startup-in-flight runtimes without leaking MCP processes", async () => {
     vi.useRealTimers();
     const workspaceDir = await makeTempDir("openclaw-bundle-mcp-tools-");

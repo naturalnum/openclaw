@@ -306,19 +306,18 @@ export class GatewayWorkbenchAdapter implements WorkbenchAdapter {
       userScope && args.sessionKey && !isSessionInLocalUserScope(args.sessionKey, userScope)
         ? { ...args, sessionKey: null, skipSessionProject: true, skipProjectDefault: true }
         : args;
-    const rawAgentsList = await requiredRequest(
-      this.gateway.request<AgentsListResult>("agents.list", {}),
-      "agents.list",
-    );
+    const [rawAgentsList, rawSessionsResult] = await Promise.all([
+      requiredRequest(this.gateway.request<AgentsListResult>("agents.list", {}), "agents.list"),
+      requiredRequest(
+        this.gateway.request<SessionsListResult>("sessions.list", {
+          includeGlobal: false,
+          includeUnknown: true,
+          limit: 200,
+        }),
+        "sessions.list",
+      ),
+    ]);
     const agentsList = this.filterAgentsList(rawAgentsList);
-    const rawSessionsResult = await requiredRequest(
-      this.gateway.request<SessionsListResult>("sessions.list", {
-        includeGlobal: false,
-        includeUnknown: true,
-        limit: 200,
-      }),
-      "sessions.list",
-    );
     const sessionsResult = this.filterSessionsList(rawSessionsResult);
     const selection = resolveSelection(sanitizedArgs, agentsList, sessionsResult);
     const requests: Array<Promise<unknown>> = [

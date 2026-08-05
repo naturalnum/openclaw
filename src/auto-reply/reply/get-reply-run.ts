@@ -424,6 +424,14 @@ export async function runPreparedReply(
       systemEventBlocks: drainedSystemEventBlocks,
     });
   };
+  // These modules are only needed after the inbound message has passed the
+  // early validation paths, but they are independent and expensive on a cold
+  // process. Start loading them together instead of paying each import in
+  // sequence before the first model request.
+  const sessionUpdatesRuntimeForRun =
+    process.env.OPENCLAW_TEST_FAST === "1" ? null : loadSessionUpdatesRuntime();
+  const piEmbeddedRuntimeForRun = useFastReplyRuntime ? null : loadPiEmbeddedRuntime();
+  const agentRunnerRuntimeForRun = loadAgentRunnerRuntime();
   const skillResult =
     process.env.OPENCLAW_TEST_FAST === "1"
       ? {
@@ -432,7 +440,7 @@ export async function runPreparedReply(
           systemSent: currentSystemSent,
         }
       : await (async () => {
-          const { ensureSkillSnapshot } = await loadSessionUpdatesRuntime();
+          const { ensureSkillSnapshot } = await sessionUpdatesRuntimeForRun!;
           return ensureSkillSnapshot({
             sessionEntry,
             sessionStore,
@@ -513,7 +521,7 @@ export async function runPreparedReply(
         inlineMode: perMessageQueueMode,
         inlineOptions: perMessageQueueOptions,
       });
-  const piRuntime = useFastReplyRuntime ? null : await loadPiEmbeddedRuntime();
+  const piRuntime = piEmbeddedRuntimeForRun ? await piEmbeddedRuntimeForRun : null;
   const sessionLaneKey = piRuntime
     ? piRuntime.resolveEmbeddedSessionLane(sessionKey ?? sessionIdFinal)
     : undefined;
@@ -538,7 +546,7 @@ export async function runPreparedReply(
         storePath,
         isNewSession,
       });
-  const { runReplyAgent } = await loadAgentRunnerRuntime();
+  const { runReplyAgent } = await agentRunnerRuntimeForRun;
   const queueKey = sessionKey ?? sessionIdFinal;
   preparedSessionState = resolvePreparedSessionState();
   const resolveActiveQueueSessionId = () =>

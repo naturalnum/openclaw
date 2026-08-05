@@ -29,6 +29,10 @@ import {
   isProtectedMainSessionKey,
 } from "../../integrations/openclaw/session-keys";
 import { PowerBrandMark } from "../components/ui/PowerBrandMark";
+import {
+  GatewayWorkbenchAdapterProvider,
+  useSharedGatewayWorkbenchAdapter,
+} from "../context/GatewayWorkbenchAdapterContext";
 import { useLocalUsers } from "../context/LocalUsersContext";
 import { useWorkbenchChat, WorkbenchChatProvider } from "../context/WorkbenchChatContext";
 import { WorkspaceRailProvider } from "../context/WorkspaceRailContext";
@@ -1236,7 +1240,7 @@ function PowerShellLayoutContent() {
   const localUsers = useLocalUsers();
   const userScope = buildLocalUserScope(localUsers.user);
   const canManageUsers = localUsers.enabled && localUsers.user?.role === "admin";
-  const adapter = useGatewayWorkbenchAdapter(settings, userScope);
+  const adapter = useSharedGatewayWorkbenchAdapter();
   const {
     selectSession,
     sessionsVersion,
@@ -1467,10 +1471,12 @@ export function PowerShellLayout() {
   const userScope = buildLocalUserScope(localUsers.user);
   const adapter = useGatewayWorkbenchAdapter(settings, userScope);
   return (
-    <WorkbenchChatProvider adapter={adapter} patchSettings={patchSettings} userScope={userScope}>
-      <WorkspaceRailProvider>
-        <PowerShellLayoutContent />
-      </WorkspaceRailProvider>
-    </WorkbenchChatProvider>
+    <GatewayWorkbenchAdapterProvider adapter={adapter}>
+      <WorkbenchChatProvider adapter={adapter} patchSettings={patchSettings} userScope={userScope}>
+        <WorkspaceRailProvider>
+          <PowerShellLayoutContent />
+        </WorkspaceRailProvider>
+      </WorkbenchChatProvider>
+    </GatewayWorkbenchAdapterProvider>
   );
 }

@@ -2,16 +2,16 @@
 
 ## 1. 接口汇总
 
-| 系统     | 类型 | 接口                                                 | 改动                               |
-| -------- | ---- | ---------------------------------------------------- | ---------------------------------- |
-| 技能中心 | 修改 | `POST /api/admin/skills/{slug}/{version}/approve`    | 审核后加密并向各安全中心同步技能。 |
-| 安全中心 | 修改 | `POST /api/resource/ai-skill/sync/syncAiSkill`       | 重复同步改为幂等成功。             |
-| 安全中心 | 新增 | `GET /api/ui/catalog`                                | 兼容 Agent 现有技能中心列表接口。  |
-| 安全中心 | 新增 | `POST /api/resource/ai-skill/{skillId}/installation` | 按 `action` 更新安装状态。         |
-| 盒子     | 新增 | `POST /api/box/v1/skills/decrypt-download`           | 下载密文、校验、解密并返回技能包。 |
-| 盒子     | 新增 | `POST /api/box/v1/skills/{skillId}/installation`     | 接收 Agent 安装/卸载状态并转报。   |
+| 系统     | 类型 | 接口                                                 | 改动                                    |
+| -------- | ---- | ---------------------------------------------------- | --------------------------------------- |
+| 技能中心 | 修改 | `POST /api/admin/skills/{slug}/{version}/approve`    | 审核后加密并向各安全中心同步技能。      |
+| 安全中心 | 修改 | `POST /api/resource/ai-skill/sync/syncAiSkill`       | 重复同步改为幂等成功。                  |
+| 安全中心 | 新增 | `GET /api/open/v1/skillsList`                        | 兼容 Agent 现有技能中心列表接口。       |
+| 安全中心 | 新增 | `POST /api/resource/ai-skill/{skillId}/installation` | 按 `action` 更新安装状态。              |
+| 盒子     | 新增 | `POST /api/v1/download`                              | 根据 `skillId` 下载、解密并返回技能包。 |
+| 盒子     | 新增 | `POST /api/box/v1/skills/{skillId}/installation`     | 接收 Agent 安装/卸载状态并转报。        |
 
-安全中心现有 `POST /api/resource/ai-skill/page` 保持不变，新增的 `/api/ui/catalog` 内部复用其查询能力。当前版本继续使用 `skillId`，暂不增加 `fileId`。
+安全中心现有 `POST /api/resource/ai-skill/page` 保持不变，新增的 `/api/open/v1/skillsList` 内部复用其查询能力。当前版本继续使用 `skillId`，暂不增加 `fileId`。
 
 ## 3.1 技能（Skills）管理
 
@@ -22,7 +22,7 @@
 | 类型         | 内容说明                                                        |
 | ------------ | --------------------------------------------------------------- |
 | 请求方式     | **`GET`**                                                       |
-| 请求方法     | **`/api/ui/catalog`**                                           |
+| 请求方法     | **`/api/open/v1/skillsList`**                                   |
 | Content-Type | `application/json`                                              |
 | 接口说明     | **兼容 Agent 现有技能中心列表接口，内部调用安全中心分页查询。** |
 
@@ -43,7 +43,7 @@
 #### 请求示例
 
 ```http
-GET /api/ui/catalog?q=review&category=development&sort=comprehensive&page=1&limit=100
+GET /api/open/v1/skillsList?q=review&category=development&sort=comprehensive&page=1&limit=100
 ```
 
 #### 响应参数
@@ -72,18 +72,6 @@ GET /api/ui/catalog?q=review&category=development&sort=comprehensive&page=1&limi
 | `author`       | 是       | `string`   | `author`          | 是             | 保持不变。                               |
 
 `skillCode` 可以作为扩展字段继续返回，但当前 Agent 技能列表不依赖该字段。
-
-#### 下载解密扩展字段
-
-以下字段不是技能中心原列表字段，但后续下载解密需要，安全中心兼容响应继续返回：
-
-| 字段       | 是否必填 | 类型      | 是否重命名 | 说明                          |
-| ---------- | -------- | --------- | ---------- | ----------------------------- |
-| `filePath` | 是       | `string`  | 否         | 加密技能文件完整下载地址。    |
-| `fileSize` | 是       | `integer` | 否         | 加密技能文件大小，单位字节。  |
-| `fileName` | 是       | `string`  | 否         | 解密后返回给 Agent 的文件名。 |
-| `sign`     | 是       | `string`  | 否         | 文件签名。                    |
-| `md5`      | 是       | `string`  | 否         | 加密文件 MD5。                |
 
 #### `categories` 分类字段
 
@@ -114,12 +102,7 @@ GET /api/ui/catalog?q=review&category=development&sort=comprehensive&page=1&limi
       "downloads": 10,
       "installs": 3,
       "updatedAt": 1784822400000,
-      "author": "zhangsan",
-      "filePath": "http://192.168.2.72/skills/image-detect/v1.0.3/skill.tar.gz",
-      "fileSize": 4294967296,
-      "fileName": "skill.zip",
-      "sign": "skill-signature",
-      "md5": "46cd9ba5b5d8b49908c1e6271e093006"
+      "author": "zhangsan"
     }
   ],
   "pagination": {
@@ -168,39 +151,35 @@ POST /api/resource/ai-skill/{skillId}/installation
 ## 4. 盒子下载解密接口
 
 ```http
-POST /api/box/v1/skills/decrypt-download
+POST /api/v1/download
 Content-Type: application/json
 ```
 
-请求只包含 5 个参数：
+请求只包含技能标识：
 
 ```json
 {
-  "filePath": "http://192.168.2.72/skills/image-detect/v1.0.3/skill.tar.gz",
-  "fileSize": 4294967296,
-  "fileName": "skill.zip",
-  "sign": "skill-signature",
-  "md5": "46cd9ba5b5d8b49908c1e6271e093006"
+  "skillId": "skill-image-detect"
 }
 ```
 
 处理流程：
 
-1. 校验 `filePath` 必须属于配置的文件服务器地址和路径范围。
-2. 下载密文并校验 `fileSize`、`sign` 和 `md5`。
+1. 根据 `skillId` 从安全中心获取对应密文文件信息。
+2. 下载并校验密文文件。
 3. 调用硬件解密服务。
 4. 将解密后的技能包以文件流返回 Agent。
 
 成功响应：
 
 ```http
-Content-Type: application/zip
-Content-Disposition: attachment; filename="skill.zip"
+Content-Type: application/gzip
+Content-Disposition: attachment; filename="skill.tar.gz"
 
 {decrypted skill package stream}
 ```
 
-`filePath` 不能允许访问任意 URL，必须限制文件服务器域名、端口和路径，防止盒子被利用访问内网地址。
+响应可使用 ZIP、TAR 或 TGZ，但包内只能包含一个技能根目录；`Content-Type` 和文件名必须与实际格式一致，`Content-Length` 只能返回一次。文件地址、文件校验和硬件解密参数仅在盒子内部处理，不暴露给 Agent。
 
 ## 5. 盒子安装状态接口
 
@@ -236,8 +215,10 @@ POST /api/box/v1/skills/{skillId}/installation
 
 ## 6. Agent 改造范围说明
 
-- 采用安全中心 `GET /api/ui/catalog` 兼容路由后，Agent 的技能列表查询不需要修改。
-- 下载解密链路仍然需要 Agent 使用 5 个扩展字段调用盒子接口。
+- Agent 配置中的 `skills.registry.baseUrl` 指向安全中心的技能列表服务。
+- `skills.registry.boxBaseUrl` 指向盒子端下载解密和安装状态服务；两者允许使用不同的 IP 或域名。
+- 技能列表服务启用 OAuth2 Client Credentials 时，Agent 先调用 `/api/system/oauth2/token` 获取 Token，再使用 `Authorization: Bearer {access_token}` 查询列表；该 Token 不发送给盒子端。
+- 采用安全中心 `GET /api/open/v1/skillsList` 兼容路由后，Agent 的技能列表查询不需要修改。
+- 下载解密链路由 Agent 将技能列表的 `slug` 作为 `skillId` 传给盒子，不再依赖技能列表中的文件扩展字段。
 - 安装或卸载成功后，Agent 使用 `skillId` 调用盒子安装状态接口，并通过 `action` 区分操作。
 - `version/source` 可选；用户、盒子身份和幂等信息由盒子维护。
-- 如果希望 Agent 完全不修改，还需要继续兼容现有 `/api/v1/download` 下载接口；本版本暂不采用该方式。

@@ -34,7 +34,16 @@ describe("skills registry install flow", () => {
       const bytes = await createSkillArchiveBytes();
       const { installRegistrySkill } = await import("./install.js");
       const { readInstalledRegistrySkills } = await import("./state.js");
-      const reportInstall = vi.fn().mockResolvedValue({ installs: 1 });
+      const installedSkillDir = path.join(stateDir, "skills", "slides");
+      const reportInstall = vi.fn().mockImplementation(async () => {
+        await expect(
+          fs.readFile(path.join(installedSkillDir, "SKILL.md"), "utf8"),
+        ).resolves.toContain("# Slides");
+        await expect(
+          fs.readFile(path.join(installedSkillDir, ".openclaw-registry", "origin.json"), "utf8"),
+        ).resolves.toContain('"slug": "slides"');
+        return { installs: 1 };
+      });
 
       const result = await installRegistrySkill({
         slug: "slides",
@@ -84,6 +93,51 @@ describe("skills registry install flow", () => {
         action: "install",
         version: "1.0.0",
         source: "openclaw-registry",
+      });
+    });
+  });
+
+  it("does not report an install when the downloaded archive cannot be installed", async () => {
+    await withTempDir("openclaw-skills-registry-invalid-", async (stateDir) => {
+      vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+      vi.stubEnv("OPENCLAW_TEST_FAST", "1");
+      vi.resetModules();
+
+      const invalidZip = new JSZip();
+      invalidZip.file("package/README.md", "Missing SKILL.md");
+      const bytes = new Uint8Array(await invalidZip.generateAsync({ type: "uint8array" }));
+      const { installRegistrySkill } = await import("./install.js");
+      const reportInstall = vi.fn().mockResolvedValue({ installs: 1 });
+
+      await expect(
+        installRegistrySkill({
+          slug: "slides",
+          cfg: {
+            skills: {
+              registry: {
+                enabled: true,
+                baseUrl: "https://skills.example.com",
+              },
+            },
+          },
+          client: {
+            listCatalog: async () => {
+              throw new Error("not used in install test");
+            },
+            downloadArtifact: async () => ({
+              filename: "slides-1.0.0.zip",
+              version: "1.0.0",
+              contentType: "application/zip",
+              bytes,
+            }),
+            reportInstall,
+          },
+        }),
+      ).rejects.toThrow();
+
+      expect(reportInstall).not.toHaveBeenCalled();
+      await expect(fs.stat(path.join(stateDir, "skills", "slides"))).rejects.toMatchObject({
+        code: "ENOENT",
       });
     });
   });

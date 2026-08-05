@@ -58,9 +58,23 @@ function expectedManagedOrigins(port: number): string[] {
   return [...hosts].toSorted().map((host) => `http://${formatOriginHost(host)}:${port}`);
 }
 
-function runBootstrap(dataDir: string, appDir: string, port: number): void {
+function runBootstrap(
+  dataDir: string,
+  appDir: string,
+  port: number,
+  envOverrides: NodeJS.ProcessEnv = {},
+): void {
   execFileSync(process.execPath, [bootstrapScript, dataDir, appDir, String(port)], {
-    env: { ...process.env, POWER_AGENT_SKILL_CENTER_URL: "" },
+    env: {
+      ...process.env,
+      POWER_AGENT_SKILL_CENTER_URL: "",
+      POWER_AGENT_SKILL_BOX_URL: "",
+      POWER_AGENT_SKILL_CENTER_CLIENT_ID: "",
+      POWER_AGENT_SKILL_CENTER_CLIENT_SECRET: "",
+      POWER_AGENT_SKILL_CENTER_TOKEN_URL: "",
+      POWER_AGENT_SKILL_CENTER_SCOPE: "",
+      ...envOverrides,
+    },
     stdio: "pipe",
   });
 }
@@ -95,7 +109,39 @@ describe("agent-bootstrap-config", () => {
       },
     });
     expect(config.gateway.controlUi.allowedOrigins).toEqual(expectedManagedOrigins(port));
+    expect(config.skills).toEqual({ allowBundled: ["__none__"] });
     expect(statSync(path.join(dataDir, "openclaw.json")).mode & 0o777).toBe(0o600);
+  });
+
+  it("persists SkillCenter OAuth settings supplied during first startup", () => {
+    const root = createTempDir("openclaw-agent-bootstrap-oauth-");
+    const dataDir = path.join(root, "data");
+    const appDir = path.join(root, "app");
+
+    runBootstrap(dataDir, appDir, 19_127, {
+      POWER_AGENT_SKILL_CENTER_URL: "https://skills.example",
+      POWER_AGENT_SKILL_BOX_URL: "http://box.example",
+      POWER_AGENT_SKILL_CENTER_CLIENT_ID: "agent-test",
+      POWER_AGENT_SKILL_CENTER_CLIENT_SECRET: "test-client-secret", // pragma: allowlist secret
+      POWER_AGENT_SKILL_CENTER_TOKEN_URL: "https://auth.example/oauth/token",
+      POWER_AGENT_SKILL_CENTER_SCOPE: "read write",
+    });
+
+    expect(readConfig(dataDir).skills).toEqual({
+      allowBundled: ["__none__"],
+      registry: {
+        enabled: true,
+        baseUrl: "https://skills.example",
+        boxBaseUrl: "http://box.example",
+        oauth: {
+          clientId: "agent-test",
+          clientSecret: "test-client-secret", // pragma: allowlist secret
+          tokenUrl: "https://auth.example/oauth/token",
+          scope: "read write",
+        },
+        timeoutMs: 10_000,
+      },
+    });
   });
 
   it("upgrades an existing config without replacing user models, agents, skills, or token", () => {
@@ -151,7 +197,10 @@ describe("agent-bootstrap-config", () => {
     const config = readConfig(dataDir);
     expect(config.agents).toEqual(existing.agents);
     expect(config.models).toEqual(existing.models);
-    expect(config.skills).toEqual(existing.skills);
+    expect(config.skills).toEqual({
+      ...existing.skills,
+      allowBundled: ["__none__"],
+    });
     expect(config.plugins).toEqual(existing.plugins);
     expect(config.customProductSetting).toEqual(existing.customProductSetting);
     expect(config.gateway).toMatchObject({

@@ -5157,7 +5157,6 @@ export class OpenClawPowerApp extends LitElement {
         installFilter: this.skillsState.skillsInstallFilter,
         busyKey: this.skillsState.skillsBusyKey,
         messages: this.skillsState.skillMessages,
-        registryBaseUrl: this.skillsState.skillsRegistryBaseUrl,
         onSearchChange: (next) => {
           void this.runControllerAction(setSkillsFilter(this.skillsState, next));
         },

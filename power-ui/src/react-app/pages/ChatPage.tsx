@@ -22,16 +22,14 @@ import type {
   WorkbenchApprovalRequest,
 } from "../../adapters/workbench-adapter";
 import { extractText } from "../../compat/chat";
-import { buildLocalUserScope } from "../../integrations/openclaw/local-user-scope";
 import { isPowerQuickSessionKey } from "../../integrations/openclaw/session-keys";
 import { ChatMarkdownBody } from "../components/chat/ChatMarkdownBody";
 import { ChatModelPicker } from "../components/chat/ChatModelPicker";
 import { ChatToolStepsList, type ChatToolStepsPhase } from "../components/chat/ChatToolStepsList";
 import { ChatWorkspaceFilesPanel } from "../components/chat/ChatWorkspaceFilesPanel";
-import { useLocalUsers } from "../context/LocalUsersContext";
+import { useSharedGatewayWorkbenchAdapter } from "../context/GatewayWorkbenchAdapterContext";
 import { useWorkbenchChat } from "../context/WorkbenchChatContext";
 import { useWorkspaceRail } from "../context/WorkspaceRailContext";
-import { useGatewayWorkbenchAdapter } from "../hooks/useGatewayWorkbenchAdapter";
 import { usePowerUiSettings } from "../hooks/usePowerUiSettings";
 import {
   CHAT_WORKSPACE_FILE_ACCEPT,
@@ -45,6 +43,7 @@ import { shouldHideChatMessage } from "../lib/chat-message-visibility";
 import { dedupeCumulativeStreamSegments, streamTextAfterPrefix } from "../lib/chat-stream-segments";
 import { resolveChatModelPool, resolveEffectiveChatModelRef } from "../lib/configured-chat-models";
 import { formatCatalogModelRef } from "../lib/model-catalog";
+import { resolveSessionDisplayLabel } from "../lib/session-display-label";
 
 /** 主色仅用于关键操作；大面积 UI 用中性灰白 */
 const BRAND = {
@@ -593,9 +592,7 @@ function ClipIcon({ className }: { className?: string }) {
 export function ChatPage() {
   const { message } = App.useApp();
   const { settings, patchSettings } = usePowerUiSettings();
-  const localUsers = useLocalUsers();
-  const userScope = buildLocalUserScope(localUsers.user);
-  const adapter = useGatewayWorkbenchAdapter(settings, userScope);
+  const adapter = useSharedGatewayWorkbenchAdapter();
   const {
     snapshot,
     snapshotError,
@@ -933,7 +930,7 @@ export function ChatPage() {
     }
     const row = snapshot?.sessionsResult?.sessions?.find((s) => s.key === selectedSessionKey);
     const label = sanitizeUserChatDisplayText((row?.label ?? "").trim());
-    return label || selectedSessionKey;
+    return resolveSessionDisplayLabel(label, selectedSessionKey);
   }, [selectedSessionKey, snapshot?.sessionsResult?.sessions]);
 
   const followBottomRef = useRef(true);

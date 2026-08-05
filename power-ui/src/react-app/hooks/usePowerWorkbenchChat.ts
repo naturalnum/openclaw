@@ -929,9 +929,9 @@ export function usePowerWorkbenchChat(
       rt.client = clientRef.current;
       rt.connected = connected;
       rt.displayToolSteps = [];
-      if (modelId.trim()) {
-        await adapter.request("sessions.patch", { key: sessionKey, model: modelId.trim() });
-      }
+      // New sessions persist their model through sessions.create, while existing
+      // sessions persist model changes from the composer. Sending does not need
+      // another synchronous sessions.patch round trip.
       const sendPromise = sendChatMessage(
         rt,
         preparedText,

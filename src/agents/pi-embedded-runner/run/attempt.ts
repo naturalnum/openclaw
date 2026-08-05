@@ -62,6 +62,7 @@ import {
 } from "../../channel-tools.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../defaults.js";
 import { resolveOpenClawDocsPath } from "../../docs-path.js";
+import { hasEnabledEmbeddedPiMcpServers } from "../../embedded-pi-mcp.js";
 import { isTimeoutError } from "../../failover-error.js";
 import { resolveHeartbeatPromptForSystemPrompt } from "../../heartbeat-system-prompt.js";
 import { resolveImageSanitizationLimits } from "../../image-sanitization.js";
@@ -557,14 +558,19 @@ export async function runEmbeddedAttempt(
       model: params.model,
     });
     const clientTools = toolsEnabled ? params.clientTools : undefined;
-    const bundleMcpSessionRuntime = toolsEnabled
-      ? await getOrCreateSessionMcpRuntime({
-          sessionId: params.sessionId,
-          sessionKey: params.sessionKey,
-          workspaceDir: effectiveWorkspace,
-          cfg: params.config,
-        })
-      : undefined;
+    const bundleMcpSessionRuntime =
+      toolsEnabled &&
+      hasEnabledEmbeddedPiMcpServers({
+        workspaceDir: effectiveWorkspace,
+        cfg: params.config,
+      })
+        ? await getOrCreateSessionMcpRuntime({
+            sessionId: params.sessionId,
+            sessionKey: params.sessionKey,
+            workspaceDir: effectiveWorkspace,
+            cfg: params.config,
+          })
+        : undefined;
     const bundleMcpRuntime = bundleMcpSessionRuntime
       ? await materializeBundleMcpToolsForRun({
           runtime: bundleMcpSessionRuntime,

@@ -26,10 +26,19 @@ tar -xzf agent.tar.gz
 
 部署人员可在首次启动时通过环境变量注入技能中心地址：
 
-export POWER_AGENT_SKILL_CENTER_URL="https://skills.example.com"
+export POWER_AGENT_SKILL_CENTER_URL="http://skillcenter.internal:3000"
+export POWER_AGENT_SKILL_BOX_URL="http://skill-box.internal:3100"
+export POWER_AGENT_SKILL_CENTER_CLIENT_ID="<技能中心分配的 Client ID>"
+export POWER_AGENT_SKILL_CENTER_CLIENT_SECRET="<技能中心分配的 Client Secret>"
+# 可选；默认请求 POWER_AGENT_SKILL_CENTER_URL/api/system/oauth2/token
+export POWER_AGENT_SKILL_CENTER_TOKEN_URL="http://skillcenter.internal:3000/api/system/oauth2/token"
+# 可选；默认 read write
+export POWER_AGENT_SKILL_CENTER_SCOPE="read write"
 
-该地址会写入 data/openclaw.json 的 skills.registry 配置，不在用户界面展示或允许用户修改。未配置时不会访问其他公共技能库。
-技能中心与 Agent 同机部署时可使用 127.0.0.1；分机部署时必须填写 Agent 服务器能访问的局域网 IP 或域名。
+POWER_AGENT_SKILL_CENTER_URL 用于查询技能列表，POWER_AGENT_SKILL_BOX_URL 用于下载解密以及安装、卸载数量上报。
+技能中心启用鉴权时，Client ID 与 Client Secret 必须同时配置。Agent 会通过 OAuth2 Client Credentials 获取 Token，缓存到内存，并在调用技能列表接口时添加 Authorization: Bearer 请求头。Token 不会发送给盒子端下载和安装数量接口。
+两个地址会写入 data/openclaw.json 的 skills.registry 配置，不在用户界面展示或允许用户修改。未配置技能中心地址时不会访问其他公共技能库。
+对应服务与 Agent 同机部署时可使用 127.0.0.1；分机部署时必须填写 Agent 服务器能访问的局域网 IP 或域名。
 
 执行：
 

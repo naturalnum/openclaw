@@ -22033,6 +22033,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
             additionalProperties: {
               type: "object",
               properties: {
+                enabled: {
+                  type: "boolean",
+                  description:
+                    "Set false to keep an MCP server configured while preventing runtime adapters from starting or probing it.",
+                },
                 command: {
                   type: "string",
                 },
@@ -22172,14 +22177,129 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
             properties: {
               enabled: {
                 type: "boolean",
+                title: "Enable Skills Registry",
+                description:
+                  "Enable remote skill discovery and installation. Disable this when the deployment should use only locally uploaded skills.",
               },
               baseUrl: {
                 type: "string",
+                title: "SkillCenter Base URL",
+                description:
+                  "SkillCenter base URL used only for catalog queries, for example http://skills.internal:3000.",
+              },
+              boxBaseUrl: {
+                type: "string",
+                title: "Skills Box Base URL",
+                description:
+                  "Box service base URL used for decrypted skill downloads and install or uninstall reporting. When omitted, the SkillCenter base URL is used for compatibility with older deployments.",
+              },
+              oauth: {
+                type: "object",
+                properties: {
+                  tokenUrl: {
+                    type: "string",
+                    format: "uri",
+                    title: "SkillCenter OAuth Token URL",
+                    description:
+                      "OAuth2 token endpoint. When omitted, the Agent requests /api/system/oauth2/token from the configured SkillCenter base URL.",
+                  },
+                  clientId: {
+                    type: "string",
+                    minLength: 1,
+                    title: "SkillCenter OAuth Client ID",
+                    description:
+                      "OAuth2 client identifier issued to this Agent deployment by SkillCenter.",
+                  },
+                  clientSecret: {
+                    anyOf: [
+                      {
+                        type: "string",
+                      },
+                      {
+                        oneOf: [
+                          {
+                            type: "object",
+                            properties: {
+                              source: {
+                                type: "string",
+                                const: "env",
+                              },
+                              provider: {
+                                type: "string",
+                                pattern: "^[a-z][a-z0-9_-]{0,63}$",
+                              },
+                              id: {
+                                type: "string",
+                                pattern: "^[A-Z][A-Z0-9_]{0,127}$",
+                              },
+                            },
+                            required: ["source", "provider", "id"],
+                            additionalProperties: false,
+                          },
+                          {
+                            type: "object",
+                            properties: {
+                              source: {
+                                type: "string",
+                                const: "file",
+                              },
+                              provider: {
+                                type: "string",
+                                pattern: "^[a-z][a-z0-9_-]{0,63}$",
+                              },
+                              id: {
+                                type: "string",
+                              },
+                            },
+                            required: ["source", "provider", "id"],
+                            additionalProperties: false,
+                          },
+                          {
+                            type: "object",
+                            properties: {
+                              source: {
+                                type: "string",
+                                const: "exec",
+                              },
+                              provider: {
+                                type: "string",
+                                pattern: "^[a-z][a-z0-9_-]{0,63}$",
+                              },
+                              id: {
+                                type: "string",
+                              },
+                            },
+                            required: ["source", "provider", "id"],
+                            additionalProperties: false,
+                          },
+                        ],
+                      },
+                    ],
+                    title: "SkillCenter OAuth Client Secret",
+                    description:
+                      "OAuth2 client secret issued to this Agent deployment. Supports a literal value or SecretRef and is never sent to box endpoints.",
+                  },
+                  scope: {
+                    type: "string",
+                    minLength: 1,
+                    title: "SkillCenter OAuth Scope",
+                    description:
+                      'Optional OAuth2 scope sent to the token endpoint, for example "read write".',
+                  },
+                },
+                required: ["clientId", "clientSecret"],
+                additionalProperties: false,
+                title: "SkillCenter OAuth",
+                description:
+                  "OAuth2 Client Credentials used only for SkillCenter catalog requests. Box download and install-reporting requests do not receive this credential.",
               },
               timeoutMs: {
                 type: "integer",
                 minimum: 1000,
                 maximum: 9007199254740991,
+                title: "Skills Registry Timeout (ms)",
+                description:
+                  "Timeout in milliseconds for SkillCenter and box service requests. The default is 10000 and the minimum is 1000.",
               },
             },
             additionalProperties: false,
@@ -24507,6 +24627,52 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       label: "Skills Watch Debounce (ms)",
       help: "Debounce window in milliseconds for coalescing rapid skill file changes before reload logic runs. Increase to reduce reload churn on frequent writes, or lower for faster edit feedback.",
       tags: ["performance", "automation"],
+    },
+    "skills.registry.enabled": {
+      label: "Enable Skills Registry",
+      help: "Enable remote skill discovery and installation. Disable this when the deployment should use only locally uploaded skills.",
+      tags: ["advanced"],
+    },
+    "skills.registry.baseUrl": {
+      label: "SkillCenter Base URL",
+      help: "SkillCenter base URL used only for catalog queries, for example http://skills.internal:3000.",
+      tags: ["advanced", "url-secret"],
+    },
+    "skills.registry.boxBaseUrl": {
+      label: "Skills Box Base URL",
+      help: "Box service base URL used for decrypted skill downloads and install or uninstall reporting. When omitted, the SkillCenter base URL is used for compatibility with older deployments.",
+      tags: ["advanced", "url-secret"],
+    },
+    "skills.registry.oauth": {
+      label: "SkillCenter OAuth",
+      help: "OAuth2 Client Credentials used only for SkillCenter catalog requests. Box download and install-reporting requests do not receive this credential.",
+      tags: ["advanced"],
+    },
+    "skills.registry.oauth.tokenUrl": {
+      label: "SkillCenter OAuth Token URL",
+      help: "OAuth2 token endpoint. When omitted, the Agent requests /api/system/oauth2/token from the configured SkillCenter base URL.",
+      tags: ["security", "auth"],
+    },
+    "skills.registry.oauth.clientId": {
+      label: "SkillCenter OAuth Client ID",
+      help: "OAuth2 client identifier issued to this Agent deployment by SkillCenter.",
+      tags: ["advanced"],
+    },
+    "skills.registry.oauth.clientSecret": {
+      label: "SkillCenter OAuth Client Secret",
+      help: "OAuth2 client secret issued to this Agent deployment. Supports a literal value or SecretRef and is never sent to box endpoints.",
+      tags: ["security", "auth"],
+      sensitive: true,
+    },
+    "skills.registry.oauth.scope": {
+      label: "SkillCenter OAuth Scope",
+      help: 'Optional OAuth2 scope sent to the token endpoint, for example "read write".',
+      tags: ["advanced"],
+    },
+    "skills.registry.timeoutMs": {
+      label: "Skills Registry Timeout (ms)",
+      help: "Timeout in milliseconds for SkillCenter and box service requests. The default is 10000 and the minimum is 1000.",
+      tags: ["performance"],
     },
     "agents.defaults.skills": {
       label: "Skills",
@@ -26901,6 +27067,10 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       help: "Plugin entry name inside the source marketplace, used for later updates.",
       tags: ["advanced"],
     },
+    "mcp.servers.*.enabled": {
+      help: "Set false to keep an MCP server configured while preventing runtime adapters from starting or probing it.",
+      tags: ["advanced"],
+    },
     "models.providers.*.headers.*": {
       sensitive: true,
       tags: ["security", "models"],
@@ -27299,9 +27469,6 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       tags: ["media", "tools", "url-secret"],
     },
     "mcp.servers.*.url": {
-      tags: ["advanced", "url-secret"],
-    },
-    "skills.registry.baseUrl": {
       tags: ["advanced", "url-secret"],
     },
   },

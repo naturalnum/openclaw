@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { GatewayWorkbenchAdapter } from "../../adapters/gateway-workbench-adapter";
 import type { WorkbenchAdapterEvent } from "../../adapters/workbench-adapter";
+import { resolveSessionDisplayLabel } from "../lib/session-display-label";
 
 export type RecentSessionNavItem = {
   key: string;
@@ -32,12 +33,15 @@ export function useRecentSessionsForNav(adapter: GatewayWorkbenchAdapter | null)
       const rows = Array.isArray(res.sessions) ? res.sessions : [];
       const mapped: RecentSessionNavItem[] = rows
         .filter((r) => typeof r.key === "string" && r.key.trim())
-        .map((r) => ({
-          key: r.key!.trim(),
-          label: (typeof r.label === "string" ? r.label : "").trim() || r.key!.trim(),
-          updatedAt:
-            typeof r.updatedAt === "number" && Number.isFinite(r.updatedAt) ? r.updatedAt : null,
-        }))
+        .map((r) => {
+          const key = r.key!.trim();
+          return {
+            key,
+            label: resolveSessionDisplayLabel(r.label, key),
+            updatedAt:
+              typeof r.updatedAt === "number" && Number.isFinite(r.updatedAt) ? r.updatedAt : null,
+          };
+        })
         .toSorted((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
         .slice(0, 24);
       setSessions(mapped);

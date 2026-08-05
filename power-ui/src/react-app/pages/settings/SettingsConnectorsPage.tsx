@@ -1,12 +1,12 @@
 import { Alert } from "antd";
 import { PageHeader } from "../../components/ui/PageHeader";
-import { useGatewayWorkbenchAdapter } from "../../hooks/useGatewayWorkbenchAdapter";
+import { useSharedGatewayWorkbenchAdapter } from "../../context/GatewayWorkbenchAdapterContext";
 import { usePowerUiSettings } from "../../hooks/usePowerUiSettings";
 import { SettingsConnectorsPanel } from "./SettingsConnectorsPanel";
 
 export function SettingsConnectorsPage() {
   const { settings } = usePowerUiSettings();
-  const adapter = useGatewayWorkbenchAdapter(settings);
+  const adapter = useSharedGatewayWorkbenchAdapter();
   const canUseGateway = Boolean(settings.gatewayUrl.trim());
 
   return (

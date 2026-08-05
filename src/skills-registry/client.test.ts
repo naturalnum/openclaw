@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const remoteHttp = vi.hoisted(() => ({
   requests: [] as Array<{ url: string; init?: RequestInit; auditContext: string }>,
-  responder: async (_url: string): Promise<Response> => new Response(null, { status: 500 }),
+  responder: async (_url: string, _init?: RequestInit): Promise<Response> =>
+    new Response(null, { status: 500 }),
 }));
 
 vi.mock("../memory-host-sdk/host/remote-http.js", () => ({
@@ -18,7 +19,7 @@ vi.mock("../memory-host-sdk/host/remote-http.js", () => ({
       init: params.init,
       auditContext: params.auditContext,
     });
-    return await params.onResponse(await remoteHttp.responder(params.url));
+    return await params.onResponse(await remoteHttp.responder(params.url, params.init));
   },
 }));
 
@@ -30,6 +31,13 @@ function parseRequestBody(request: { init?: RequestInit } | undefined): unknown 
     throw new TypeError("expected request body to be a JSON string");
   }
   return JSON.parse(body) as unknown;
+}
+
+function readRequestHeader(
+  request: { init?: RequestInit } | undefined,
+  name: string,
+): string | null {
+  return new Headers(request?.init?.headers).get(name);
 }
 
 describe("skills registry client", () => {
@@ -109,26 +117,79 @@ describe("skills registry client", () => {
     expect(new URL(remoteHttp.requests[0]?.url ?? "").searchParams.get("q")).toBe("slide");
   });
 
-  it("resolves download fields, downloads the decrypted package, and reports state changes", async () => {
+  it("authenticates catalog requests with a cached OAuth2 access token", async () => {
     remoteHttp.responder = async (url) => {
       const parsed = new URL(url);
-      if (parsed.pathname === "/api/open/v1/skillsList") {
+      if (parsed.pathname === "/api/system/oauth2/token") {
         return Response.json({
-          skills: [
-            {
-              slug: "slides",
-              displayName: "Slides",
-              version: "1.0.0",
-              filePath: "http://files.example.com/slides-1.0.0.zip.encrypted",
-              fileSize: 123,
-              fileName: "slides-1.0.0.zip",
-              sign: "mock-signature",
-              md5: "46cd9ba5b5d8b49908c1e6271e093006",
-            },
-          ],
-          pagination: { page: 1, limit: 100, total: 1, totalPages: 1 },
+          code: 200,
+          data: {
+            access_token: "test-access-token", // pragma: allowlist secret
+            token_type: "bearer",
+            expires_in: 3_600,
+            scope: "read write",
+          },
+          success: true,
         });
       }
+      if (parsed.pathname === "/api/v1/download") {
+        return new Response(new Uint8Array([1, 2, 3]), {
+          headers: { "content-type": "application/zip" },
+        });
+      }
+      const page = Number(parsed.searchParams.get("page"));
+      return Response.json({
+        categories: [],
+        skills: [],
+        pagination: { page, limit: 100, total: 0, totalPages: 2 },
+      });
+    };
+    const client = createSkillsRegistryClient({
+      skills: {
+        registry: {
+          enabled: true,
+          baseUrl: "http://skills.example.com",
+          boxBaseUrl: "http://box.example.com",
+          oauth: {
+            clientId: "agent-test",
+            clientSecret: "test-client-secret", // pragma: allowlist secret
+            scope: "read write",
+          },
+        },
+      },
+    });
+
+    await expect(client?.listCatalog()).resolves.toEqual({ categories: [], items: [] });
+    await expect(client?.downloadArtifact({ slug: "slides" })).resolves.toMatchObject({
+      filename: "slides-latest.zip",
+    });
+
+    expect(remoteHttp.requests.map((request) => new URL(request.url).pathname)).toEqual([
+      "/api/system/oauth2/token",
+      "/api/open/v1/skillsList",
+      "/api/open/v1/skillsList",
+      "/api/v1/download",
+    ]);
+    expect(remoteHttp.requests[0]?.init?.method).toBe("POST");
+    expect(parseRequestBody(remoteHttp.requests[0])).toEqual({
+      grantType: "client_credentials",
+      clientId: "agent-test",
+      clientSecret: "test-client-secret", // pragma: allowlist secret
+      scope: "read write",
+    });
+    expect(readRequestHeader(remoteHttp.requests[0], "authorization")).toBeNull();
+    expect(readRequestHeader(remoteHttp.requests[1], "authorization")).toBe(
+      "Bearer test-access-token", // pragma: allowlist secret
+    );
+    expect(readRequestHeader(remoteHttp.requests[2], "authorization")).toBe(
+      "Bearer test-access-token", // pragma: allowlist secret
+    );
+    expect(readRequestHeader(remoteHttp.requests[3], "authorization")).toBeNull();
+  });
+
+  it("downloads by slug and reports install and uninstall state changes", async () => {
+    remoteHttp.responder = async (url) => {
+      const parsed = new URL(url);
       if (parsed.pathname === "/api/v1/download") {
         return new Response(new Uint8Array([1, 2, 3]), {
           headers: {
@@ -140,7 +201,13 @@ describe("skills registry client", () => {
       return Response.json({ installs: 9 });
     };
     const client = createSkillsRegistryClient({
-      skills: { registry: { enabled: true, baseUrl: "http://skills.example.com" } },
+      skills: {
+        registry: {
+          enabled: true,
+          baseUrl: "http://skills.example.com",
+          boxBaseUrl: "http://box.example.com/",
+        },
+      },
     });
 
     await expect(
@@ -169,43 +236,45 @@ describe("skills registry client", () => {
     ).resolves.toEqual({ installs: 9 });
 
     expect(remoteHttp.requests.map((request) => new URL(request.url).pathname)).toEqual([
-      "/api/open/v1/skillsList",
       "/api/v1/download",
       "/api/v1/skills/slides/install-event",
       "/api/v1/skills/slides/install-event",
     ]);
-    expect(remoteHttp.requests[1]?.init?.method).toBe("POST");
-    expect(parseRequestBody(remoteHttp.requests[1])).toEqual({
-      filePath: "http://files.example.com/slides-1.0.0.zip.encrypted",
-      fileSize: 123,
-      fileName: "slides-1.0.0.zip",
-      sign: "mock-signature",
-      md5: "46cd9ba5b5d8b49908c1e6271e093006",
-    });
-    expect(new URL(remoteHttp.requests[2]?.url ?? "").pathname).toBe(
+    expect(remoteHttp.requests.map((request) => new URL(request.url).origin)).toEqual([
+      "http://box.example.com",
+      "http://box.example.com",
+      "http://box.example.com",
+    ]);
+    expect(remoteHttp.requests[0]?.init?.method).toBe("POST");
+    expect(parseRequestBody(remoteHttp.requests[0])).toEqual({ skillId: "slides" });
+    expect(new URL(remoteHttp.requests[1]?.url ?? "").pathname).toBe(
       "/api/v1/skills/slides/install-event",
     );
-    expect(parseRequestBody(remoteHttp.requests[2])).toMatchObject({
+    expect(parseRequestBody(remoteHttp.requests[1])).toMatchObject({
       action: "install",
     });
-    expect(parseRequestBody(remoteHttp.requests[3])).toMatchObject({
+    expect(parseRequestBody(remoteHttp.requests[2])).toMatchObject({
       action: "uninstall",
     });
   });
 
-  it("fails clearly when the catalog has not been adapted with download fields", async () => {
+  it("falls back to the catalog URL for older configs without a box URL", async () => {
     remoteHttp.responder = async () =>
-      Response.json({
-        skills: [{ slug: "slides", displayName: "Slides", version: "1.0.0" }],
-        pagination: { page: 1, limit: 100, total: 1, totalPages: 1 },
+      new Response(new Uint8Array([1, 2, 3]), {
+        headers: { "content-type": "application/zip" },
       });
     const client = createSkillsRegistryClient({
       skills: { registry: { enabled: true, baseUrl: "http://skills.example.com" } },
     });
 
-    await expect(client?.downloadArtifact({ slug: "slides", version: "1.0.0" })).rejects.toThrow(
-      "expected filePath, fileSize, fileName, sign, and md5",
-    );
+    await expect(
+      client?.downloadArtifact({ slug: "slides", version: "1.0.0" }),
+    ).resolves.toMatchObject({
+      filename: "slides-1.0.0.zip",
+      version: "1.0.0",
+    });
     expect(remoteHttp.requests).toHaveLength(1);
+    expect(new URL(remoteHttp.requests[0]?.url ?? "").origin).toBe("http://skills.example.com");
+    expect(parseRequestBody(remoteHttp.requests[0])).toEqual({ skillId: "slides" });
   });
 });

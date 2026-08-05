@@ -24,7 +24,6 @@ export type SkillsProps = {
   installFilter: SkillsRegistryInstallFilter;
   busyKey: string | null;
   messages: SkillMessageMap;
-  registryBaseUrl: string | null;
   onSearchChange: (next: string) => void;
   onCategoryChange: (next: string | null) => void;
   onSortChange: (next: SkillsRegistrySortBy) => void;
@@ -455,13 +454,6 @@ export function renderSkills(props: SkillsProps) {
                 }}
               />
             </label>
-            ${props.registryBaseUrl
-              ? html`
-                  <a class="btn" href=${props.registryBaseUrl} target="_blank" rel="noreferrer">
-                    打开技能中心
-                  </a>
-                `
-              : nothing}
             <button
               class="btn"
               ?disabled=${props.loading || !props.connected}

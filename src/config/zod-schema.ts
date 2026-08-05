@@ -925,6 +925,16 @@ export const OpenClawSchema = z
           .object({
             enabled: z.boolean().optional(),
             baseUrl: z.string().optional(),
+            boxBaseUrl: z.string().optional(),
+            oauth: z
+              .object({
+                tokenUrl: HttpUrlSchema.optional(),
+                clientId: z.string().trim().min(1),
+                clientSecret: SecretInputSchema.register(sensitive),
+                scope: z.string().trim().min(1).optional(),
+              })
+              .strict()
+              .optional(),
             timeoutMs: z.number().int().min(1000).optional(),
           })
           .strict()

@@ -194,3 +194,53 @@ describe("GatewayWorkbenchAdapter.uploadChatFiles", () => {
     ]);
   });
 });
+
+describe("GatewayWorkbenchAdapter.snapshot", () => {
+  it("requests agents and sessions concurrently on initial load", async () => {
+    const adapter = new GatewayWorkbenchAdapter({
+      getSettings: () => ({ gatewayUrl: "ws://127.0.0.1:18789", token: "test-token" }),
+    });
+    let resolveAgents: ((value: unknown) => void) | undefined;
+    let resolveSessions: ((value: unknown) => void) | undefined;
+    const request = vi.fn((method: string) => {
+      if (method === "agents.list") {
+        return new Promise((resolve) => {
+          resolveAgents = resolve;
+        });
+      }
+      if (method === "sessions.list") {
+        return new Promise((resolve) => {
+          resolveSessions = resolve;
+        });
+      }
+      if (method === "models.list") {
+        return Promise.resolve({ models: [] });
+      }
+      if (method === "config.get") {
+        return Promise.resolve({ config: {} });
+      }
+      return Promise.resolve({});
+    });
+    Object.defineProperty(adapter, "gateway", { value: { request } });
+
+    const snapshotPromise = adapter.snapshot({ projectId: null, sessionKey: null });
+    await vi.waitFor(() => {
+      expect(request).toHaveBeenCalledWith("agents.list", {});
+      expect(request).toHaveBeenCalledWith("sessions.list", {
+        includeGlobal: false,
+        includeUnknown: true,
+        limit: 200,
+      });
+    });
+
+    resolveAgents?.({ agents: [], defaultId: null });
+    resolveSessions?.({
+      sessions: [],
+      defaults: { model: "", modelProvider: "", contextTokens: 0 },
+    });
+
+    const snapshot = await snapshotPromise;
+    expect(snapshot.agentsList.agents).toEqual([]);
+    expect(snapshot.sessionsResult.sessions).toEqual([]);
+  });
+});

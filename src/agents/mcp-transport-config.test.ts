@@ -36,7 +36,7 @@ describe("resolveMcpTransportConfig", () => {
         "X-Count": "42",
       },
       description: "https://mcp.example.com/sse",
-      connectionTimeoutMs: 30_000,
+      connectionTimeoutMs: 5_000,
     });
   });
 

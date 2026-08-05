@@ -635,6 +635,24 @@ export const FIELD_HELP: Record<string, string> = {
     "Enable filesystem watching for skill-definition changes so updates can be applied without full process restart. Keep enabled in development workflows and disable in immutable production images.",
   "skills.load.watchDebounceMs":
     "Debounce window in milliseconds for coalescing rapid skill file changes before reload logic runs. Increase to reduce reload churn on frequent writes, or lower for faster edit feedback.",
+  "skills.registry.enabled":
+    "Enable remote skill discovery and installation. Disable this when the deployment should use only locally uploaded skills.",
+  "skills.registry.baseUrl":
+    "SkillCenter base URL used only for catalog queries, for example http://skills.internal:3000.",
+  "skills.registry.boxBaseUrl":
+    "Box service base URL used for decrypted skill downloads and install or uninstall reporting. When omitted, the SkillCenter base URL is used for compatibility with older deployments.",
+  "skills.registry.oauth":
+    "OAuth2 Client Credentials used only for SkillCenter catalog requests. Box download and install-reporting requests do not receive this credential.",
+  "skills.registry.oauth.tokenUrl":
+    "OAuth2 token endpoint. When omitted, the Agent requests /api/system/oauth2/token from the configured SkillCenter base URL.",
+  "skills.registry.oauth.clientId":
+    "OAuth2 client identifier issued to this Agent deployment by SkillCenter.",
+  "skills.registry.oauth.clientSecret":
+    "OAuth2 client secret issued to this Agent deployment. Supports a literal value or SecretRef and is never sent to box endpoints.",
+  "skills.registry.oauth.scope":
+    'Optional OAuth2 scope sent to the token endpoint, for example "read write".',
+  "skills.registry.timeoutMs":
+    "Timeout in milliseconds for SkillCenter and box service requests. The default is 10000 and the minimum is 1000.",
   approvals:
     "Approval routing controls for forwarding exec and plugin approval requests to chat destinations outside the originating session. Keep these disabled unless operators need explicit out-of-band approval visibility.",
   "approvals.exec":

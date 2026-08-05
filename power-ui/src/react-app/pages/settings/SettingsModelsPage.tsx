@@ -1,14 +1,14 @@
 import { Alert } from "antd";
 import { PageHeader } from "../../components/ui/PageHeader";
+import { useSharedGatewayWorkbenchAdapter } from "../../context/GatewayWorkbenchAdapterContext";
 import { useWorkbenchChat } from "../../context/WorkbenchChatContext";
-import { useGatewayWorkbenchAdapter } from "../../hooks/useGatewayWorkbenchAdapter";
 import { usePowerUiSettings } from "../../hooks/usePowerUiSettings";
 import { SettingsModelsPanel } from "./SettingsModelsPanel";
 
 export function SettingsModelsPage() {
   const { settings } = usePowerUiSettings();
   const { refreshSnapshot } = useWorkbenchChat();
-  const adapter = useGatewayWorkbenchAdapter(settings);
+  const adapter = useSharedGatewayWorkbenchAdapter();
   const canUseGateway = Boolean(settings.gatewayUrl.trim());
 
   return (

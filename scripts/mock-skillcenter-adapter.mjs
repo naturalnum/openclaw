@@ -8,7 +8,6 @@ const skillCenterBaseUrl = normalizeBaseUrl(
 );
 const skillCenterCatalogPath =
   process.env.SKILLCENTER_CATALOG_PATH?.trim() || "/api/open/v1/skillsList";
-const skillCenterOrigin = new URL(skillCenterBaseUrl).origin;
 const installCounts = new Map();
 
 function parsePositiveInteger(value, fallback) {
@@ -49,24 +48,6 @@ async function readJsonBody(request) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
-function buildMockDownloadFields(skill) {
-  const slug = typeof skill.slug === "string" ? skill.slug.trim() : "";
-  const version = typeof skill.version === "string" ? skill.version.trim() : "";
-  const fileName = `${slug}-${version || "latest"}.zip`;
-  const fileUrl = new URL("/api/v1/download", `${skillCenterBaseUrl}/`);
-  fileUrl.searchParams.set("slug", slug);
-  if (version) {
-    fileUrl.searchParams.set("version", version);
-  }
-  return {
-    filePath: fileUrl.toString(),
-    fileSize: 0,
-    fileName,
-    sign: `mock-sign:${slug}:${version || "latest"}`,
-    md5: "00000000000000000000000000000000",
-  };
-}
-
 async function proxyCatalog(request, response) {
   const incoming = new URL(request.url ?? "/api/open/v1/skillsList", "http://127.0.0.1");
   const upstreamUrl = new URL(skillCenterCatalogPath, `${skillCenterBaseUrl}/`);
@@ -91,7 +72,6 @@ async function proxyCatalog(request, response) {
         }
         return {
           ...skill,
-          ...buildMockDownloadFields(skill ?? {}),
           installs: slug ? (installCounts.get(slug) ?? upstreamInstalls) : upstreamInstalls,
         };
       })
@@ -100,26 +80,18 @@ async function proxyCatalog(request, response) {
 }
 
 function validateDownloadRequest(body) {
-  const requiredStrings = ["filePath", "fileName", "sign", "md5"];
-  for (const field of requiredStrings) {
-    if (typeof body[field] !== "string" || !body[field].trim()) {
-      throw new Error(`${field} is required`);
-    }
+  if (typeof body.skillId !== "string" || !body.skillId.trim()) {
+    throw new Error("skillId is required");
   }
-  if (typeof body.fileSize !== "number" || !Number.isFinite(body.fileSize) || body.fileSize < 0) {
-    throw new Error("fileSize must be a non-negative number");
-  }
-  const fileUrl = new URL(body.filePath);
-  if (fileUrl.origin !== skillCenterOrigin || fileUrl.pathname !== "/api/v1/download") {
-    throw new Error("mock decryption only accepts local SkillCenter download URLs");
-  }
-  return fileUrl;
+  return body.skillId.trim();
 }
 
 async function mockDecryptDownload(request, response) {
   const body = await readJsonBody(request);
-  const fileUrl = validateDownloadRequest(body);
-  const upstreamResponse = await fetch(fileUrl, {
+  const skillId = validateDownloadRequest(body);
+  const upstreamUrl = new URL("/api/v1/download", `${skillCenterBaseUrl}/`);
+  upstreamUrl.searchParams.set("slug", skillId);
+  const upstreamResponse = await fetch(upstreamUrl, {
     headers: { accept: "application/octet-stream" },
   });
   if (!upstreamResponse.ok) {
@@ -134,7 +106,7 @@ async function mockDecryptDownload(request, response) {
     "content-type": upstreamResponse.headers.get("content-type") ?? "application/octet-stream",
     "content-disposition":
       upstreamResponse.headers.get("content-disposition") ??
-      `attachment; filename="${String(body.fileName).replace(/["\\]/g, "-")}"`,
+      `attachment; filename="${skillId.replace(/["\\]/g, "-")}-latest.zip"`,
     "content-length": bytes.length,
     "x-skill-decryption": "mock-passthrough",
   });

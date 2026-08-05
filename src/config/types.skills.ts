@@ -24,9 +24,25 @@ export type SkillsInstallConfig = {
   nodeManager?: "npm" | "pnpm" | "yarn" | "bun";
 };
 
+export type SkillsRegistryOAuthConfig = {
+  /** OAuth2 token endpoint. Defaults to /api/system/oauth2/token on the catalog server. */
+  tokenUrl?: string;
+  /** OAuth2 client identifier issued to this Agent deployment. */
+  clientId: string;
+  /** OAuth2 client secret issued to this Agent deployment. */
+  clientSecret: SecretInput;
+  /** Optional OAuth2 scope sent to the token endpoint. */
+  scope?: string;
+};
+
 export type SkillsRegistryConfig = {
   enabled?: boolean;
+  /** SkillCenter catalog API base URL. */
   baseUrl?: string;
+  /** Box API base URL for decrypted downloads and install state reporting. */
+  boxBaseUrl?: string;
+  /** OAuth2 Client Credentials settings for SkillCenter catalog requests. */
+  oauth?: SkillsRegistryOAuthConfig;
   timeoutMs?: number;
 };
 

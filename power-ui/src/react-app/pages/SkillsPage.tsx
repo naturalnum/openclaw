@@ -44,8 +44,8 @@ import type {
 } from "../../compat/types";
 import { PageScaffold } from "../components/ui/PageScaffold";
 import { StatusPill } from "../components/ui/StatusPill";
+import { useSharedGatewayWorkbenchAdapter } from "../context/GatewayWorkbenchAdapterContext";
 import { useLocalUsers } from "../context/LocalUsersContext";
-import { useGatewayWorkbenchAdapter } from "../hooks/useGatewayWorkbenchAdapter";
 import { usePowerUiSettings } from "../hooks/usePowerUiSettings";
 import { ROUTES } from "../router/paths";
 
@@ -161,7 +161,7 @@ function useSkillsMarket(
 export function SkillsPage() {
   const { message } = App.useApp();
   const { settings } = usePowerUiSettings();
-  const adapter = useGatewayWorkbenchAdapter(settings);
+  const adapter = useSharedGatewayWorkbenchAdapter();
   const localUsers = useLocalUsers();
   const { state, run } = useSkillsMarket(adapter, localUsers.sessionToken);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -235,11 +235,6 @@ export function SkillsPage() {
                 }
               }}
             />
-            {state.skillsRegistryBaseUrl ? (
-              <Button href={state.skillsRegistryBaseUrl} target="_blank" rel="noreferrer">
-                打开技能中心
-              </Button>
-            ) : null}
             <Button
               icon={<UploadOutlined />}
               loading={state.skillsArchiveBusy}

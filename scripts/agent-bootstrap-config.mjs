@@ -71,6 +71,28 @@ async function writeManagedConfig(configPath, config) {
 
 const configPath = path.join(dataDir, "openclaw.json");
 const skillCenterBaseUrl = process.env.POWER_AGENT_SKILL_CENTER_URL?.trim();
+const skillBoxBaseUrl = process.env.POWER_AGENT_SKILL_BOX_URL?.trim();
+const skillCenterClientId = process.env.POWER_AGENT_SKILL_CENTER_CLIENT_ID?.trim();
+const skillCenterClientSecret = process.env.POWER_AGENT_SKILL_CENTER_CLIENT_SECRET?.trim();
+const skillCenterTokenUrl = process.env.POWER_AGENT_SKILL_CENTER_TOKEN_URL?.trim();
+const skillCenterScope = process.env.POWER_AGENT_SKILL_CENTER_SCOPE?.trim();
+const hasSkillCenterOAuthEnv = Boolean(
+  skillCenterClientId || skillCenterClientSecret || skillCenterTokenUrl || skillCenterScope,
+);
+if (hasSkillCenterOAuthEnv && (!skillCenterClientId || !skillCenterClientSecret)) {
+  throw new Error(
+    "POWER_AGENT_SKILL_CENTER_CLIENT_ID and POWER_AGENT_SKILL_CENTER_CLIENT_SECRET must be configured together",
+  );
+}
+const skillCenterOAuth =
+  skillCenterClientId && skillCenterClientSecret
+    ? {
+        clientId: skillCenterClientId,
+        clientSecret: skillCenterClientSecret,
+        ...(skillCenterTokenUrl ? { tokenUrl: skillCenterTokenUrl } : {}),
+        scope: skillCenterScope || "read write",
+      }
+    : undefined;
 let existingConfig;
 try {
   existingConfig = JSON.parse(await fs.readFile(configPath, "utf8"));
@@ -78,6 +100,11 @@ try {
   if (err && typeof err === "object" && "code" in err && err.code !== "ENOENT") {
     throw err;
   }
+}
+if (!existingConfig && skillCenterOAuth && !skillCenterBaseUrl) {
+  throw new Error(
+    "POWER_AGENT_SKILL_CENTER_URL is required when configuring SkillCenter OAuth on first startup",
+  );
 }
 
 if (!existingConfig) {
@@ -98,17 +125,22 @@ if (!existingConfig) {
       },
     },
     logging: { file: path.join(dataDir, "logs", "openclaw.log") },
-    ...(skillCenterBaseUrl
-      ? {
-          skills: {
+    skills: {
+      // Power Agent only loads skills installed by SkillCenter or uploaded by
+      // users. A non-matching sentinel disables OpenClaw's bundled skill prompts.
+      allowBundled: ["__none__"],
+      ...(skillCenterBaseUrl || skillBoxBaseUrl
+        ? {
             registry: {
               enabled: true,
-              baseUrl: skillCenterBaseUrl,
+              ...(skillCenterBaseUrl ? { baseUrl: skillCenterBaseUrl } : {}),
+              ...(skillBoxBaseUrl ? { boxBaseUrl: skillBoxBaseUrl } : {}),
+              ...(skillCenterOAuth ? { oauth: skillCenterOAuth } : {}),
               timeoutMs: 10_000,
             },
-          },
-        }
-      : {}),
+          }
+        : {}),
+    },
     plugins: {
       allow: ["power-backend"],
       entries: {
@@ -151,15 +183,21 @@ if (!existingConfig) {
       dangerouslyDisableDeviceAuth: existingControlUi.dangerouslyDisableDeviceAuth ?? true,
     },
   };
-  if (skillCenterBaseUrl) {
-    const existingSkills = isRecord(existingConfig.skills) ? existingConfig.skills : {};
+  const existingSkills = isRecord(existingConfig.skills) ? existingConfig.skills : {};
+  existingConfig.skills = {
+    ...existingSkills,
+    allowBundled: ["__none__"],
+  };
+  if (skillCenterBaseUrl || skillBoxBaseUrl || skillCenterOAuth) {
     const existingRegistry = isRecord(existingSkills.registry) ? existingSkills.registry : {};
     existingConfig.skills = {
-      ...existingSkills,
+      ...existingConfig.skills,
       registry: {
         ...existingRegistry,
         enabled: true,
-        baseUrl: skillCenterBaseUrl,
+        ...(skillCenterBaseUrl ? { baseUrl: skillCenterBaseUrl } : {}),
+        ...(skillBoxBaseUrl ? { boxBaseUrl: skillBoxBaseUrl } : {}),
+        ...(skillCenterOAuth ? { oauth: skillCenterOAuth } : {}),
         timeoutMs: existingRegistry.timeoutMs ?? 10_000,
       },
     };
