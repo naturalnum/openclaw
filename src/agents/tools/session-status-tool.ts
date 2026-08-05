@@ -21,7 +21,6 @@ import {
   resolveAgentIdFromSessionKey,
 } from "../../routing/session-key.js";
 import { applyModelOverrideToSessionEntry } from "../../sessions/model-overrides.js";
-import { importRuntimeModule } from "../../shared/runtime-import.js";
 import { normalizeOptionalLowercaseString } from "../../shared/string-coerce.js";
 import { buildTaskStatusSnapshotForRelatedSessionKeyForOwner } from "../../tasks/task-owner-access.js";
 import { formatTaskStatusDetail, formatTaskStatusTitle } from "../../tasks/task-status.js";
@@ -55,48 +54,17 @@ const SessionStatusToolSchema = Type.Object({
   model: Type.Optional(Type.String()),
 });
 
-type CommandsStatusRuntimeModule = {
-  buildStatusText: (params: {
-    cfg: OpenClawConfig;
-    sessionEntry?: SessionEntry;
-    sessionKey: string;
-    parentSessionKey?: string;
-    sessionScope?: "global" | "per-sender" | "per-thread" | "shared";
-    storePath?: string;
-    statusChannel: string;
-    provider: string;
-    model: string;
-    contextTokens?: number;
-    resolvedThinkLevel?: ThinkLevel;
-    resolvedFastMode?: boolean;
-    resolvedVerboseLevel: VerboseLevel;
-    resolvedReasoningLevel: ReasoningLevel;
-    resolvedElevatedLevel?: ElevatedLevel;
-    resolveDefaultThinkingLevel: () => Promise<ThinkLevel | undefined>;
-    isGroup: boolean;
-    defaultGroupActivation: () => "always" | "mention";
-    taskLineOverride?: string;
-    skipDefaultTaskLookup?: boolean;
-    primaryModelLabelOverride?: string;
-    modelAuthOverride?: string;
-    activeModelAuthOverride?: string;
-    includeTranscriptUsage?: boolean;
-  }) => Promise<string>;
-};
+type CommandsStatusRuntimeModule =
+  typeof import("../../auto-reply/reply/commands-status.runtime.js");
 
-const COMMANDS_STATUS_RUNTIME_SPEC = [
-  "../../auto-reply/reply/commands-status.runtime",
-  ".js",
-] as const;
-
-let commandsStatusRuntimePromise: Promise<CommandsStatusRuntimeModule> | null = null;
+let commandsStatusRuntimePromise: Promise<CommandsStatusRuntimeModule> | undefined;
 
 function loadCommandsStatusRuntime(): Promise<CommandsStatusRuntimeModule> {
-  commandsStatusRuntimePromise ??= importRuntimeModule<CommandsStatusRuntimeModule>(
-    import.meta.url,
-    COMMANDS_STATUS_RUNTIME_SPEC,
-  );
-  return commandsStatusRuntimePromise;
+  // Keep this as a direct dynamic import so the production bundler rewrites it
+  // to the emitted dist chunk. A computed URL survives bundling unchanged and
+  // resolves outside dist when session_status runs from a bundled chunk.
+  return (commandsStatusRuntimePromise ??=
+    import("../../auto-reply/reply/commands-status.runtime.js"));
 }
 
 function resolveSessionEntry(params: {

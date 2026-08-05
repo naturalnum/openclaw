@@ -14,6 +14,24 @@
   color: #24272d;
 }
 
+.power-neutral-select-dropdown .ant-select-item {
+  border-radius: 8px;
+  margin: 2px 4px;
+}
+
+.power-neutral-select-dropdown
+  .ant-select-item-option-selected:not(.ant-select-item-option-disabled) {
+  background: #f1f1ef;
+  color: #24272d;
+  font-weight: 500;
+}
+
+.power-neutral-select-dropdown
+  .ant-select-item-option-active:not(.ant-select-item-option-disabled) {
+  background: #f7f7f5;
+  color: #24272d;
+}
+
 .power-sidebar-action-dropdown .ant-dropdown-menu {
   min-width: 7.5rem;
   padding: 0.25rem;

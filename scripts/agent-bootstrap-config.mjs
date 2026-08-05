@@ -69,6 +69,46 @@ async function writeManagedConfig(configPath, config) {
   await fs.chmod(configPath, 0o600);
 }
 
+async function removeFileIfPresent(filePath) {
+  try {
+    await fs.unlink(filePath);
+  } catch (err) {
+    if (!err || typeof err !== "object" || !("code" in err) || err.code !== "ENOENT") {
+      throw err;
+    }
+  }
+}
+
+async function listDirectories(dir) {
+  try {
+    return (await fs.readdir(dir, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+  } catch (err) {
+    if (err && typeof err === "object" && "code" in err && err.code === "ENOENT") {
+      return [];
+    }
+    throw err;
+  }
+}
+
+async function removeLegacyBootstrapPrompts(stateDir) {
+  await removeFileIfPresent(path.join(stateDir, "workspace", "BOOTSTRAP.md"));
+  for (const usersDir of [
+    path.join(stateDir, "users"),
+    path.join(stateDir, "workspace", "users"),
+  ]) {
+    for (const userId of await listDirectories(usersDir)) {
+      const userDir = path.join(usersDir, userId);
+      await removeFileIfPresent(path.join(userDir, "default", "BOOTSTRAP.md"));
+      const projectsDir = path.join(userDir, "projects");
+      for (const projectName of await listDirectories(projectsDir)) {
+        await removeFileIfPresent(path.join(projectsDir, projectName, "BOOTSTRAP.md"));
+      }
+    }
+  }
+}
+
 const configPath = path.join(dataDir, "openclaw.json");
 const skillCenterBaseUrl = process.env.POWER_AGENT_SKILL_CENTER_URL?.trim();
 const skillBoxBaseUrl = process.env.POWER_AGENT_SKILL_BOX_URL?.trim();
@@ -125,6 +165,13 @@ if (!existingConfig) {
       },
     },
     logging: { file: path.join(dataDir, "logs", "openclaw.log") },
+    agents: {
+      defaults: {
+        // Power Agent has a product identity already. New users, projects, and
+        // chats must not enter OpenClaw's interactive identity onboarding.
+        skipBootstrap: true,
+      },
+    },
     skills: {
       // Power Agent only loads skills installed by SkillCenter or uploaded by
       // users. A non-matching sentinel disables OpenClaw's bundled skill prompts.
@@ -183,6 +230,15 @@ if (!existingConfig) {
       dangerouslyDisableDeviceAuth: existingControlUi.dangerouslyDisableDeviceAuth ?? true,
     },
   };
+  const existingAgents = isRecord(existingConfig.agents) ? existingConfig.agents : {};
+  const existingAgentDefaults = isRecord(existingAgents.defaults) ? existingAgents.defaults : {};
+  existingConfig.agents = {
+    ...existingAgents,
+    defaults: {
+      ...existingAgentDefaults,
+      skipBootstrap: true,
+    },
+  };
   const existingSkills = isRecord(existingConfig.skills) ? existingConfig.skills : {};
   existingConfig.skills = {
     ...existingSkills,
@@ -204,3 +260,5 @@ if (!existingConfig) {
   }
   await writeManagedConfig(configPath, existingConfig);
 }
+
+await removeLegacyBootstrapPrompts(dataDir);

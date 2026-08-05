@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -27,7 +27,11 @@ type BootstrapConfig = {
     };
     [key: string]: unknown;
   };
-  agents?: unknown;
+  agents?: {
+    defaults?: Record<string, unknown>;
+    list?: unknown[];
+    [key: string]: unknown;
+  };
   models?: unknown;
   skills?: unknown;
   plugins?: unknown;
@@ -109,6 +113,7 @@ describe("agent-bootstrap-config", () => {
       },
     });
     expect(config.gateway.controlUi.allowedOrigins).toEqual(expectedManagedOrigins(port));
+    expect(config.agents).toEqual({ defaults: { skipBootstrap: true } });
     expect(config.skills).toEqual({ allowBundled: ["__none__"] });
     expect(statSync(path.join(dataDir, "openclaw.json")).mode & 0o777).toBe(0o600);
   });
@@ -195,7 +200,13 @@ describe("agent-bootstrap-config", () => {
     runBootstrap(dataDir, appDir, port);
 
     const config = readConfig(dataDir);
-    expect(config.agents).toEqual(existing.agents);
+    expect(config.agents).toEqual({
+      ...existing.agents,
+      defaults: {
+        ...existing.agents.defaults,
+        skipBootstrap: true,
+      },
+    });
     expect(config.models).toEqual(existing.models);
     expect(config.skills).toEqual({
       ...existing.skills,
@@ -224,6 +235,31 @@ describe("agent-bootstrap-config", () => {
       ...expectedManagedOrigins(port),
     ]);
     expect(config.gateway.auth).not.toHaveProperty("password");
+  });
+
+  it("disables identity onboarding and removes legacy bootstrap prompts", () => {
+    const root = createTempDir("openclaw-agent-bootstrap-onboarding-");
+    const dataDir = path.join(root, "data");
+    const appDir = path.join(root, "app");
+    const workspaceDirs = [
+      path.join(dataDir, "workspace"),
+      path.join(dataDir, "workspace", "users", "legacy", "projects", "archive"),
+      path.join(dataDir, "users", "admin", "default"),
+      path.join(dataDir, "users", "admin", "projects", "research"),
+    ];
+    for (const workspaceDir of workspaceDirs) {
+      mkdirSync(workspaceDir, { recursive: true });
+      writeFileSync(path.join(workspaceDir, "BOOTSTRAP.md"), "identity onboarding\n", "utf8");
+      writeFileSync(path.join(workspaceDir, "project-data.txt"), "keep me\n", "utf8");
+    }
+
+    runBootstrap(dataDir, appDir, 19_129);
+
+    expect(readConfig(dataDir).agents?.defaults?.skipBootstrap).toBe(true);
+    for (const workspaceDir of workspaceDirs) {
+      expect(existsSync(path.join(workspaceDir, "BOOTSTRAP.md"))).toBe(false);
+      expect(readFileSync(path.join(workspaceDir, "project-data.txt"), "utf8")).toBe("keep me\n");
+    }
   });
 
   it("is idempotent across repeated starts", () => {

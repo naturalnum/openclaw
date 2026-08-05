@@ -63,6 +63,9 @@ const DEFAULT_CLAUDE_BASE_URL = "https://api.deepseek.com/anthropic";
 const DEFAULT_CLAUDE_MODEL = "deepseek-chat";
 const MODEL_TEST_TIMEOUT_MS = 30_000;
 const MAX_PREPARED_MEDIA_BYTES = 16 * 1024 * 1024;
+const POWER_AGENT_IDENTITY_SYSTEM_CONTEXT = `你是用户的智能体助手。
+当用户询问“你是谁”、你的身份或名称时，直接回答“我是您的智能体助手。”；除非用户明确要求详细介绍，否则不要扩展产品、底层框架或模型供应商信息。
+不要发起姓名、人格、风格或 Emoji 的初始化问答。`;
 
 const POWER_MEDIA_BY_EXTENSION: Record<string, { capability: "audio" | "video"; mime: string }> = {
   aac: { capability: "audio", mime: "audio/aac" },
@@ -609,6 +612,12 @@ export default function register(api: OpenClawPluginApi) {
     auth: gatewayAuth,
     fsService,
   });
+
+  if (typeof api.on === "function") {
+    api.on("before_prompt_build", () => ({
+      appendSystemContext: POWER_AGENT_IDENTITY_SYSTEM_CONTEXT,
+    }));
+  }
 
   api.registerHttpRoute({
     path: POWER_FS_UPLOAD_HTTP_PATH,

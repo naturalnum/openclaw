@@ -571,13 +571,8 @@ function SidebarNav({
       </nav>
 
       {!collapsed ? (
-        <>
-          <div
-            className={cn(
-              "mt-3 flex flex-col overflow-hidden border-t border-stone-200/85 px-2 pb-2 pt-3",
-              projectsOpen ? "max-h-[62%] min-h-0 shrink-0" : "shrink-0",
-            )}
-          >
+        <div className="power-sidebar-scroll mt-3 flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain border-t border-stone-200/85">
+          <div className={cn("flex shrink-0 flex-col px-2 pb-1 pt-3")}>
             <div
               className={cn(
                 sectionHeaderRowClass,
@@ -623,7 +618,7 @@ function SidebarNav({
               </button>
             </div>
             {projectsOpen ? (
-              <div className="power-sidebar-scroll mt-1.5 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overscroll-contain pb-2 pl-1">
+              <div className="mt-2 flex flex-col gap-1 pb-2 pl-2">
                 {projects.map((p) => {
                   const projectCollapsed = collapsedProjectIds.has(p.id);
                   const projectSessions = sessionsByProject.get(p.id) ?? [];
@@ -871,12 +866,7 @@ function SidebarNav({
             ) : null}
           </div>
 
-          <div
-            className={cn(
-              "flex min-h-0 flex-col border-t border-stone-200/85 px-2 pt-2.5",
-              recentOpen ? "max-h-[34%] shrink-0" : "shrink-0",
-            )}
-          >
+          <div className="flex shrink-0 flex-col px-2 pt-1">
             <button
               type="button"
               aria-expanded={recentOpen}
@@ -896,7 +886,7 @@ function SidebarNav({
               ) : null}
             </button>
             {recentOpen ? (
-              <div className="power-sidebar-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-0.5 pb-2 pt-1.5">
+              <div className="pb-2 pl-2 pr-0.5 pt-2">
                 {!recentLoading && recentOnlySessions.length === 0 ? (
                   <p className="px-1.5 py-2 text-center text-[11px] leading-snug text-slate-500">
                     暂无会话
@@ -982,7 +972,7 @@ function SidebarNav({
               </div>
             ) : null}
           </div>
-        </>
+        </div>
       ) : null}
 
       <div

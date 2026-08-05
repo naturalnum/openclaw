@@ -51,6 +51,7 @@ async function invokeHandler(handler: RegisteredHandler, params?: unknown) {
 
 function createPluginApiMock() {
   const gatewayMethods = new Map<string, RegisteredHandler>();
+  const hooks = new Map<string, () => unknown>();
   return {
     api: {
       pluginConfig: {
@@ -62,6 +63,9 @@ function createPluginApiMock() {
       registerGatewayMethod: vi.fn((name: string, handler: RegisteredHandler) => {
         gatewayMethods.set(name, handler);
       }),
+      on: vi.fn((name: string, handler: () => unknown) => {
+        hooks.set(name, handler);
+      }),
       logger: {
         info: vi.fn(),
         warn: vi.fn(),
@@ -70,8 +74,24 @@ function createPluginApiMock() {
       },
     },
     gatewayMethods,
+    hooks,
   };
 }
+
+describe("Power Agent identity prompt", () => {
+  it("adds a stable product identity without interactive onboarding", async () => {
+    const { default: register } = await import("./plugin.js");
+    const { api, hooks } = createPluginApiMock();
+    register(api as never);
+
+    const hook = hooks.get("before_prompt_build");
+    expect(hook).toBeDefined();
+    expect(hook?.()).toEqual({
+      appendSystemContext: expect.stringContaining("我是您的智能体助手。"),
+    });
+    expect(JSON.stringify(hook?.())).toContain("不要发起姓名、人格、风格或 Emoji");
+  });
+});
 
 describe("power.code.settings.set", () => {
   const originalHome = process.env.HOME;

@@ -385,16 +385,6 @@ function buildVisibleUserMessage(text: string, input: { imageCount: number; file
   return "";
 }
 
-function formatElapsedDuration(ms: number): string {
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-  if (totalSeconds < 60) {
-    return `${totalSeconds}s`;
-  }
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
-}
-
 function mediaPathBasename(rawPath: string): string {
   const normalized = rawPath.replaceAll("\\", "/").trim();
   const parts = normalized.split("/").filter((part) => part.trim().length > 0);
@@ -816,7 +806,6 @@ export function ChatPage() {
 
   const chatToolSteps = activeRuntime?.displayToolSteps ?? [];
   const runActive = Boolean(activeRuntime?.chatRunId);
-  const [activityNowMs, setActivityNowMs] = useState(() => Date.now());
   const visibleToolSteps = useMemo(
     () =>
       shouldShowToolStepsList(chatToolSteps, { active: runActive || sending }) ? chatToolSteps : [],
@@ -858,10 +847,6 @@ export function ChatPage() {
   const showStream = showLiveStream;
   const busy = sending || runActive || Boolean(activeRuntime?.chatSending) || showStream;
   const activeApproval = approvalQueue[0] ?? null;
-  const activityStartedAt =
-    activeRuntime?.chatStreamStartedAt ?? optimisticUserBubble?.ts ?? (busy ? activityNowMs : null);
-  const elapsedLabel =
-    busy && activityStartedAt ? formatElapsedDuration(activityNowMs - activityStartedAt) : null;
   /** 已发起请求但尚未收到可见文本（首 token 等待） */
   const awaitingFirstToken = runActive && !showLiveStream && !activeRuntime?.lastError;
   const showAssistantOutput = awaitingFirstToken || showStream;
@@ -875,35 +860,7 @@ export function ChatPage() {
     return "done";
   }, [visibleToolSteps, runActive, sending]);
   const showAssistantActivityCard = visibleToolSteps.length > 0 || showAssistantOutput;
-  const runStatusHint = useMemo(() => {
-    if (!runActive && !sending) {
-      return null;
-    }
-    const suffix = elapsedLabel ? ` · 已用 ${elapsedLabel}` : "";
-    if (visibleToolSteps.some((step) => !step.complete)) {
-      return `正在执行任务…${suffix}`;
-    }
-    if (awaitingFirstToken) {
-      return `正在等待回复…${suffix}`;
-    }
-    if (showStream) {
-      return `正在生成回复…${suffix}`;
-    }
-    if (runActive) {
-      return `正在整理结果…${suffix}`;
-    }
-    return `发送中…${suffix}`;
-  }, [visibleToolSteps, runActive, sending, showStream, awaitingFirstToken, elapsedLabel]);
   const errorText = snapshotError ?? activeRuntime?.lastError ?? null;
-  useEffect(() => {
-    if (!busy) {
-      setActivityNowMs(Date.now());
-      return undefined;
-    }
-    setActivityNowMs(Date.now());
-    const timer = window.setInterval(() => setActivityNowMs(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [busy, selectedSessionKey, activeRuntime?.chatRunId, activeRuntime?.chatStreamStartedAt]);
   useEffect(() => {
     if (!optimisticUserBubble) {
       return;
@@ -1291,16 +1248,9 @@ export function ChatPage() {
         <header className="power-chat-page-header flex h-14 shrink-0 items-center justify-between gap-3 border-b border-stone-200/80 bg-white/95 px-5 backdrop-blur">
           <div className="min-w-0 flex-1 pt-0.5">
             {currentSessionLabel ? (
-              <>
-                <p className="truncate text-sm font-semibold tracking-[-0.01em] text-slate-900 sm:text-base">
-                  {currentSessionLabel}
-                </p>
-                {runStatusHint ? (
-                  <p className="truncate text-xs text-slate-500" aria-live="polite">
-                    {runStatusHint}
-                  </p>
-                ) : null}
-              </>
+              <p className="truncate text-sm font-semibold tracking-[-0.01em] text-slate-900 sm:text-base">
+                {currentSessionLabel}
+              </p>
             ) : (
               <p className="truncate text-sm text-slate-500">新建或选择会话以开始</p>
             )}

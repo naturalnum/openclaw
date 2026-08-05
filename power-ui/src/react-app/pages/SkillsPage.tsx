@@ -283,6 +283,7 @@ export function SkillsPage() {
                   value={state.skillsSortBy}
                   onChange={(v) => void run(setSkillsSortBy(state, v))}
                   className="min-w-[9.5rem]"
+                  classNames={{ popup: { root: "power-neutral-select-dropdown" } }}
                   options={[
                     { value: "comprehensive", label: "综合" },
                     { value: "downloads", label: "下载量" },

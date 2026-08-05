@@ -97,6 +97,48 @@ cfg.gateway.controlUi = {
   // Production deployments should prefer HTTPS and device identity.
   dangerouslyDisableDeviceAuth: true,
 };
+cfg.agents ??= {};
+cfg.agents.defaults ??= {};
+cfg.agents.defaults.skipBootstrap = true;
+
+const removeBootstrapIfPresent = (workspaceDir) => {
+  const bootstrapPath = path.join(workspaceDir, "BOOTSTRAP.md");
+  try {
+    fs.unlinkSync(bootstrapPath);
+    console.log("[dev-stack] removed legacy identity onboarding:", bootstrapPath);
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw error;
+    }
+  }
+};
+const listDirectories = (dir) => {
+  try {
+    return fs
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+};
+removeBootstrapIfPresent(path.join(path.dirname(configPath), "workspace"));
+for (const usersDir of [
+  path.join(path.dirname(configPath), "users"),
+  path.join(path.dirname(configPath), "workspace", "users"),
+]) {
+  for (const userId of listDirectories(usersDir)) {
+    const userDir = path.join(usersDir, userId);
+    removeBootstrapIfPresent(path.join(userDir, "default"));
+    const projectsDir = path.join(userDir, "projects");
+    for (const projectName of listDirectories(projectsDir)) {
+      removeBootstrapIfPresent(path.join(projectsDir, projectName));
+    }
+  }
+}
 fs.writeFileSync(configPath, `${JSON.stringify(cfg, null, 2)}\n`, { mode: 0o600 });
 console.log(
   `[dev-stack] configured LAN gateway on port ${gatewayPort}; allowed UI origins: ${requiredOrigins.join(", ")}`,
