@@ -20,6 +20,10 @@ if [ -e "${APP_DIR}" ]; then
   rm -rf "${STALE_APP_DIR}" || true
 fi
 mkdir -p "${APP_DIR}"
+rm -f "${OUTPUT_ROOT}/.env"
+if [ -f "${PROJECT_ROOT}/deploy/agent.env" ]; then
+  cp "${PROJECT_ROOT}/deploy/agent.env" "${OUTPUT_ROOT}/agent.env"
+fi
 for item in dist node_modules docs qa package.json openclaw.mjs; do
   cp -R "${PROJECT_ROOT}/${item}" "${APP_DIR}/${item}"
 done
@@ -32,11 +36,14 @@ chmod 0755 "${OUTPUT_ROOT}/start.sh"
 rm -f "${ARCHIVE_PATH}"
 tar \
   --exclude='.DS_Store' \
-  --exclude="${OUTPUT_NAME}/data" \
   -czf "${ARCHIVE_PATH}" \
   -C "${OUTPUT_PARENT}" \
-  "${OUTPUT_NAME}"
+  "${OUTPUT_NAME}/app" \
+  "${OUTPUT_NAME}/start.sh" \
+  "${OUTPUT_NAME}/agent.env"
 
 echo "Agent package created at ${OUTPUT_ROOT}"
 echo "Clean install archive created at ${ARCHIVE_PATH}"
-echo "The application updater may replace app/ and start.sh; data/ is created on first launch."
+echo "The application updater may replace app/ and start.sh."
+echo "The default agent.env is included; environment variables may override its values."
+echo "User data/ is not included in the clean install archive."

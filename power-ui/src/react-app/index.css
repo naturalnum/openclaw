@@ -269,13 +269,22 @@
   background: #b8b8b4;
 }
 
-/* 对话页「最近修改」侧栏：展开/收起与预览加宽 */
+/* 对话页「项目文件」浮层：展开/收起与预览加宽 */
 #root .power-workspace-rail {
   transition:
     width 320ms cubic-bezier(0.4, 0, 0.2, 1),
     opacity 280ms cubic-bezier(0.4, 0, 0.2, 1),
+    transform 320ms cubic-bezier(0.4, 0, 0.2, 1),
     border-color 320ms cubic-bezier(0.4, 0, 0.2, 1);
   border-color: rgba(228, 228, 231, 0.9);
+}
+
+#root .power-chat-stage {
+  transition: margin-right 320ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#root .power-chat-stage--preview-open {
+  margin-right: min(50vw, 42rem);
 }
 
 #root .power-workspace-files-card {
@@ -288,18 +297,24 @@
 
 #root .power-workspace-rail--list.power-workspace-rail--open {
   width: 328px;
+  max-height: calc(100% - 4rem);
   opacity: 1;
+  transform: translateX(0);
 }
 
 #root .power-workspace-rail--preview.power-workspace-rail--open {
   width: min(50vw, 42rem);
   opacity: 1;
+  transform: translateX(0);
 }
 
 #root .power-workspace-rail--closed {
   width: 0;
   opacity: 0;
+  transform: translateX(12px);
+  border-width: 0;
   border-color: transparent;
+  box-shadow: none;
   pointer-events: none;
 }
 
@@ -311,6 +326,8 @@
 
 #root .power-workspace-rail--list .power-workspace-rail__inner {
   width: 328px;
+  height: auto;
+  max-height: 100%;
 }
 
 #root .power-workspace-rail--preview .power-workspace-rail__inner {
@@ -319,13 +336,13 @@
 
 @media (prefers-reduced-motion: reduce) {
   #root .power-workspace-rail,
-  #root .power-workspace-rail__inner {
+  #root .power-workspace-rail__inner,
+  #root .power-chat-stage {
     transition: none;
   }
 }
 
 /* 工作区文件预览全屏：隐藏左侧导航与对话，仅保留预览区 */
-#root.power-workspace-preview-fullscreen .power-sidebar,
 #root.power-workspace-preview-fullscreen .power-shell-mobile-header {
   display: none !important;
 }
@@ -348,6 +365,15 @@
   opacity: 1 !important;
   pointer-events: auto !important;
   border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+@media (min-width: 768px) {
+  #root.power-workspace-preview-fullscreen .power-workspace-rail {
+    left: var(--power-sidebar-width, 260px);
+    width: auto !important;
+  }
 }
 
 #root.power-workspace-preview-fullscreen .power-workspace-rail__inner {

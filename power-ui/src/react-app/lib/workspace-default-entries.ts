@@ -1,6 +1,6 @@
 /**
  * OpenClaw workspace bootstrap / state files (see `src/agents/workspace.ts`).
- * Hidden from Power UI「最近修改」— users care about task outputs, not agent scaffolding.
+ * Hidden from Power UI「项目文件」— users care about task outputs, not agent scaffolding.
  */
 export const OPENCLAW_WORKSPACE_HIDDEN_FILE_NAMES = new Set(
   [

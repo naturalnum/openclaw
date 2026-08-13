@@ -258,6 +258,30 @@ describe("skills registry client", () => {
     });
   });
 
+  it("allows at least 60 seconds for box-side download and decryption", async () => {
+    const timeoutSpy = vi
+      .spyOn(AbortSignal, "timeout")
+      .mockImplementation(() => new AbortController().signal);
+    remoteHttp.responder = async () =>
+      new Response(new Uint8Array([1, 2, 3]), {
+        headers: { "content-type": "application/zip" },
+      });
+    const client = createSkillsRegistryClient({
+      skills: {
+        registry: {
+          enabled: true,
+          baseUrl: "http://skills.example.com",
+          boxBaseUrl: "http://box.example.com",
+          timeoutMs: 10_000,
+        },
+      },
+    });
+
+    await expect(client?.downloadArtifact({ slug: "slides" })).resolves.toBeDefined();
+    expect(timeoutSpy).toHaveBeenCalledWith(60_000);
+    timeoutSpy.mockRestore();
+  });
+
   it("falls back to the catalog URL for older configs without a box URL", async () => {
     remoteHttp.responder = async () =>
       new Response(new Uint8Array([1, 2, 3]), {

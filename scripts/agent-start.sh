@@ -7,6 +7,7 @@ DATA_DIR="${AGENT_ROOT}/data"
 RUN_DIR="${DATA_DIR}/run"
 PID_FILE="${RUN_DIR}/gateway.pid"
 START_LOG="${DATA_DIR}/logs/start.log"
+ENV_FILE="${AGENT_ROOT}/agent.env"
 
 print_access_urls() {
   node - "${gateway_port}" <<'NODE'
@@ -56,6 +57,43 @@ mkdir -p \
   "${DATA_DIR}/tmp"
 chmod 0700 "${DATA_DIR}"
 
+# Load machine-local settings beside start.sh. Values explicitly supplied by
+# the launcher take precedence over agent.env, and packaged defaults are last.
+skill_center_url_was_set="${POWER_AGENT_SKILL_CENTER_URL+x}"
+skill_center_url_value="${POWER_AGENT_SKILL_CENTER_URL-}"
+skill_box_url_was_set="${POWER_AGENT_SKILL_BOX_URL+x}"
+skill_box_url_value="${POWER_AGENT_SKILL_BOX_URL-}"
+skill_center_client_id_was_set="${POWER_AGENT_SKILL_CENTER_CLIENT_ID+x}"
+skill_center_client_id_value="${POWER_AGENT_SKILL_CENTER_CLIENT_ID-}"
+skill_center_client_secret_was_set="${POWER_AGENT_SKILL_CENTER_CLIENT_SECRET+x}"
+skill_center_client_secret_value="${POWER_AGENT_SKILL_CENTER_CLIENT_SECRET-}"
+
+if [ -f "${ENV_FILE}" ]; then
+  set -a
+  # shellcheck disable=SC1090 -- deployment-local file resolved at runtime.
+  . "${ENV_FILE}"
+  set +a
+fi
+
+if [ -n "${skill_center_url_was_set}" ]; then
+  POWER_AGENT_SKILL_CENTER_URL="${skill_center_url_value}"
+fi
+if [ -n "${skill_box_url_was_set}" ]; then
+  POWER_AGENT_SKILL_BOX_URL="${skill_box_url_value}"
+fi
+if [ -n "${skill_center_client_id_was_set}" ]; then
+  POWER_AGENT_SKILL_CENTER_CLIENT_ID="${skill_center_client_id_value}"
+fi
+if [ -n "${skill_center_client_secret_was_set}" ]; then
+  POWER_AGENT_SKILL_CENTER_CLIENT_SECRET="${skill_center_client_secret_value}"
+fi
+
+# Packaged defaults apply only when neither launch environment nor agent.env sets a value.
+: "${POWER_AGENT_SKILL_CENTER_URL=http://192.168.2.5:28080}"
+: "${POWER_AGENT_SKILL_BOX_URL=http://127.0.0.1:3300}"
+export POWER_AGENT_SKILL_CENTER_URL POWER_AGENT_SKILL_BOX_URL
+export POWER_AGENT_SKILL_CENTER_CLIENT_ID POWER_AGENT_SKILL_CENTER_CLIENT_SECRET
+
 gateway_port=18789
 expect_port=0
 for arg in "$@"; do
@@ -75,8 +113,14 @@ is_gateway_process() {
   command_line="$(ps -p "${checked_pid}" -o command= 2>/dev/null || true)"
   case "${command_line}" in
     *openclaw-gateway*|*"${APP_DIR}/openclaw.mjs"*) return 0 ;;
-    *) return 1 ;;
   esac
+  if command -v lsof >/dev/null 2>&1; then
+    process_cwd="$(lsof -a -p "${checked_pid}" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1)"
+    if [ "${process_cwd}" = "${AGENT_ROOT}" ]; then
+      return 0
+    fi
+  fi
+  return 1
 }
 
 is_recorded_agent_process() {

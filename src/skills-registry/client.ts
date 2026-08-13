@@ -8,6 +8,8 @@ import {
 import { resolveSecretInputString } from "../secrets/resolve-secret-input-string.js";
 
 export type SkillsRegistrySortBy = "comprehensive" | "downloads" | "updated";
+
+const SKILL_DOWNLOAD_TIMEOUT_MS = 60_000;
 export type SkillsRegistryInstallFilter = "all" | "installed" | "not_installed";
 
 export type SkillsRegistryCategory = {
@@ -310,6 +312,9 @@ export function createSkillsRegistryClient(cfg: OpenClawConfig): SkillsRegistryC
     return null;
   }
   const { catalogBaseUrl, boxBaseUrl, oauth, timeoutMs } = resolved;
+  // Download includes the box-side decrypt step, which can take substantially
+  // longer than catalog and status requests.
+  const downloadTimeoutMs = Math.max(timeoutMs, SKILL_DOWNLOAD_TIMEOUT_MS);
   let accessToken: CachedAccessToken | null = null;
   let accessTokenRequest: Promise<string> | null = null;
 
@@ -444,7 +449,7 @@ export function createSkillsRegistryClient(cfg: OpenClawConfig): SkillsRegistryC
           // download contract names the same value `skillId`.
           body: JSON.stringify({ skillId: slug }),
           ...(typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
-            ? { signal: AbortSignal.timeout(timeoutMs) }
+            ? { signal: AbortSignal.timeout(downloadTimeoutMs) }
             : {}),
         },
         ssrfPolicy,

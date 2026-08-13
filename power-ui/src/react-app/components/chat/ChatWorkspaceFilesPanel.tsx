@@ -1,4 +1,5 @@
 import {
+  CloseOutlined,
   DeleteOutlined,
   DownloadOutlined,
   FileTextOutlined,
@@ -640,7 +641,12 @@ export function ChatWorkspaceFilesPanel({
   );
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-transparent">
+    <div
+      className={cn(
+        "flex min-h-0 flex-col bg-transparent",
+        showToolbar || showPreviewPane ? "h-full" : "max-h-[26rem]",
+      )}
+    >
       {showToolbar ? (
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200/70 bg-white px-4 py-3">
           <div className="min-w-0 flex-1">
@@ -681,7 +687,8 @@ export function ChatWorkspaceFilesPanel({
       >
         <section
           className={cn(
-            "power-chat-scroll min-h-0 overflow-y-auto bg-transparent px-4 py-5",
+            "power-chat-scroll min-h-0 overflow-y-auto bg-transparent",
+            showToolbar ? "px-4 py-5" : "p-3",
             filesPaneHidden && "hidden",
           )}
         >
@@ -693,14 +700,33 @@ export function ChatWorkspaceFilesPanel({
               {error}
             </div>
           ) : null}
-          <div className="mx-auto max-w-[19.5rem]">
-            <div className="power-workspace-files-card rounded-2xl border border-stone-200/85 bg-[#fbfbfa] p-2.5 shadow-sm shadow-neutral-900/[0.03]">
+          <div className={cn("mx-auto", showToolbar ? "max-w-[19.5rem]" : "w-full")}>
+            <div
+              className={
+                showToolbar
+                  ? "power-workspace-files-card rounded-2xl border border-stone-200/85 bg-[#fbfbfa] p-2.5 shadow-sm shadow-neutral-900/[0.03]"
+                  : "p-1"
+              }
+            >
               <div className="mb-2 flex items-center justify-between gap-2 px-0.5">
-                <span className="text-[13px] font-semibold text-slate-800">最近修改</span>
-                {uploadFileTrigger(
-                  "上传文件",
-                  "inline-flex h-7 shrink-0 items-center gap-1 rounded-full border border-stone-200/90 bg-white px-2 text-[11px] font-medium text-neutral-700 transition hover:border-stone-300 hover:bg-stone-50",
-                )}
+                <span className="text-[13px] font-semibold text-slate-800">项目文件</span>
+                <div className="flex items-center gap-1.5">
+                  {uploadFileTrigger(
+                    "上传文件",
+                    "inline-flex h-7 shrink-0 items-center gap-1 rounded-full border border-stone-200/90 bg-white px-2 text-[11px] font-medium text-neutral-700 transition hover:border-stone-300 hover:bg-stone-50",
+                  )}
+                  {!showToolbar && onCollapseRail ? (
+                    <button
+                      type="button"
+                      title="关闭项目文件"
+                      aria-label="关闭项目文件"
+                      onClick={onCollapseRail}
+                      className="flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition hover:bg-stone-100 hover:text-slate-700"
+                    >
+                      <CloseOutlined className="text-[12px]" />
+                    </button>
+                  ) : null}
+                </div>
               </div>
               {loading ? (
                 <div className="py-6 text-center text-xs text-slate-500">加载中…</div>
@@ -825,7 +851,10 @@ export function ChatWorkspaceFilesPanel({
                   ) : isMarkdownEntry(preview.entry) ? (
                     <article className="power-chat-scroll h-full overflow-auto bg-white px-6 py-5">
                       <ChatMarkdownBody
-                        className="chat-markdown mx-auto max-w-3xl break-words text-[15px] leading-relaxed text-slate-800 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+                        className={cn(
+                          "chat-markdown mx-auto break-words text-[15px] leading-relaxed text-slate-800 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+                          previewFullscreen ? "max-w-5xl" : "max-w-3xl",
+                        )}
                         source={preview.result.content}
                       />
                     </article>

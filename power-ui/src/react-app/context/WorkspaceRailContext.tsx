@@ -25,6 +25,14 @@ export type WorkspaceRailContextValue = {
 const WorkspaceRailContext = createContext<WorkspaceRailContextValue | null>(null);
 
 const ROOT_FULLSCREEN_CLASS = "power-workspace-preview-fullscreen";
+const RAIL_OPEN_STORAGE_KEY = "power-ui.workspace-rail-open";
+
+function readStoredRailOpen(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  return window.localStorage.getItem(RAIL_OPEN_STORAGE_KEY) === "true";
+}
 
 function syncRootFullscreenClass(active: boolean) {
   const root = document.getElementById("root");
@@ -37,7 +45,7 @@ function syncRootFullscreenClass(active: boolean) {
 export function WorkspaceRailProvider({ children }: { children: ReactNode }) {
   const location = useLocation();
   const [previewActive, setPreviewActive] = useState(false);
-  const [railOpen, setRailOpen] = useState(true);
+  const [railOpen, setRailOpenState] = useState(readStoredRailOpen);
   const [fullscreen, setFullscreen] = useState(false);
 
   const onChatRoute = location.pathname === ROUTES.root || location.pathname === "/";
@@ -46,9 +54,13 @@ export function WorkspaceRailProvider({ children }: { children: ReactNode }) {
     if (!onChatRoute) {
       setPreviewActive(false);
       setFullscreen(false);
-      setRailOpen(true);
     }
   }, [onChatRoute]);
+
+  const setRailOpen = useCallback((open: boolean) => {
+    setRailOpenState(open);
+    window.localStorage.setItem(RAIL_OPEN_STORAGE_KEY, String(open));
+  }, []);
 
   useEffect(() => {
     syncRootFullscreenClass(fullscreen && onChatRoute);
@@ -75,7 +87,7 @@ export function WorkspaceRailProvider({ children }: { children: ReactNode }) {
   const collapseRail = useCallback(() => {
     setFullscreen(false);
     setRailOpen(false);
-  }, []);
+  }, [setRailOpen]);
 
   const value = useMemo(
     () => ({
@@ -88,7 +100,15 @@ export function WorkspaceRailProvider({ children }: { children: ReactNode }) {
       collapseRail,
       canFullscreen,
     }),
-    [canFullscreen, collapseRail, fullscreen, previewActive, railOpen, toggleFullscreen],
+    [
+      canFullscreen,
+      collapseRail,
+      fullscreen,
+      previewActive,
+      railOpen,
+      setRailOpen,
+      toggleFullscreen,
+    ],
   );
 
   return <WorkspaceRailContext.Provider value={value}>{children}</WorkspaceRailContext.Provider>;

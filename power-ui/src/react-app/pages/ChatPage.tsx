@@ -2,8 +2,7 @@ import {
   ArrowUpOutlined,
   DownloadOutlined,
   FileTextOutlined,
-  MenuFoldOutlined,
-  MenuUnfoldOutlined,
+  FolderOpenOutlined,
 } from "@ant-design/icons";
 import { App } from "antd";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -43,7 +42,6 @@ import { shouldHideChatMessage } from "../lib/chat-message-visibility";
 import { dedupeCumulativeStreamSegments, streamTextAfterPrefix } from "../lib/chat-stream-segments";
 import { resolveChatModelPool, resolveEffectiveChatModelRef } from "../lib/configured-chat-models";
 import { formatCatalogModelRef } from "../lib/model-catalog";
-import { resolveSessionDisplayLabel } from "../lib/session-display-label";
 
 /** 主色仅用于关键操作；大面积 UI 用中性灰白 */
 const BRAND = {
@@ -881,15 +879,6 @@ export function ChatPage() {
     }
   }, [activeRuntime?.chatMessages, busy, optimisticUserBubble, sending]);
 
-  const currentSessionLabel = useMemo(() => {
-    if (!selectedSessionKey.trim()) {
-      return "";
-    }
-    const row = snapshot?.sessionsResult?.sessions?.find((s) => s.key === selectedSessionKey);
-    const label = sanitizeUserChatDisplayText((row?.label ?? "").trim());
-    return resolveSessionDisplayLabel(label, selectedSessionKey);
-  }, [selectedSessionKey, snapshot?.sessionsResult?.sessions]);
-
   const followBottomRef = useRef(true);
   const [tailGapPx, setTailGapPx] = useState(0);
 
@@ -1244,40 +1233,30 @@ export function ChatPage() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-white">
-      <main className="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] bg-white">
-        <header className="power-chat-page-header flex h-14 shrink-0 items-center justify-between gap-3 border-b border-stone-200/80 bg-white/95 px-5 backdrop-blur">
-          <div className="min-w-0 flex-1 pt-0.5">
-            {currentSessionLabel ? (
-              <p className="truncate text-sm font-semibold tracking-[-0.01em] text-slate-900 sm:text-base">
-                {currentSessionLabel}
-              </p>
-            ) : (
-              <p className="truncate text-sm text-slate-500">新建或选择会话以开始</p>
-            )}
-          </div>
-          {workspaceRailEligible ? (
+      <main className="min-h-0 min-w-0 flex-1 bg-white">
+        <div className="relative flex h-full min-h-0 min-w-0 bg-white">
+          {workspaceRailEligible && !workspaceRailOpen ? (
             <button
               type="button"
-              aria-label={workspaceRailOpen ? "收起最近修改" : "展开最近修改"}
-              title={workspaceRailOpen ? "收起最近修改" : "展开最近修改"}
-              aria-expanded={workspaceRailOpen}
-              onClick={() => setWorkspaceRailOpen(!workspaceRailOpen)}
+              aria-label="打开项目文件"
+              title="打开项目文件"
+              aria-expanded={false}
+              onClick={() => setWorkspaceRailOpen(true)}
               className={cn(
-                "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-stone-200/90 bg-white text-slate-500 shadow-sm shadow-stone-200/60 transition",
-                "hover:border-stone-300 hover:bg-stone-50 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300/70",
+                "absolute right-3 top-3 z-30 flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-stone-200/90 bg-white/95 px-3 text-xs font-medium text-slate-600 shadow-sm shadow-stone-200/60 backdrop-blur transition",
+                "hover:border-stone-300 hover:bg-stone-50 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300/70",
               )}
             >
-              {workspaceRailOpen ? (
-                <MenuUnfoldOutlined className="text-[15px]" aria-hidden />
-              ) : (
-                <MenuFoldOutlined className="text-[15px]" aria-hidden />
-              )}
+              <FolderOpenOutlined className="text-[14px]" aria-hidden />
+              <span>项目文件</span>
             </button>
           ) : null}
-        </header>
-
-        <div className="relative flex min-h-0 min-w-0 bg-white">
-          <div className="power-chat-stage grid min-h-0 min-w-0 flex-1 grid-rows-[minmax(0,1fr)_auto] transition-[flex] duration-300 ease-out">
+          <div
+            className={cn(
+              "power-chat-stage grid min-h-0 min-w-0 flex-1 grid-rows-[minmax(0,1fr)_auto]",
+              workspaceRailOpen && workspacePreviewActive && "power-chat-stage--preview-open",
+            )}
+          >
             <div className="relative min-h-0 min-w-0 overflow-hidden">
               <div
                 ref={scrollRef}
@@ -1536,7 +1515,7 @@ export function ChatPage() {
                 >
                   <button
                     type="button"
-                    title={`支持图片直发；文档、表格、演示、文本、音频、视频会作为本次对话附件上传到隐藏目录，不显示在右侧最近修改。图片最多 ${MAX_CHAT_ATTACHMENT_COUNT} 张，其他文件最多 ${MAX_CHAT_WORKSPACE_FILE_COUNT} 个。`}
+                    title={`支持图片直发；文档、表格、演示、文本、音频、视频会作为本次对话附件上传到隐藏目录，不显示在右侧项目文件。图片最多 ${MAX_CHAT_ATTACHMENT_COUNT} 张，其他文件最多 ${MAX_CHAT_WORKSPACE_FILE_COUNT} 个。`}
                     disabled={
                       (pendingAttachments.length >= MAX_CHAT_ATTACHMENT_COUNT &&
                         pendingWorkspaceFiles.length >= MAX_CHAT_WORKSPACE_FILE_COUNT) ||
@@ -1631,10 +1610,10 @@ export function ChatPage() {
           {workspaceRailEligible ? (
             <aside
               className={cn(
-                "power-workspace-rail relative block min-h-0 shrink-0 overflow-hidden border-l border-stone-200/85 bg-white",
+                "power-workspace-rail absolute z-20 block min-h-0 overflow-hidden border border-stone-200/85 bg-white",
                 workspacePreviewActive
-                  ? "power-workspace-rail--preview"
-                  : "power-workspace-rail--list",
+                  ? "power-workspace-rail--preview bottom-0 right-0 top-0 rounded-none border-y-0 border-r-0 shadow-[-12px_0_32px_rgba(24,24,27,0.08)]"
+                  : "power-workspace-rail--list right-3 top-3 rounded-xl shadow-lg shadow-stone-900/[0.08]",
                 workspaceRailOpen ? "power-workspace-rail--open" : "power-workspace-rail--closed",
                 workspacePreviewFullscreen && "power-workspace-rail--fullscreen",
               )}
@@ -1652,10 +1631,11 @@ export function ChatPage() {
                       canFullscreen={workspaceCanFullscreen}
                       previewFullscreen={workspacePreviewFullscreen}
                       onToggleFullscreen={toggleWorkspacePreviewFullscreen}
+                      onCollapseRail={() => setWorkspaceRailOpen(false)}
                     />
                   ) : (
                     <div className="flex h-full flex-col bg-[#fafafa] px-4 py-5 text-sm text-slate-500">
-                      <div className="mb-2 text-[13px] font-semibold text-slate-800">最近修改</div>
+                      <div className="mb-2 text-[13px] font-semibold text-slate-800">项目文件</div>
                       <div className="rounded-xl border border-slate-200/70 bg-white px-3 py-2 text-xs leading-relaxed">
                         正在连接工作区文件服务…
                       </div>
