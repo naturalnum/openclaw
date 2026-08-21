@@ -278,6 +278,11 @@ describe("buildGatewayReloadPlan", () => {
       expectNoopPath: "gateway.remote.url",
     },
     {
+      path: "mcp.servers.weather.enabled",
+      expectRestartGateway: false,
+      expectNoopPath: "mcp.servers.weather.enabled",
+    },
+    {
       path: "gateway.auth.token",
       expectRestartGateway: true,
       expectRestartReason: "gateway.auth.token",

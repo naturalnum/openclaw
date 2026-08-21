@@ -3,6 +3,27 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const mcpSdkMocks = vi.hoisted(() => ({
+  connect: vi.fn(async () => {}),
+  listTools: vi.fn(async () => ({ tools: [{ name: "get_weather_forecast" }] })),
+  close: vi.fn(async () => {}),
+  requestInit: null as unknown,
+}));
+
+vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
+  Client: class {
+    connect = mcpSdkMocks.connect;
+    listTools = mcpSdkMocks.listTools;
+    close = mcpSdkMocks.close;
+  },
+}));
+
+vi.mock("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({
+  StreamableHTTPClientTransport: function MockStreamableHttpTransport(_url: URL, options: unknown) {
+    mcpSdkMocks.requestInit = options;
+  },
+}));
+
 vi.mock("../../src/config/config.js", () => ({
   loadConfig: () => ({
     models: {
@@ -90,6 +111,50 @@ describe("Power Agent identity prompt", () => {
       appendSystemContext: expect.stringContaining("我是您的智能体助手。"),
     });
     expect(JSON.stringify(hook?.())).toContain("不要发起姓名、人格、风格或 Emoji");
+  });
+});
+
+describe("power.mcp.test", () => {
+  beforeEach(() => {
+    mcpSdkMocks.connect.mockClear();
+    mcpSdkMocks.listTools.mockClear();
+    mcpSdkMocks.close.mockClear();
+    mcpSdkMocks.requestInit = null;
+  });
+
+  it("tests the saved MCP server with its unredacted authorization header", async () => {
+    const configModule = await import("../../src/config/config.js");
+    vi.mocked(configModule.readConfigFileSnapshot).mockResolvedValueOnce({
+      config: {
+        mcp: {
+          servers: {
+            weather: {
+              type: "http",
+              url: "http://127.0.0.1:3310/mcp",
+              headers: { Authorization: "Bearer saved-secret-token" },
+            },
+          },
+        },
+      },
+    } as never);
+    const { default: register } = await import("./plugin.js");
+    const { api, gatewayMethods } = createPluginApiMock();
+    register(api as never);
+
+    const result = await invokeHandler(gatewayMethods.get("power.mcp.test")!, {
+      name: "weather",
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      data: { ok: true, toolCount: 1, tools: ["get_weather_forecast"] },
+    });
+    expect(mcpSdkMocks.connect).toHaveBeenCalledTimes(1);
+    expect(mcpSdkMocks.listTools).toHaveBeenCalledTimes(1);
+    expect(mcpSdkMocks.close).toHaveBeenCalledTimes(1);
+    expect(mcpSdkMocks.requestInit).toEqual({
+      requestInit: { headers: { Authorization: "Bearer saved-secret-token" } },
+    });
   });
 });
 

@@ -1,6 +1,8 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { listAgentIds, resolveAgentWorkspaceDir } from "../../src/agents/agent-scope.js";
 import { loadConfig, readConfigFileSnapshot } from "../../src/config/config.js";
@@ -62,6 +64,7 @@ type PowerClaudeSettings = {
 const DEFAULT_CLAUDE_BASE_URL = "https://api.deepseek.com/anthropic";
 const DEFAULT_CLAUDE_MODEL = "deepseek-chat";
 const MODEL_TEST_TIMEOUT_MS = 30_000;
+const MCP_TEST_TIMEOUT_MS = 5_000;
 const MAX_PREPARED_MEDIA_BYTES = 16 * 1024 * 1024;
 const POWER_AGENT_IDENTITY_SYSTEM_CONTEXT = `你是用户的智能体助手。
 当用户询问“你是谁”、你的身份或名称时，直接回答“我是您的智能体助手。”；除非用户明确要求详细介绍，否则不要扩展产品、底层框架或模型供应商信息。
@@ -86,6 +89,22 @@ const POWER_MEDIA_BY_EXTENSION: Record<string, { capability: "audio" | "video"; 
   mpg: { capability: "video", mime: "video/mpeg" },
   webm: { capability: "video", mime: "video/webm" },
 };
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+}
 
 type PowerPreparedMediaFile = {
   prepared: boolean;
@@ -186,6 +205,60 @@ async function testTextModel(params: unknown) {
     : (payload as { choices?: Array<{ message?: { content?: unknown } }> } | null)?.choices?.[0]
         ?.message?.content;
   return { content: typeof content === "string" && content.trim() ? content.trim() : "ok" };
+}
+
+async function testSavedMcpServer(params: unknown) {
+  const input = params && typeof params === "object" ? (params as Record<string, unknown>) : {};
+  const name = typeof input.name === "string" ? input.name.trim() : "";
+  if (!name) {
+    throw new Error("MCP 服务器名不能为空");
+  }
+  const snapshot = await readConfigFileSnapshot();
+  const mcp = (snapshot.config as unknown as { mcp?: { servers?: Record<string, unknown> } }).mcp;
+  const rawServer = mcp?.servers?.[name];
+  if (!rawServer || typeof rawServer !== "object" || Array.isArray(rawServer)) {
+    throw new Error("找不到已保存的 MCP 配置");
+  }
+  const server = rawServer as Record<string, unknown>;
+  const url = typeof server.url === "string" ? server.url.trim() : "";
+  if (!url) {
+    throw new Error("已保存的 MCP 配置不是 HTTP 服务");
+  }
+  const headers =
+    server.headers && typeof server.headers === "object" && !Array.isArray(server.headers)
+      ? (server.headers as Record<string, unknown>)
+      : {};
+  const timeoutMs =
+    typeof server.connectionTimeoutMs === "number" &&
+    Number.isFinite(server.connectionTimeoutMs) &&
+    server.connectionTimeoutMs > 0
+      ? server.connectionTimeoutMs
+      : MCP_TEST_TIMEOUT_MS;
+  const requestHeaders = Object.fromEntries(
+    Object.entries(headers).filter((entry): entry is [string, string] => {
+      const [key, value] = entry;
+      return key.trim().length > 0 && typeof value === "string";
+    }),
+  );
+  const transport = new StreamableHTTPClientTransport(new URL(url), {
+    requestInit: { headers: requestHeaders },
+  });
+  const client = new Client({ name: "openclaw-power-mcp-probe", version: "1.0.0" });
+  try {
+    await withTimeout(client.connect(transport), timeoutMs, `连接超时（${timeoutMs}ms）`);
+    const listed = await withTimeout(
+      client.listTools(),
+      timeoutMs,
+      `读取工具列表超时（${timeoutMs}ms）`,
+    );
+    return {
+      ok: true,
+      toolCount: listed.tools.length,
+      tools: listed.tools.map((tool) => tool.name),
+    };
+  } finally {
+    await client.close().catch(() => {});
+  }
 }
 
 function parsePluginConfig(api: OpenClawPluginApi): PowerBackendPluginConfig {
@@ -644,6 +717,17 @@ export default function register(api: OpenClawPluginApi) {
     async ({ params, respond }: GatewayRequestHandlerOptions) => {
       try {
         respond(true, await testTextModel(params));
+      } catch (error) {
+        sendError(respond, error);
+      }
+    },
+  );
+
+  api.registerGatewayMethod(
+    "power.mcp.test",
+    async ({ params, respond }: GatewayRequestHandlerOptions) => {
+      try {
+        respond(true, await testSavedMcpServer(params));
       } catch (error) {
         sendError(respond, error);
       }

@@ -97,6 +97,10 @@ const BASE_RELOAD_RULES_TAIL: ReloadRule[] = [
   { prefix: "session", kind: "none" },
   { prefix: "talk", kind: "none" },
   { prefix: "skills", kind: "none" },
+  // MCP runtimes read the configured server map when a conversation run starts.
+  // Toggling or editing a server therefore applies to the next run without
+  // restarting the gateway and interrupting the settings UI.
+  { prefix: "mcp", kind: "none" },
   { prefix: "secrets", kind: "none" },
   { prefix: "plugins", kind: "restart" },
   { prefix: "ui", kind: "none" },

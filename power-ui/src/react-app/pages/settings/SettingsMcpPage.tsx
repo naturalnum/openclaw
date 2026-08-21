@@ -446,8 +446,18 @@ export function SettingsMcpPage() {
         message.info("stdio MCP 需要保存后由运行时启动验证。");
         return;
       }
-      await probeHttpMcpServer(server);
-      message.success("MCP 接口可用");
+      if (draft.originalKey && draft.originalKey === draft.key.trim()) {
+        const result = await adapter.request<{ toolCount?: number }>("power.mcp.test", {
+          name: draft.originalKey,
+        });
+        const toolCount = typeof result.toolCount === "number" ? result.toolCount : null;
+        message.success(
+          toolCount === null ? "MCP 接口可用" : `MCP 接口可用，发现 ${toolCount} 个工具`,
+        );
+      } else {
+        await probeHttpMcpServer(server);
+        message.success("MCP 接口可用；保存后可继续验证工具列表");
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setMcpError(msg);
